@@ -44,6 +44,9 @@ assert.equal(generatedFilters.some((item) => item.entity_id === "sensor.waste"),
 assert.equal(generatedFilters.some((item) => item.entity_id === "sensor.ups"), true);
 assert.equal(generatedFilters.some((item) => item.entity_id === "sensor.frost"), true);
 const generatedAuto = generated.views[0].sections[0].cards.find((card) => card.type === "custom:auto-entities");
+assert.equal(generatedAuto.card.type, "vertical-stack");
+assert.equal(generatedAuto.card_param, "cards");
+assert.equal(generatedAuto.show_empty, false);
 assert.equal(generatedAuto.filter.exclude.some((item) => item.entity_id === "sensor.excluded_battery"), true);
 
 const editor = new SmartphoneDashboardStrategyEditor();

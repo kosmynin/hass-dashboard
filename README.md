@@ -9,7 +9,7 @@ Ein gemeinsames HACS-Custom-Integration-Paket für das deutsche Smartphone-Dashb
 2. Home Assistant neu starten.
 3. Unter **Einstellungen → Geräte & Dienste → Integration hinzufügen** „Smartphone Dashboard“ wählen.
 4. Unter **Einstellungen → Dashboards → Ressourcen** verbindlich das Modul
-   `/smartphone-dashboard/smartphone-dashboard-loader.js?v=22.0.1` eintragen.
+   `/smartphone-dashboard/smartphone-dashboard-loader.js?v=22.0.2` eintragen.
 5. Eine alte `/local/smartphone-dashboard-loader.js`-Resource entfernen, damit
    nicht zwei Versionen konkurrieren.
 6. Home Assistant neu starten, Browserdaten aktualisieren und das primäre

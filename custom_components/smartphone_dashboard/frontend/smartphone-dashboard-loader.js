@@ -6,7 +6,7 @@
 const TYPE = "smartphone-dashboard";
 const ELEMENT = `ll-strategy-dashboard-${TYPE}`;
 const LEGACY_ELEMENT = `ll-strategy-${TYPE}`;
-const CORE_URL = new URL("./smartphone-dashboard-strategy.js?v=22.0.1", import.meta.url).href;
+const CORE_URL = new URL("./smartphone-dashboard-strategy.js?v=22.0.2", import.meta.url).href;
 
 let corePromise;
 
@@ -54,4 +54,4 @@ if (!window.customStrategies.some((item) => item.type === TYPE)) {
 
 // Download früh starten, ohne die sofortige Registrierung zu verzögern.
 void loadCore();
-console.info("Smartphone-Dashboard-Loader v22.0.1 registriert");
+console.info("Smartphone-Dashboard-Loader v22.0.2 registriert");

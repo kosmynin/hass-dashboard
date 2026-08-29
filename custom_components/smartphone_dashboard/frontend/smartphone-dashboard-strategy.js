@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.1";
+const STRATEGY_VERSION = "22.0.2";
 const CONFIG_VERSION = 22;
 let cachedDisplayNotificationConfig;
 const NOTIFICATION_HELPERS = {
@@ -123,7 +123,7 @@ const BASE_DASHBOARD = {
       { type: "heading", heading: "Personen", icon: "mdi:account-group-outline" },
       { type: "horizontal-stack", cards: [] },
       { type: "heading", heading: "Meldungen", icon: "mdi:bell-badge-outline" },
-      { type: "custom:auto-entities", unique: true, card: { type: "vertical-stack" }, filter: { include: [
+      { type: "custom:auto-entities", unique: true, show_empty: false, card: { type: "vertical-stack" }, card_param: "cards", filter: { include: [
         { entity_id: "sensor.*battery", options: { type: "custom:bubble-card", card_type: "button" } },
         { entity_id: "sensor.*batterie", options: { type: "custom:bubble-card", card_type: "button" } },
         { domain: "sensor", attributes: { device_class: "battery" }, options: { type: "custom:bubble-card", card_type: "button" } },

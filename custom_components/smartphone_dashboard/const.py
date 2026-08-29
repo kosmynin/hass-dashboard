@@ -2,7 +2,7 @@
 from pathlib import Path
 
 DOMAIN = "smartphone_dashboard"
-VERSION = "22.0.1"
+VERSION = "22.0.2"
 STORAGE_KEY = f"{DOMAIN}.config"
 STORAGE_VERSION = 3
 FRONTEND_DIR = Path(__file__).parent / "frontend"
