@@ -2,13 +2,13 @@
 
 ## Repository-Voraussetzung
 
-HACS unterstützt für Custom Repositories öffentliche GitHub-Repositories. Bei
-Entwicklung auf GitLab ist daher ein öffentliches GitHub-Mirror erforderlich.
-Erst dieses Mirror in HACS als Integration eintragen; GitLab allein ist keine
-HACS-Installationsquelle.
-Quellprojekt: `https://gitlab.com/kosmynin/hass-dashboard-strategy`. Für HACS
-muss dieses Projekt zusätzlich öffentlich nach GitHub gespiegelt werden; der
-Codeowner des Mirrors ist `@kosmynin`.
+HACS-Repository:
+`https://github.com/kosmynin/hass-dashboard`
+
+Dieses öffentliche Repository in HACS als benutzerdefiniertes Repository vom
+Typ **Integration** eintragen. Das Entwicklungsrepository liegt unter
+`https://gitlab.com/kosmynin/hass-dashboard-strategy`; beide `main`-Branches
+werden gemeinsam veröffentlicht. Der Codeowner ist `@kosmynin`.
 
 HACS installiert ausschließlich `custom_components/smartphone_dashboard`, daher liegen alle Laufzeitdateien einschließlich Frontend innerhalb dieses Ordners. Nach Updates Home Assistant neu starten und den Browser hart neu laden.
 

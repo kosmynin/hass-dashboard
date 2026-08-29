@@ -4,7 +4,8 @@ Ein gemeinsames HACS-Custom-Integration-Paket für das deutsche Smartphone-Dashb
 
 ## Installation
 
-1. Dieses Repository in HACS als **Integration** hinzufügen und installieren.
+1. `https://github.com/kosmynin/hass-dashboard` in HACS als benutzerdefiniertes
+   Repository vom Typ **Integration** hinzufügen und installieren.
 2. Home Assistant neu starten.
 3. Unter **Einstellungen → Geräte & Dienste → Integration hinzufügen** „Smartphone Dashboard“ wählen.
 4. Unter **Einstellungen → Dashboards → Ressourcen** verbindlich das Modul
@@ -47,8 +48,8 @@ der 17 bisherigen Helfer abgelegt.
 
 Siehe [INSTALLATION.md](INSTALLATION.md).
 
-> HACS installiert Custom Repositories ausschließlich aus öffentlichen
-> GitHub-Repositories. Ein GitLab-Remote kann als Entwicklungs-Remote dienen,
-> muss für HACS aber öffentlich nach GitHub gespiegelt werden. Die enthaltenen
-> GitHub Actions laufen in diesem Veröffentlichungs-Mirror; dieses Paket führt
-> selbst weder Commit noch Push aus.
+> Das öffentliche HACS-Repository liegt unter
+> `https://github.com/kosmynin/hass-dashboard`. Das GitLab-Projekt
+> `https://gitlab.com/kosmynin/hass-dashboard-strategy` bleibt das
+> Entwicklungsrepository. Beide Repositories werden auf demselben Stand
+> gehalten.

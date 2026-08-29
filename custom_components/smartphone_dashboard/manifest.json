@@ -4,9 +4,9 @@
   "codeowners": ["@kosmynin"],
   "config_flow": true,
   "dependencies": ["frontend", "http", "lovelace"],
-  "documentation": "https://gitlab.com/kosmynin/hass-dashboard-strategy",
+  "documentation": "https://github.com/kosmynin/hass-dashboard",
   "integration_type": "service",
   "iot_class": "local_push",
-  "issue_tracker": "https://gitlab.com/kosmynin/hass-dashboard-strategy/-/issues",
+  "issue_tracker": "https://github.com/kosmynin/hass-dashboard/issues",
   "version": "22.0.0"
 }
