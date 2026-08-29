@@ -11,7 +11,7 @@ from typing import Any
 from homeassistant.const import EVENT_STATE_CHANGED
 from homeassistant.core import Event, HomeAssistant, callback
 from .config_manager import ConfigManager
-from .notification_core import pending_fingerprints, retained_fingerprints, valid_nina_glob
+from .notification_core import pending_fingerprints, retained_fingerprints, ups_state_is_alert, valid_nina_glob
 
 DEFAULTS = {"battery": 6, "contact": 15, "co2": 1000, "frost": 4, "nina": "binary_sensor.nina_warning_*"}
 _LOGGER = logging.getLogger(__name__)
@@ -137,7 +137,7 @@ class NotificationCoordinator:
                 alerts.append({"fingerprint": f"waste:{entity_id}:{state.state}", "message": f"🗑️ {state.attributes.get('friendly_name', entity_id)}: {state.state}"})
         for entity_id in filter(None, map(str.strip, self._state("input_text.smartphone_usv_sensoren").split(","))):
             state = self.hass.states.get(entity_id)
-            if self._enabled("usv") and state and str(state.state).lower() not in ("online", "on", "ok", "normal", "unknown", "unavailable"):
+            if self._enabled("usv") and state and ups_state_is_alert(entity_id, state.state, state.attributes.get("device_class")):
                 alerts.append({"fingerprint": f"ups:{entity_id}:{state.state}", "message": f"🔌 {state.attributes.get('friendly_name', entity_id)}: {state.state}"})
         frost_id = self._state("input_text.smartphone_frost_sensor")
         frost = self.hass.states.get(frost_id)

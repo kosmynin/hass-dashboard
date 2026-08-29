@@ -7,8 +7,19 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.6";
+const STRATEGY_VERSION = "22.0.7";
 const CONFIG_VERSION = 22;
+
+const UPS_NON_ALERT_STATES = [
+  "ONLINE", "Online", "online", "ON", "On", "on", "OK", "Ok", "ok",
+  "NORMAL", "Normal", "normal", "OL", "ol", "Connected", "connected",
+  "AVAILABLE", "Available", "available", "MAINS", "Mains", "mains",
+  "LINE", "Line", "line", "UNKNOWN", "Unknown", "unknown",
+  "UNAVAILABLE", "Unavailable", "unavailable", "NONE", "None", "none", "",
+];
+const UPS_PROBLEM_DEVICE_CLASSES = new Set([
+  "problem", "safety", "smoke", "tamper", "moisture",
+]);
 let cachedDisplayNotificationConfig;
 const NOTIFICATION_POPUPS = {
   batteries: ["#meldung-batterien", "Batterien", "mdi:battery-alert"],
@@ -616,11 +627,20 @@ function applyNotificationOptions(dashboard, config, hass) {
     if (entityId === "sensor.*ups_status") {
       if (emitted.has("ups")) return [];
       emitted.add("ups");
-      const entries = upsEntities.map((entity_id) => ({
-        ...entry,
-        entity_id,
-        not: { state: "/^(ONLINE|Online|online)$/" },
-      }));
+      const entries = upsEntities.map((entity_id) => {
+        const state = hass?.states?.[entity_id];
+        if (entity_id.startsWith("binary_sensor.")) {
+          const problemSensor = UPS_PROBLEM_DEVICE_CLASSES.has(
+            String(state?.attributes?.device_class || "").toLowerCase(),
+          );
+          return { ...entry, entity_id, state: problemSensor ? "on" : "off" };
+        }
+        return {
+          ...entry,
+          entity_id,
+          not: { or: UPS_NON_ALERT_STATES.map((normalState) => ({ state: normalState })) },
+        };
+      });
       return settings.ups ? emit("ups", entries) : [];
     }
     if (entityId === "sensor.*temperature") {

@@ -10,7 +10,7 @@ def test_manifest_and_hacs():
     hacs = json.loads((ROOT / "hacs.json").read_text())
     assert manifest["domain"] == "smartphone_dashboard"
     assert manifest["config_flow"] is True
-    assert manifest["version"] == "22.0.6"
+    assert manifest["version"] == "22.0.7"
     assert hacs["name"] == "Smartphone Dashboard"
 
 def test_python_syntax_and_runtime_files():
@@ -100,7 +100,9 @@ def test_generic_base_matches_notification_and_quick_action_transformers():
     assert 'entry.not = { state: "0" }' in strategy
     assert 'entry.state = "on"' in strategy
     assert 'state: "/.*([Hh]eute|[Mm]orgen).*/"' in strategy
-    assert 'not: { state: "/^(ONLINE|Online|online)$/" }' in strategy
+    assert "const UPS_NON_ALERT_STATES" in strategy
+    assert 'entity_id.startsWith("binary_sensor.")' in strategy
+    assert 'state: problemSensor ? "on" : "off"' in strategy
     assert 'const NOTIFICATION_POPUPS' in strategy
     assert 'initial_view: "listWeek"' in strategy
     assert 'entity?.attributes?.instruction' in strategy

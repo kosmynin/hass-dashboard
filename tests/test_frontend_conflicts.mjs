@@ -110,7 +110,10 @@ assert.equal(generatedFilters.some((item) => item.entity_id === "sensor.waste"),
 assert.equal(generatedFilters.some((item) => item.entity_id === "sensor.ups"), true);
 assert.equal(generatedFilters.some((item) => item.entity_id === "sensor.frost"), true);
 assert.equal(generatedFilters.find((item) => item.entity_id === "sensor.waste").state, "/.*([Hh]eute|[Mm]orgen).*/");
-assert.deepEqual(generatedFilters.find((item) => item.entity_id === "sensor.ups").not, { state: "/^(ONLINE|Online|online)$/" });
+const upsNormalFilter = generatedFilters.find((item) => item.entity_id === "sensor.ups").not.or;
+assert.equal(upsNormalFilter.some((item) => item.state === "online"), true);
+assert.equal(upsNormalFilter.some((item) => item.state === "on"), true);
+assert.equal(upsNormalFilter.some((item) => item.state === "unavailable"), true);
 assert.equal(generatedFilters.find((item) => item.entity_id === "sensor.waste").options.tap_action.navigation_path, "#meldung-abfall");
 assert.equal(generated.views[0].sections[0].cards.some((card) => card.hash === "#meldung-abfall"), true);
 assert.equal(generated.views[0].sections[0].cards.some((card) => card.hash === "#meldung-usv"), true);
@@ -120,6 +123,25 @@ assert.equal(generatedAuto.card_param, "cards");
 assert.equal(generatedAuto.show_empty, false);
 assert.equal(generatedAuto.else.name, "Keine Meldungen");
 assert.equal(generatedAuto.filter.exclude.some((item) => item.entity_id === "sensor.excluded_battery"), true);
+
+const binaryUpsDashboard = { views: [{ sections: [{ cards: [
+  { type: "heading", heading: "Meldungen" },
+  { type: "custom:auto-entities", filter: { include: [
+    { entity_id: "sensor.*ups_status", options: { type: "custom:bubble-card", card_type: "button" } },
+  ], exclude: [] } },
+] }] }] };
+applyNotificationOptions(binaryUpsDashboard, {
+  notification_ups: true,
+  ups_entities: "binary_sensor.ups_online,binary_sensor.ups_problem",
+}, {
+  states: {
+    "binary_sensor.ups_online": { state: "on", attributes: { device_class: "connectivity" } },
+    "binary_sensor.ups_problem": { state: "off", attributes: { device_class: "problem" } },
+  },
+});
+const binaryUpsFilters = binaryUpsDashboard.views[0].sections[0].cards.find((card) => card.type === "custom:auto-entities").filter.include;
+assert.equal(binaryUpsFilters.find((item) => item.entity_id === "binary_sensor.ups_online").state, "off");
+assert.equal(binaryUpsFilters.find((item) => item.entity_id === "binary_sensor.ups_problem").state, "on");
 
 const wasteDashboard = { views: [{ sections: [{ cards: [
   { type: "heading", heading: "Meldungen" },

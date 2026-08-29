@@ -13,7 +13,7 @@ HACS installiert ausschließlich `custom_components/smartphone_dashboard`, daher
 
 Der statische Pfad nutzt `hass.http.async_register_static_paths`. Die Integration
 injiziert automatisch einen versionsabhängigen Pfad nach dem Muster
-`/smartphone-dashboard/v22.0.6/smartphone-dashboard-loader.js`. Entferne alle
+`/smartphone-dashboard/v22.0.7/smartphone-dashboard-loader.js`. Entferne alle
 manuellen `/smartphone-dashboard/...`- und `/local/...`-Ressourcen, damit keine
 alte Datei zuerst das Custom Element registriert.
 
