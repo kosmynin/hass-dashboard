@@ -8,12 +8,19 @@ const roomHass = {
   states: {
     "light.kitchen": { state: "off", attributes: { friendly_name: "Küche" } },
     "sensor.kitchen_temperature": { state: "21.5", attributes: { friendly_name: "Küchentemperatur", device_class: "temperature", unit_of_measurement: "°C" } },
+    "sensor.kitchen_hidden": { state: "42", attributes: { friendly_name: "Versteckt", unit_of_measurement: "%" } },
+    "sensor.hidden_room_only": { state: "1", attributes: { friendly_name: "Einzige versteckte Entität", unit_of_measurement: "%" } },
   },
-  areas: { kitchen: { area_id: "kitchen", name: "Küche", icon: "mdi:silverware-fork-knife" } },
+  areas: {
+    kitchen: { area_id: "kitchen", name: "Küche", icon: "mdi:silverware-fork-knife" },
+    hidden_room: { area_id: "hidden_room", name: "Versteckter Raum", icon: "mdi:eye-off" },
+  },
   devices: {},
   entities: {
     kitchen_light: { entity_id: "light.kitchen", area_id: "kitchen" },
     kitchen_temperature: { entity_id: "sensor.kitchen_temperature", area_id: "kitchen" },
+    kitchen_hidden: { entity_id: "sensor.kitchen_hidden", area_id: "kitchen", hidden_by: "user" },
+    hidden_room_only: { entity_id: "sensor.hidden_room_only", area_id: "hidden_room", hidden_by: "user" },
   },
 };
 const sanitizedRooms = detectedRooms(roomHass, [{
@@ -44,6 +51,53 @@ assert.equal("template" in sensorCard, false);
 assert.equal(sensorCard.custom_fields.title.card.entity, "sensor.kitchen_temperature");
 assert.equal(sensorCard.custom_fields.graph.card.entities[0], "sensor.kitchen_temperature");
 assert.equal(sensorCard.custom_fields.graph.card.line_color, "#A2AADB");
+assert.equal(JSON.stringify(roomPopup).includes("sensor.kitchen_hidden"), false);
+assert.equal(roomDashboard.views[0].sections[0].cards[1].cards.length, 1);
+assert.equal(roomDashboard.views[0].sections[0].cards.some((card) => card.hash === "#raum-hidden_room"), false);
+
+const visibilityHass = {
+  states: {
+    "person.visible": { state: "home", attributes: { friendly_name: "Sichtbar" } },
+    "person.hidden": { state: "home", attributes: { friendly_name: "Versteckt" } },
+    "script.visible": { state: "off", attributes: { friendly_name: "Sichtbares Script" } },
+    "script.hidden": { state: "off", attributes: { friendly_name: "Verstecktes Script" } },
+    "media_player.visible": { state: "idle", attributes: { friendly_name: "Sichtbare Medien" } },
+    "media_player.hidden": { state: "idle", attributes: { friendly_name: "Versteckte Medien" } },
+    "sensor.hidden_battery": { state: "3", attributes: { friendly_name: "Versteckte Batterie", device_class: "battery", unit_of_measurement: "%" } },
+    "sensor.disabled_system_cpu": { state: "12", attributes: { friendly_name: "Deaktivierte CPU", unit_of_measurement: "%" } },
+  },
+  areas: {}, devices: {}, services: {},
+  entities: {
+    person_visible: { entity_id: "person.visible" },
+    person_hidden: { entity_id: "person.hidden", hidden_by: "user" },
+    script_visible: { entity_id: "script.visible" },
+    script_hidden: { entity_id: "script.hidden", hidden_by: "user" },
+    media_visible: { entity_id: "media_player.visible" },
+    media_hidden: { entity_id: "media_player.hidden", hidden_by: "integration" },
+    hidden_battery: { entity_id: "sensor.hidden_battery", hidden_by: "user" },
+    disabled_cpu: { entity_id: "sensor.disabled_system_cpu", disabled_by: "integration" },
+  },
+};
+const visibilityDashboard = await SmartphoneDashboardStrategy.generate({
+  persons: [{ entity: "person.visible" }, { entity: "person.hidden" }],
+  quick_actions: ["script.visible", "script.hidden"],
+  features: {
+    media: { enabled: true, auto_discover: true, entities: ["media_player.hidden"] },
+    system: { enabled: true, auto_discover: true, entities: ["sensor.disabled_system_cpu"] },
+  },
+}, visibilityHass);
+const visibilityCards = visibilityDashboard.views[0].sections[0].cards;
+const visibilityPersonHeading = visibilityCards.findIndex((card) => card.heading === "Personen");
+assert.deepEqual(visibilityCards[visibilityPersonHeading + 1].cards.map((card) => card.entity), ["person.visible"]);
+assert.equal(visibilityCards.some((card) => card.entity === "script.visible"), true);
+assert.equal(visibilityCards.some((card) => card.entity === "script.hidden"), false);
+const mediaPopup = visibilityCards.find((card) => card.hash === "#medien");
+assert.deepEqual(mediaPopup.cards.map((card) => card.entity), ["media_player.visible"]);
+assert.equal(visibilityCards.some((card) => card.hash === "#system"), false);
+const visibilityAuto = visibilityCards.find((card) => card.type === "custom:auto-entities");
+assert.equal(visibilityAuto.filter.exclude.some((item) => item.entity_id === "sensor.hidden_battery"), true);
+const batteryPopup = visibilityCards.find((card) => card.hash === "#meldung-batterien");
+assert.equal(batteryPopup.cards[0].filter.exclude.some((item) => item.entity_id === "sensor.hidden_battery"), true);
 
 const personDashboard = await SmartphoneDashboardStrategy.generate({}, {
   states: { "person.boris": { state: "home", attributes: { friendly_name: "Boris" } } },

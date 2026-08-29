@@ -10,7 +10,7 @@ def test_manifest_and_hacs():
     hacs = json.loads((ROOT / "hacs.json").read_text())
     assert manifest["domain"] == "smartphone_dashboard"
     assert manifest["config_flow"] is True
-    assert manifest["version"] == "22.0.9"
+    assert manifest["version"] == "22.0.10"
     assert hacs["name"] == "Smartphone Dashboard"
 
 def test_python_syntax_and_runtime_files():
@@ -115,7 +115,9 @@ def test_generic_base_matches_notification_and_quick_action_transformers():
     assert "function graphSensorCard" in strategy
     assert 'template: "bubble_card_graph"' not in strategy
     assert "ACTIVE_ROOM_STYLES" in strategy
-    assert 'hass?.states?.[configuredLight]' in strategy
+    assert "function isEntityVisible" in strategy
+    assert "hiddenDashboardEntityIds(hass)" in strategy
+    assert "isEntityVisible(hass, configuredLight)" in strategy
 
 def test_storage_is_dashboard_scoped_and_notification_status_atomic():
     source = (COMPONENT / "config_manager.py").read_text()

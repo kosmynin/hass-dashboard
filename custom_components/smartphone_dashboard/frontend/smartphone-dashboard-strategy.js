@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.9";
+const STRATEGY_VERSION = "22.0.10";
 const CONFIG_VERSION = 22;
 
 const ACTIVE_ROOM_STYLES = `
@@ -236,6 +236,28 @@ function valuesOf(value) {
   return [];
 }
 
+function entityRegistryMap(hass) {
+  return new Map(
+    valuesOf(hass?.entities)
+      .filter((entry) => entry?.entity_id)
+      .map((entry) => [entry.entity_id, entry]),
+  );
+}
+
+function isEntityVisible(hass, entityId, registry = entityRegistryMap(hass)) {
+  const state = hass?.states?.[entityId];
+  if (!state) return false;
+  const entry = registry.get(entityId);
+  return !entry?.hidden_by && !entry?.disabled_by && state.attributes?.hidden !== true;
+}
+
+function hiddenDashboardEntityIds(hass) {
+  const registry = entityRegistryMap(hass);
+  return Object.keys(hass?.states || {}).filter(
+    (entityId) => !isEntityVisible(hass, entityId, registry),
+  );
+}
+
 function normalizeRoomKey(value) {
   return String(value || "")
     .toLocaleLowerCase("de-DE")
@@ -253,7 +275,8 @@ function entitiesForArea(hass, areaId) {
         (entry.area_id || deviceArea) === areaId &&
         !entry.disabled_by &&
         !entry.hidden_by &&
-        hass?.states?.[entry.entity_id]
+        hass?.states?.[entry.entity_id] &&
+        hass.states[entry.entity_id]?.attributes?.hidden !== true
       );
     })
     .map((entry) => entry.entity_id)
@@ -279,7 +302,7 @@ function detectedRooms(hass, configuredRooms) {
     const areaEntities = entitiesForArea(hass, area.area_id);
     const firstLight = areaEntities.find((entityId) => entityId.startsWith("light."));
     const configuredLight = String(current?.main_light || "");
-    const mainLight = configuredLight.startsWith("light.") && hass?.states?.[configuredLight]
+    const mainLight = configuredLight.startsWith("light.") && isEntityVisible(hass, configuredLight)
       ? configuredLight
       : firstLight || "";
     const room = {
@@ -307,15 +330,18 @@ function detectedRooms(hass, configuredRooms) {
 function detectedPersons(hass, configuredPersons) {
   const configured = Array.isArray(configuredPersons) ? configuredPersons : [];
   const existing = new Map(configured.map((person) => [person.entity, person]));
-  const personEntities = Object.keys(hass?.states || {})
-    .filter((entityId) => entityId.startsWith("person."))
+  const registry = entityRegistryMap(hass);
+  const allPersonEntities = Object.keys(hass?.states || {})
+    .filter((entityId) => entityId.startsWith("person."));
+  const personEntities = allPersonEntities
+    .filter((entityId) => isEntityVisible(hass, entityId, registry))
     .sort((a, b) => {
       const nameA = hass.states[a]?.attributes?.friendly_name || a;
       const nameB = hass.states[b]?.attributes?.friendly_name || b;
       return nameA.localeCompare(nameB, "de");
     });
   const ordered = [
-    ...configured.map((person) => person.entity).filter((entityId) => personEntities.includes(entityId)),
+    ...configured.map((person) => person.entity).filter((entityId) => allPersonEntities.includes(entityId)),
     ...personEntities.filter((entityId) => !existing.has(entityId)),
   ];
 
@@ -369,7 +395,7 @@ function applyPersonOptions(dashboard, config, hass) {
     : legacyIndex;
   if (index < 0) return dashboard;
   const persons = detectedPersons(hass, config.persons).filter(
-    (person) => person.enabled !== false,
+    (person) => person.enabled !== false && isEntityVisible(hass, person.entity),
   );
   if (!persons.length) {
     if (headingIndex >= 0 && index === headingIndex + 1) cards.splice(headingIndex, 2);
@@ -458,9 +484,11 @@ function withNotificationPopup(entry, category) {
 }
 
 function notificationCalendarEntities(hass) {
+  const registry = entityRegistryMap(hass);
   return Object.entries(hass?.states || {})
     .filter(([entityId, state]) =>
       entityId.startsWith("calendar.") &&
+      isEntityVisible(hass, entityId, registry) &&
       /abfall|müll|muell|waste|trash|recycl/i.test(
         `${entityId} ${state?.attributes?.friendly_name || ""}`,
       ),
@@ -469,7 +497,7 @@ function notificationCalendarEntities(hass) {
     .sort((a, b) => a.localeCompare(b, "de"));
 }
 
-function notificationDetailCard(filters, category) {
+function notificationDetailCard(filters, category, hiddenEntityIds = []) {
   const include = filters.map((entry) => {
     const detail = structuredClone(entry);
     if (category === "nina") {
@@ -525,7 +553,11 @@ function notificationDetailCard(filters, category) {
     card_param: "cards",
     filter: {
       include,
-      exclude: [{ state: "unavailable" }, { state: "unknown" }],
+      exclude: [
+        { state: "unavailable" },
+        { state: "unknown" },
+        ...hiddenEntityIds.map((entity_id) => ({ entity_id })),
+      ],
     },
     else: {
       type: "markdown",
@@ -534,7 +566,7 @@ function notificationDetailCard(filters, category) {
   };
 }
 
-function notificationDetailPopups(filtersByCategory, hass) {
+function notificationDetailPopups(filtersByCategory, hass, hiddenEntityIds = []) {
   const calendars = notificationCalendarEntities(hass);
   return Object.entries(filtersByCategory).flatMap(([category, filters]) => {
     if (!filters.length || !NOTIFICATION_POPUPS[category]) return [];
@@ -548,7 +580,7 @@ function notificationDetailPopups(filtersByCategory, hass) {
         entities: calendars,
       });
     }
-    cards.push(notificationDetailCard(filters, category));
+    cards.push(notificationDetailCard(filters, category, hiddenEntityIds));
     return [{
       type: "custom:bubble-card",
       card_type: "pop-up",
@@ -604,6 +636,7 @@ function applyNotificationOptions(dashboard, config, hass) {
     .split(",")
     .map((entityId) => entityId.trim())
     .filter(Boolean);
+  const hiddenEntityIds = hiddenDashboardEntityIds(hass);
 
   const emitted = new Set();
   const detailFilters = Object.fromEntries(
@@ -673,6 +706,7 @@ function applyNotificationOptions(dashboard, config, hass) {
   autoEntities.filter.exclude = [
     { state: "unavailable" },
     { state: "unknown" },
+    ...hiddenEntityIds.map((entity_id) => ({ options: {}, entity_id })),
     ...batteryExclusions.map((entity_id) => ({ options: {}, entity_id })),
   ];
   const popupHashes = new Set(Object.values(NOTIFICATION_POPUPS).map(([hash]) => hash));
@@ -680,7 +714,7 @@ function applyNotificationOptions(dashboard, config, hass) {
     if (popupHashes.has(cards[index]?.hash)) cards.splice(index, 1);
   }
   if (config.show_notifications !== false) {
-    cards.push(...notificationDetailPopups(detailFilters, hass));
+    cards.push(...notificationDetailPopups(detailFilters, hass, hiddenEntityIds));
   }
   return dashboard;
 }
@@ -704,7 +738,7 @@ function applyQuickActionOptions(dashboard, config, hass) {
   if (!Array.isArray(cards)) return dashboard;
   const headingIndex = cards.findIndex((card) => card?.name === "Aktionen" || card?.heading === "Aktionen");
   if (headingIndex < 0) return dashboard;
-  const actions = configuredQuickActions(hass, config.quick_actions).filter((entityId) => hass?.states?.[entityId]);
+  const actions = configuredQuickActions(hass, config.quick_actions).filter((entityId) => isEntityVisible(hass, entityId));
   if (!actions.length) {
     cards.splice(headingIndex, 2);
     return dashboard;
@@ -965,7 +999,9 @@ function applyRoomOptions(dashboard, config, hass) {
   const cards = view?.sections?.[0]?.cards;
   if (!Array.isArray(cards)) return dashboard;
 
-  const rooms = detectedRooms(hass, config.rooms).filter((room) => room.enabled !== false);
+  const rooms = detectedRooms(hass, config.rooms).filter(
+    (room) => room.enabled !== false && room.entity_count > 0,
+  );
   const roomHeadingIndex = cards.findIndex((card) => card?.name === "Räume");
   if (!rooms.length && roomHeadingIndex >= 0) {
     const deleteCount = cards[roomHeadingIndex + 1]?.type === "grid" ? 2 : 1;
@@ -1081,7 +1117,9 @@ function csv(value) {
 }
 
 function entityIds(hass, domain, pattern) {
+  const registry = entityRegistryMap(hass);
   return Object.keys(hass?.states || {}).filter((id) =>
+    isEntityVisible(hass, id, registry) &&
     (!domain || id.startsWith(`${domain}.`)) && (!pattern || pattern.test(id)),
   );
 }
@@ -1158,11 +1196,14 @@ function autoFeatureEntities(hass, key, systemGroups = []) {
     ...entityIds(hass, "alarm_control_panel"),
     ...entityIds(hass, "lock"),
   ];
+  const registry = entityRegistryMap(hass);
   if (key === "printer") return Object.keys(hass?.states || {}).filter((id) =>
+    isEntityVisible(hass, id, registry) &&
     /^(sensor|binary_sensor|switch|button|number|select)\./.test(id) &&
     /printer|druck|bambu|octoprint|klipper|moonraker/i.test(id),
   );
   return Object.keys(hass?.states || {}).filter((id) =>
+    isEntityVisible(hass, id, registry) &&
     /^(sensor|binary_sensor)\./.test(id) &&
     (/system|server|processor|memory|disk|cpu|ram|power|last|home_assistant_core|uptime|ups|opnsense|truenas|zima|influxdb_(internet|truenas|zima)|gateway.*status|net_(in|out)|inbytes|outbytes|pool/i.test(id) ||
       systemGroups.some((group) => matchesEntityPattern(id, group.pattern))),
@@ -1181,15 +1222,22 @@ function autoBambuPrinterIds(hass) {
   };
   const devices = valuesOf(hass?.devices);
   const deviceById = new Map(devices.map((device) => [device.id, device]));
+  const registry = entityRegistryMap(hass);
+  const visibleDeviceIds = new Set(
+    [...registry.values()]
+      .filter((entity) => entity.device_id && isEntityVisible(hass, entity.entity_id, registry))
+      .map((entity) => entity.device_id),
+  );
   const deviceIds = devices
     .filter((device) => isBambuPrinterText(
       [device.model, device.name_by_user, device.name], device.manufacturer,
     ))
     .map((device) => device.id)
-    .filter(Boolean);
+    .filter((deviceId) => deviceId && (!registry.size || visibleDeviceIds.has(deviceId)));
   const registryDeviceIds = valuesOf(hass?.entities)
     .filter((entity) =>
       entity.device_id &&
+      isEntityVisible(hass, entity.entity_id, registry) &&
       isBambuPrinterText(
         [entity.entity_id, entity.platform, entity.original_name, entity.name],
         deviceById.get(entity.device_id)?.manufacturer,
@@ -1264,7 +1312,10 @@ function normalizedSystemColors(value) {
 
 function configuredFeatures(config, hass) {
   const configured = config.features && typeof config.features === "object" ? config.features : {};
-  const existingEntities = new Set(Object.keys(hass?.states || {}));
+  const registry = entityRegistryMap(hass);
+  const existingEntities = new Set(
+    Object.keys(hass?.states || {}).filter((entityId) => isEntityVisible(hass, entityId, registry)),
+  );
   const existingDevices = new Set(valuesOf(hass?.devices).map((device) => device.id));
   const requestedHashes = Object.fromEntries(Object.entries(FEATURE_META).map(([key, meta]) => [
     key,
@@ -1280,9 +1331,7 @@ function configuredFeatures(config, hass) {
     const manualEntities = Array.isArray(item.entities)
       ? item.entities.filter((entityId) => existingEntities.has(entityId))
       : [];
-    const entityRegistry = new Map(
-      valuesOf(hass?.entities).map((entry) => [entry.entity_id, entry]),
-    );
+    const entityRegistry = registry;
     const automaticEntities = item.auto_discover !== false
       ? autoFeatureEntities(hass, key, systemGroups).filter((entityId) =>
           !excluded.has(entityId) &&
@@ -2038,12 +2087,14 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
     const filter = {};
     if (domain) filter.domain = domain;
     if (deviceClass) filter.device_class = deviceClass;
+    const registry = entityRegistryMap(this._hass);
     return this._createSelector({
       label,
       value,
       multiple,
       selector: { entity: { multiple, ...(Object.keys(filter).length ? { filter } : {}), ...(includeEntities ? { include_entities: includeEntities } : {}) } },
       fallbackOptions: Object.keys(this._hass?.states || {}).filter((entityId) =>
+        isEntityVisible(this._hass, entityId, registry) &&
         (!domain || entityId.startsWith(`${domain}.`)) && (!includeEntities || includeEntities.includes(entityId)),
       ),
       onChange,
@@ -2064,8 +2115,9 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
       return;
     }
 
+    const registry = entityRegistryMap(this._hass);
     const travelSensors = Object.keys(this._hass?.states || {}).filter((entityId) => {
-      if (!entityId.startsWith("sensor.")) return false;
+      if (!entityId.startsWith("sensor.") || !isEntityVisible(this._hass, entityId, registry)) return false;
       const state = this._hass.states[entityId];
       const unit = state?.attributes?.unit_of_measurement;
       return unit === "min" || /travel|fahrt|fahrzeit|home_travel/i.test(entityId);
@@ -2131,8 +2183,9 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
 
   _renderQuickActions(container) {
     const actions = configuredQuickActions(this._hass, this._config.quick_actions);
+    const registry = entityRegistryMap(this._hass);
     const available = Object.keys(this._hass?.states || {})
-      .filter((entityId) => entityId.startsWith("script.") && !actions.includes(entityId))
+      .filter((entityId) => entityId.startsWith("script.") && isEntityVisible(this._hass, entityId, registry) && !actions.includes(entityId))
       .sort((a, b) => {
         const nameA = this._hass.states[a]?.attributes?.friendly_name || a;
         const nameB = this._hass.states[b]?.attributes?.friendly_name || b;
@@ -2363,7 +2416,10 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
       name.value = group.name;
       pattern.value = group.pattern;
       const suggestions = item.querySelector(`#${suggestionId}`);
-      for (const entityId of Object.keys(this._hass?.states || {}).filter((id) => id.startsWith("sensor."))) {
+      const registry = entityRegistryMap(this._hass);
+      for (const entityId of Object.keys(this._hass?.states || {}).filter(
+        (id) => id.startsWith("sensor.") && isEntityVisible(this._hass, id, registry),
+      )) {
         const option = document.createElement("option"); option.value = entityId; suggestions.appendChild(option);
       }
       const patternError = document.createElement("div");
@@ -2812,7 +2868,10 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
     const ninaInput = this.shadowRoot.querySelector("[data-nina-entities]");
     const ninaError = this.shadowRoot.querySelector("[data-nina-error]");
     ninaInput.value = String(this._effectiveSetting("nina_entities") || "");
-    for (const entityId of Object.keys(this._hass?.states || {}).filter((id) => /^binary_sensor\.nina/i.test(id)).sort()) {
+    const registry = entityRegistryMap(this._hass);
+    for (const entityId of Object.keys(this._hass?.states || {}).filter(
+      (id) => /^binary_sensor\.nina/i.test(id) && isEntityVisible(this._hass, id, registry),
+    ).sort()) {
       const option = document.createElement("option"); option.value = `${entityId}*`; this.shadowRoot.querySelector("#nina-entity-suggestions").appendChild(option);
     }
     const validateNina = () => {
