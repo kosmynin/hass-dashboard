@@ -1,0 +1,38 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Version prüfen
+        shell: python
+        run: |
+          import json
+          import os
+          from pathlib import Path
+
+          manifest = json.loads(
+              Path("custom_components/smartphone_dashboard/manifest.json").read_text()
+          )
+          tag = os.environ["GITHUB_REF_NAME"].removeprefix("v")
+          if manifest["version"] != tag:
+              raise SystemExit(
+                  f"Tag {tag} stimmt nicht mit Manifest {manifest['version']} überein"
+              )
+      - name: GitHub-Release erstellen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "${GITHUB_REF_NAME}"
+          --verify-tag
+          --title "Smartphone Dashboard ${GITHUB_REF_NAME}"
+          --generate-notes

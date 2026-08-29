@@ -12,6 +12,8 @@ def test_manifest_and_hacs():
     assert manifest["config_flow"] is True
     assert manifest["version"] == "22.0.10"
     assert hacs["name"] == "Smartphone Dashboard"
+    release = (ROOT / ".github/workflows/release.yml").read_text()
+    assert 'tags:' in release and 'gh release create' in release
 
 def test_python_syntax_and_runtime_files():
     for path in COMPONENT.glob("*.py"):
