@@ -1,0 +1,7 @@
+# Legacy migration reference only. Do not include this file as a Home Assistant
+# package. Existing helpers are discovered and imported by the integration;
+# none are created, changed, renamed or deleted here.
+smartphone_dashboard_legacy_helpers:
+  schema: 22
+  managed_by: custom_components.smartphone_dashboard
+  active_automation: false

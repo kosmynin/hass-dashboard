@@ -1,0 +1,49 @@
+# Installation und Diagnose
+
+## Repository-Voraussetzung
+
+HACS unterstützt für Custom Repositories öffentliche GitHub-Repositories. Bei
+Entwicklung auf GitLab ist daher ein öffentliches GitHub-Mirror erforderlich.
+Erst dieses Mirror in HACS als Integration eintragen; GitLab allein ist keine
+HACS-Installationsquelle.
+Quellprojekt: `https://gitlab.com/kosmynin/hass-dashboard-strategy`. Für HACS
+muss dieses Projekt zusätzlich öffentlich nach GitHub gespiegelt werden; der
+Codeowner des Mirrors ist `@kosmynin`.
+
+HACS installiert ausschließlich `custom_components/smartphone_dashboard`, daher liegen alle Laufzeitdateien einschließlich Frontend innerhalb dieses Ordners. Nach Updates Home Assistant neu starten und den Browser hart neu laden.
+
+Der statische Pfad nutzt `hass.http.async_register_static_paths`. Trage
+`/smartphone-dashboard/smartphone-dashboard-loader.js?v=22.0.0` verbindlich als
+Modul-Resource ein und entferne die alte `/local/...`-Resource. Es wird
+absichtlich nicht automatisch in Lovelace-Resource-Storage geschrieben.
+
+Die primäre Strategy-Konfiguration lautet:
+
+```yaml
+strategy:
+  type: custom:smartphone-dashboard
+  backend_key: default
+```
+
+`backend_key: default` kennzeichnet das eine Dashboard, dessen Einstellungen
+für die globalen Benachrichtigungen maßgeblich sind. Weitere Dashboards erhalten
+einen eigenen stabilen Schlüssel oder verwenden ihren Dashboard-Pfad.
+
+Globale HTTP-, Extra-JS- und WebSocket-Registrierungen besitzen in Home
+Assistant keinen Config-Entry-Unregister-Lebenszyklus. Beim Entfernen der
+Integration stoppt der Entry sofort Hintergrundtasks; für das vollständige
+Entfernen der globalen Frontendregistrierung ist ein Neustart erforderlich.
+
+Diagnose in den Browser-WebSocket-Werkzeugen: `smartphone_dashboard/config/get`. `migration.legacy_helpers_found` sollte bei installierter Paket-Kompatibilität 17 ergeben. Der Import ist wiederholbar und löscht nichts.
+Die Admin-WebSocket-Antwort kann lokale Entity-IDs und Meldungseinstellungen
+enthalten und ist deshalb als sensible Diagnoseinformation zu behandeln.
+
+## Dashboard-Schlüssel und Benachrichtigungen
+
+Konfigurationen werden getrennt nach `backend_key` gespeichert; ohne expliziten
+Schlüssel wird der bereinigte Dashboard-Pfad verwendet. Für das Dashboard, das
+die globalen Benachrichtigungsregeln verwaltet, `backend_key: default` setzen.
+Der einmalige Import der 17 Helfer befüllt genau diesen Schlüssel. Danach ist
+der importierte Snapshot maßgeblich, auch wenn die alten Helfer später fehlen;
+sie werden weder fortlaufend darübergelegt noch gelöscht. Andere Dashboard-
+Schlüssel bleiben vollständig isoliert.

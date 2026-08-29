@@ -1,0 +1,33 @@
+name: Validate
+on: [push, pull_request, workflow_dispatch]
+permissions: {}
+jobs:
+  hacs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hacs/action@main
+        with:
+          category: integration
+  hassfest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: home-assistant/actions/hassfest@master
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install pytest
+      - run: pytest -q
+      - name: Privacy scan
+        run: |
+          ! rg -n '[C]HANGE_ME' .
+          ! rg -ni '[b]oris|[a]nastasiia|[k]osmynin|[e]rkrath|home\.[k]osmynin' custom_components/smartphone_dashboard/frontend
+          ! rg -n '"(entity|entity_id)": "[a-z_]+\.[^*{]' custom_components/smartphone_dashboard/frontend
+      - uses: actions/setup-node@v4
+        with: {node-version: "22"}
+      - run: node tests/test_frontend_conflicts.mjs
+      - run: node --input-type=module --check < custom_components/smartphone_dashboard/frontend/smartphone-dashboard-strategy.js

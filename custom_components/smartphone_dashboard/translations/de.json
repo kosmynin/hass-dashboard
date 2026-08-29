@@ -1,0 +1,6 @@
+{
+  "config": {
+    "abort": {"already_configured": "Smartphone Dashboard ist bereits eingerichtet."},
+    "step": {"user": {"description": "Richtet Backend, Strategy-Frontend und die sichere Kompatibilität mit vorhandenen Meldungshelfern gemeinsam ein.", "title": "Smartphone Dashboard einrichten"}}
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "domain": "smartphone_dashboard",
+  "name": "Smartphone Dashboard",
+  "codeowners": ["@kosmynin"],
+  "config_flow": true,
+  "dependencies": ["frontend", "http", "lovelace"],
+  "documentation": "https://gitlab.com/kosmynin/hass-dashboard-strategy",
+  "integration_type": "service",
+  "iot_class": "local_push",
+  "issue_tracker": "https://gitlab.com/kosmynin/hass-dashboard-strategy/-/issues",
+  "version": "22.0.0"
+}

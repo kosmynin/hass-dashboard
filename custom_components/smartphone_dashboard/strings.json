@@ -1,0 +1,6 @@
+{
+  "config": {
+    "abort": {"already_configured": "Smartphone Dashboard is already configured."},
+    "step": {"user": {"description": "Set up the backend, dashboard strategy and legacy helper compatibility together.", "title": "Set up Smartphone Dashboard"}}
+  }
+}
