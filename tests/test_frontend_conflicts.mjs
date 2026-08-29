@@ -5,10 +5,16 @@ globalThis.window = globalThis;
 const { SmartphoneDashboardStrategy, SmartphoneDashboardStrategyEditor, partitionConflictPatch, applyNotificationOptions, mergeBackendNotifications, detectedRooms, applyRoomOptions, configuredFeatures } = await import("../custom_components/smartphone_dashboard/frontend/smartphone-dashboard-strategy.js");
 
 const roomHass = {
-  states: { "light.kitchen": { state: "off", attributes: { friendly_name: "Küche" } } },
+  states: {
+    "light.kitchen": { state: "off", attributes: { friendly_name: "Küche" } },
+    "sensor.kitchen_temperature": { state: "21.5", attributes: { friendly_name: "Küchentemperatur", device_class: "temperature", unit_of_measurement: "°C" } },
+  },
   areas: { kitchen: { area_id: "kitchen", name: "Küche", icon: "mdi:silverware-fork-knife" } },
   devices: {},
-  entities: { kitchen_light: { entity_id: "light.kitchen", area_id: "kitchen" } },
+  entities: {
+    kitchen_light: { entity_id: "light.kitchen", area_id: "kitchen" },
+    kitchen_temperature: { entity_id: "sensor.kitchen_temperature", area_id: "kitchen" },
+  },
 };
 const sanitizedRooms = detectedRooms(roomHass, [{
   area_id: "kitchen",
@@ -29,6 +35,15 @@ assert.equal(roomCard.entity, "light.kitchen");
 assert.equal("template" in roomCard, false);
 assert.deepEqual(roomCard.tap_action, { action: "toggle" });
 assert.deepEqual(roomCard.button_action.tap_action, { action: "navigate", navigation_path: "#raum-kitchen" });
+assert.match(roomCard.styles, /primary-text-color/);
+const roomPopup = roomDashboard.views[0].sections[0].cards.find((card) => card.hash === "#raum-kitchen");
+const sensorGrid = roomPopup.cards.find((card) => card.type === "grid");
+const sensorCard = sensorGrid.cards.find((card) => card.entity === "sensor.kitchen_temperature");
+assert.equal(sensorCard.type, "custom:button-card");
+assert.equal("template" in sensorCard, false);
+assert.equal(sensorCard.custom_fields.title.card.entity, "sensor.kitchen_temperature");
+assert.equal(sensorCard.custom_fields.graph.card.entities[0], "sensor.kitchen_temperature");
+assert.equal(sensorCard.custom_fields.graph.card.line_color, "#A2AADB");
 
 const personDashboard = await SmartphoneDashboardStrategy.generate({}, {
   states: { "person.boris": { state: "home", attributes: { friendly_name: "Boris" } } },

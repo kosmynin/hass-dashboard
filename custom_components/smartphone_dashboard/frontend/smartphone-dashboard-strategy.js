@@ -7,8 +7,20 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.8";
+const STRATEGY_VERSION = "22.0.9";
 const CONFIG_VERSION = 22;
+
+const ACTIVE_ROOM_STYLES = `
+  ha-card, .bubble-button-card-container, .bubble-name-container,
+  .bubble-main-icon-container, .bubble-icon-container {
+    opacity: 1 !important;
+    filter: none !important;
+  }
+  .bubble-name, .bubble-icon {
+    color: var(--primary-text-color) !important;
+    opacity: 1 !important;
+  }
+`;
 
 const UPS_NON_ALERT_STATES = [
   "ONLINE", "Online", "online", "ON", "On", "on", "OK", "Ok", "ok",
@@ -284,6 +296,7 @@ function detectedRooms(hass, configuredRooms) {
     // Entity-IDs können nach Umbenennen oder Entfernen veraltet sein.
     room.name = area.name;
     room.main_light = mainLight;
+    room.entity_count = areaEntities.length;
     room.hidden_entities = Array.isArray(room.hidden_entities)
       ? room.hidden_entities.filter((entityId) => hass?.states?.[entityId])
       : [];
@@ -714,6 +727,69 @@ function applyQuickActionOptions(dashboard, config, hass) {
   return dashboard;
 }
 
+function graphSensorCard(entity, hass, appearance = {}) {
+  const attributes = hass?.states?.[entity]?.attributes || {};
+  const icon = appearance.icon || attributes.icon || "mdi:chart-line";
+  const color = appearance.color || "var(--primary-color)";
+  return {
+    type: "custom:button-card",
+    entity,
+    show_name: false,
+    show_state: false,
+    show_icon: false,
+    custom_fields: {
+      title: {
+        card: {
+          type: "custom:bubble-card",
+          card_type: "button",
+          button_type: "state",
+          entity,
+          name: attributes.friendly_name || entity,
+          icon,
+          card_layout: "normal",
+          styles: `
+            ha-card {
+              --bubble-main-background-color: rgba(var(--rgb-primary-text-color), 0.1) !important;
+              background: transparent !important;
+              box-shadow: none !important;
+            }
+          `,
+        },
+      },
+      graph: {
+        card: {
+          type: "custom:mini-graph-card",
+          entities: [entity],
+          show: { name: false, icon: false, state: false },
+          line_color: color,
+          card_mod: {
+            style: `
+              ha-card {
+                box-shadow: none;
+                background: none;
+                backdrop-filter: none !important;
+                border: none;
+              }
+            `,
+          },
+        },
+      },
+    },
+    styles: {
+      grid: [
+        { "grid-template-areas": '"title" "graph"' },
+        { "grid-template-rows": "min-content min-content" },
+      ],
+      card: [
+        { padding: "0px" },
+        { "border-radius": "25px" },
+        { "box-shadow": "none" },
+        { background: "rgba(var(--rgb-primary-text-color), 0.1)" },
+      ],
+    },
+  };
+}
+
 function genericRoomPopup(room, hass) {
   const hidden = new Set(room.hidden_entities || []);
   const entities = entitiesForArea(hass, room.area_id).filter(
@@ -833,16 +909,7 @@ function genericRoomPopup(room, hass) {
       square: false,
       cards: sensors.map((entity) => {
         const appearance = sensorAppearance(entity);
-        return {
-          type: "custom:button-card",
-          template: "bubble_card_graph",
-          entity,
-          variables: {
-            card_name: hass?.states?.[entity]?.attributes?.friendly_name || entity,
-            card_icon: appearance.icon,
-            graph_color: appearance.color,
-          },
-        };
+        return graphSensorCard(entity, hass, appearance);
       }),
     });
   }
@@ -869,6 +936,7 @@ function genericRoomPopup(room, hass) {
     scrolling_effect: true,
     show_name: true,
     show_header: true,
+    ...(room.entity_count ? { styles: ACTIVE_ROOM_STYLES } : {}),
     cards,
   };
 }
@@ -924,6 +992,7 @@ function applyRoomOptions(dashboard, config, hass) {
         button_action: {
           tap_action: { action: "navigate", navigation_path: room.popup_hash },
         },
+        ...(room.entity_count ? { styles: ACTIVE_ROOM_STYLES } : {}),
       })),
     };
   }
@@ -1261,11 +1330,7 @@ function featureEntityCard(entity, hass) {
   if (domain === "media_player") return { type: "custom:bubble-card", card_type: "media-player", entity };
   if (domain === "alarm_control_panel") return { type: "alarm-panel", entity };
   if (["sensor", "binary_sensor"].includes(domain) && hass?.states?.[entity]?.attributes?.unit_of_measurement) {
-    return { type: "custom:button-card", template: "bubble_card_graph", entity, variables: {
-      card_name: hass.states[entity]?.attributes?.friendly_name || entity,
-      card_icon: hass.states[entity]?.attributes?.icon || "mdi:chart-line",
-      graph_color: "var(--primary-color)",
-    }};
+    return graphSensorCard(entity, hass);
   }
   return { type: "custom:bubble-card", card_type: "button", button_type: ["switch", "input_boolean", "fan", "lock"].includes(domain) ? "switch" : "state", entity };
 }
@@ -1311,16 +1376,7 @@ function systemFeatureCards(item, hass) {
         const value = hass.states[entity];
         if (entity.startsWith("sensor.") && value?.attributes?.unit_of_measurement) {
           const appearance = systemGraphAppearance(entity, hass, item.system_colors);
-          graphs.push({
-            type: "custom:button-card",
-            template: "bubble_card_graph",
-            entity,
-            variables: {
-              card_name: value.attributes.friendly_name || entity,
-              card_icon: appearance.icon,
-              graph_color: appearance.color,
-            },
-          });
+          graphs.push(graphSensorCard(entity, hass, appearance));
         } else if (/binary_sensor\.ups|opnsense_gateway_.*_status/i.test(entity)) {
           separatorStates.push({
             entity,
