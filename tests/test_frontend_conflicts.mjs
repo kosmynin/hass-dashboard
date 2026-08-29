@@ -27,6 +27,8 @@ assert.equal(roomCard.type, "custom:bubble-card");
 assert.equal(roomCard.button_type, "slider");
 assert.equal(roomCard.entity, "light.kitchen");
 assert.equal("template" in roomCard, false);
+assert.deepEqual(roomCard.tap_action, { action: "toggle" });
+assert.deepEqual(roomCard.button_action.tap_action, { action: "navigate", navigation_path: "#raum-kitchen" });
 
 const personDashboard = await SmartphoneDashboardStrategy.generate({}, {
   states: { "person.boris": { state: "home", attributes: { friendly_name: "Boris" } } },

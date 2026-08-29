@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.7";
+const STRATEGY_VERSION = "22.0.8";
 const CONFIG_VERSION = 22;
 
 const UPS_NON_ALERT_STATES = [
@@ -920,12 +920,10 @@ function applyRoomOptions(dashboard, config, hass) {
           slider_fill_orientation: "left",
           slider_value_position: "right",
         } : {}),
-        tap_action: { action: "navigate", navigation_path: room.popup_hash },
-        ...(!room.main_light ? {
-          button_action: {
-            tap_action: { action: "navigate", navigation_path: room.popup_hash },
-          },
-        } : {}),
+        tap_action: { action: room.main_light ? "toggle" : "none" },
+        button_action: {
+          tap_action: { action: "navigate", navigation_path: room.popup_hash },
+        },
       })),
     };
   }
