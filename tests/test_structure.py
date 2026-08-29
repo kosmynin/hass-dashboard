@@ -10,7 +10,7 @@ def test_manifest_and_hacs():
     hacs = json.loads((ROOT / "hacs.json").read_text())
     assert manifest["domain"] == "smartphone_dashboard"
     assert manifest["config_flow"] is True
-    assert manifest["version"] == "22.0.4"
+    assert manifest["version"] == "22.0.5"
     assert hacs["name"] == "Smartphone Dashboard"
 
 def test_python_syntax_and_runtime_files():
@@ -88,12 +88,16 @@ def test_generic_base_matches_notification_and_quick_action_transformers():
     assert 'entity_id: "binary_sensor.nina_warning_*"' in strategy
     assert 'unique: true' in strategy
     assert 'show_empty: false' in strategy
+    assert 'name: "Keine Meldungen"' in strategy
     assert 'card_param: "cards"' in strategy
     assert 'entry.state = `<= ${batteryThreshold}`' in strategy
     assert 'entry.not = { state: "0" }' in strategy
     assert 'entry.state = "on"' in strategy
     assert 'state: "/.*([Hh]eute|[Mm]orgen).*/"' in strategy
     assert 'not: { state: "/^(ONLINE|Online|online)$/" }' in strategy
+    assert 'const NOTIFICATION_POPUPS' in strategy
+    assert 'initial_view: "listWeek"' in strategy
+    assert 'entity?.attributes?.instruction' in strategy
     assert 'entry["state 1"]' not in strategy
     assert 'card?.heading === "Aktionen"' in strategy
     assert 'hass?.states?.[entityId]' in strategy

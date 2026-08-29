@@ -9,7 +9,7 @@ Ein gemeinsames HACS-Custom-Integration-Paket für das deutsche Smartphone-Dashb
 2. Home Assistant neu starten.
 3. Unter **Einstellungen → Geräte & Dienste → Integration hinzufügen** „Smartphone Dashboard“ wählen.
 4. Unter **Einstellungen → Dashboards → Ressourcen** verbindlich das Modul
-   `/smartphone-dashboard/smartphone-dashboard-loader.js?v=22.0.4` eintragen.
+   `/smartphone-dashboard/smartphone-dashboard-loader.js?v=22.0.5` eintragen.
 5. Eine alte `/local/smartphone-dashboard-loader.js`-Resource entfernen, damit
    nicht zwei Versionen konkurrieren.
 6. Home Assistant neu starten, Browserdaten aktualisieren und das primäre
@@ -31,6 +31,10 @@ Reload-Schleifen.
 Der berechtigungsgefilterte Backend-Lesezugriff für die erste Strategy-Erzeugung
 hat ein Zeitlimit von 1,5 Sekunden. Bei Timeout werden ausschließlich explizite
 Lovelace-Werte oder der letzte erfolgreich bereinigte Browserwert verwendet.
+
+Aktive Meldungen öffnen kategoriebasierte Detail-Popups. NINA zeigt dort die
+vollständige Beschreibung und Handlungsempfehlung; für Abfall werden passende
+`calendar.*`-Entitäten automatisch erkannt und als Kalender eingebunden.
 
 ## Migration und Benachrichtigungen
 

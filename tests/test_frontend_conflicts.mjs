@@ -78,6 +78,7 @@ const filters = dashboard.views[0].sections[0].cards[1].filter.include;
 assert.equal(filters.some((item) => item.entity_id === "sensor.*battery" || item.attributes?.device_class === "battery"), false);
 assert.equal(filters.find((item) => item.entity_id === "binary_sensor.*contact").last_changed, "> 15");
 assert.equal(filters.find((item) => item.entity_id === "binary_sensor.*contact").state, "on");
+assert.equal(filters.find((item) => item.entity_id === "binary_sensor.*contact").options.tap_action.navigation_path, "#meldung-kontakte");
 assert.equal(filters.find((item) => item.entity_id === "sensor.*co2*").state, "> 1000");
 const ninaDashboard = { views: [{ sections: [{ cards: [
   { type: "heading", heading: "Meldungen" },
@@ -89,6 +90,10 @@ applyNotificationOptions(ninaDashboard, { notification_nina: true, nina_entities
 const ninaFilter = ninaDashboard.views[0].sections[0].cards[1].filter.include[0];
 assert.equal(ninaFilter.state, "on");
 assert.match(ninaFilter.options.styles, /headline/);
+assert.equal(ninaFilter.options.tap_action.navigation_path, "#meldung-nina");
+const ninaPopup = ninaDashboard.views[0].sections[0].cards.find((card) => card.hash === "#meldung-nina");
+assert.equal(ninaPopup.cards[0].filter.include[0].options.type, "custom:button-card");
+assert.match(ninaPopup.cards[0].filter.include[0].options.custom_fields.instruction, /instruction/);
 
 assert.deepEqual(mergeBackendNotifications({ notification_batteries: true, title: "Explizit" }, { notification_batteries: false, notification_contacts: false, title: "Backend" }), { notification_batteries: true, notification_contacts: false, title: "Explizit" });
 const generated = await SmartphoneDashboardStrategy.generate({ backend_key: "default" }, {
@@ -106,11 +111,34 @@ assert.equal(generatedFilters.some((item) => item.entity_id === "sensor.ups"), t
 assert.equal(generatedFilters.some((item) => item.entity_id === "sensor.frost"), true);
 assert.equal(generatedFilters.find((item) => item.entity_id === "sensor.waste").state, "/.*([Hh]eute|[Mm]orgen).*/");
 assert.deepEqual(generatedFilters.find((item) => item.entity_id === "sensor.ups").not, { state: "/^(ONLINE|Online|online)$/" });
+assert.equal(generatedFilters.find((item) => item.entity_id === "sensor.waste").options.tap_action.navigation_path, "#meldung-abfall");
+assert.equal(generated.views[0].sections[0].cards.some((card) => card.hash === "#meldung-abfall"), true);
+assert.equal(generated.views[0].sections[0].cards.some((card) => card.hash === "#meldung-usv"), true);
 const generatedAuto = generated.views[0].sections[0].cards.find((card) => card.type === "custom:auto-entities");
 assert.equal(generatedAuto.card.type, "vertical-stack");
 assert.equal(generatedAuto.card_param, "cards");
 assert.equal(generatedAuto.show_empty, false);
+assert.equal(generatedAuto.else.name, "Keine Meldungen");
 assert.equal(generatedAuto.filter.exclude.some((item) => item.entity_id === "sensor.excluded_battery"), true);
+
+const wasteDashboard = { views: [{ sections: [{ cards: [
+  { type: "heading", heading: "Meldungen" },
+  { type: "custom:auto-entities", filter: { include: [
+    { entity_id: "sensor.*abfall", options: { type: "custom:bubble-card", card_type: "button" } },
+  ], exclude: [] } },
+] }] }] };
+applyNotificationOptions(wasteDashboard, {
+  notification_waste: true,
+  waste_entities: "sensor.abfall",
+}, {
+  states: {
+    "sensor.abfall": { state: "Biomüll morgen", attributes: { friendly_name: "Abfall" } },
+    "calendar.abfall": { state: "on", attributes: { friendly_name: "Abfallkalender" } },
+  },
+});
+const wastePopup = wasteDashboard.views[0].sections[0].cards.find((card) => card.hash === "#meldung-abfall");
+assert.equal(wastePopup.cards[0].type, "calendar");
+assert.deepEqual(wastePopup.cards[0].entities, ["calendar.abfall"]);
 
 const editor = new SmartphoneDashboardStrategyEditor();
 let timerFired = false;

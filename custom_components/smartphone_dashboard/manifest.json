@@ -8,5 +8,5 @@
   "integration_type": "service",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/kosmynin/hass-dashboard/issues",
-  "version": "22.0.4"
+  "version": "22.0.5"
 }

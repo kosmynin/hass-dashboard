@@ -7,9 +7,28 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.4";
+const STRATEGY_VERSION = "22.0.5";
 const CONFIG_VERSION = 22;
 let cachedDisplayNotificationConfig;
+const NOTIFICATION_POPUPS = {
+  batteries: ["#meldung-batterien", "Batterien", "mdi:battery-alert"],
+  contacts: ["#meldung-kontakte", "Offene Kontakte", "mdi:door-open"],
+  co2: ["#meldung-co2", "CO₂", "mdi:molecule-co2"],
+  waste: ["#meldung-abfall", "Abfall", "mdi:trash-can-outline"],
+  ups: ["#meldung-usv", "USV", "mdi:power-plug-battery"],
+  frost: ["#meldung-frost", "Frost", "mdi:snowflake-alert"],
+  nina: ["#meldung-nina", "NINA-Warnungen", "mdi:alert-outline"],
+};
+const NINA_SUMMARY_STYLES = `\${(() => {
+  const entityId = typeof entity === 'string' ? entity : entity?.entity_id;
+  const warning = hass.states[entityId];
+  const headline = warning?.attributes?.headline || warning?.attributes?.friendly_name || 'NINA-Warnung';
+  const description = warning?.attributes?.description || warning?.attributes?.instruction || 'Amtliche Warnung aktiv';
+  const name = card.querySelector('.bubble-name');
+  const state = card.querySelector('.bubble-state');
+  if (name) name.innerText = headline;
+  if (state) state.innerText = description;
+})()}`;
 const NOTIFICATION_HELPERS = {
   notification_batteries: "input_boolean.smartphone_meldung_batterien",
   notification_contacts: "input_boolean.smartphone_meldung_kontakte",
@@ -140,19 +159,17 @@ const BASE_DASHBOARD = {
         { entity_id: "sensor.*temperature", options: { type: "custom:bubble-card", card_type: "button" } },
         { entity_id: "binary_sensor.nina_warning_*", state: "on", options: {
           type: "custom:bubble-card", card_type: "button", button_type: "state",
-          icon: "mdi:alert-outline", show_state: true,
-          styles: `\${(() => {
-            const entityId = typeof entity === 'string' ? entity : entity?.entity_id;
-            const warning = hass.states[entityId];
-            const headline = warning?.attributes?.headline || warning?.attributes?.friendly_name || 'NINA-Warnung';
-            const description = warning?.attributes?.description || warning?.attributes?.instruction || 'Amtliche Warnung aktiv';
-            const name = card.querySelector('.bubble-name');
-            const state = card.querySelector('.bubble-state');
-            if (name) name.innerText = headline;
-            if (state) state.innerText = description;
-          })()}`,
+          icon: "mdi:alert-outline", show_state: false, show_attribute: true,
+          styles: NINA_SUMMARY_STYLES,
         } }
-      ], exclude: [] } },
+      ], exclude: [] },
+      else: {
+        type: "custom:bubble-card",
+        card_type: "button",
+        button_type: "name",
+        name: "Keine Meldungen",
+        icon: "mdi:bell-off-outline",
+      } },
       { type: "heading", heading: "Aktionen", icon: "mdi:gesture-tap" },
       { type: "grid", columns: 2, square: false, cards: [] },
       { type: "custom:bubble-card", card_type: "separator", name: "Räume", icon: "mdi:floor-plan" },
@@ -402,6 +419,127 @@ function synchronizationStatus(config, hass) {
     title: problems.length ? "Backend-Synchronisierung unvollständig" : "Backend-Synchronisierung aktiv",
     detail: problems.length ? problems.join(" · ") : `Backend bereit · ${installedHelpers} optionale Legacy-Helfer · ${recipients.length} Notify-Dienste` };
 }
+
+function withNotificationPopup(entry, category) {
+  const hash = NOTIFICATION_POPUPS[category]?.[0];
+  if (!hash) return entry;
+  return {
+    ...entry,
+    options: {
+      ...(entry.options || {}),
+      tap_action: { action: "navigate", navigation_path: hash },
+      button_action: { tap_action: { action: "navigate", navigation_path: hash } },
+    },
+  };
+}
+
+function notificationCalendarEntities(hass) {
+  return Object.entries(hass?.states || {})
+    .filter(([entityId, state]) =>
+      entityId.startsWith("calendar.") &&
+      /abfall|müll|muell|waste|trash|recycl/i.test(
+        `${entityId} ${state?.attributes?.friendly_name || ""}`,
+      ),
+    )
+    .map(([entityId]) => entityId)
+    .sort((a, b) => a.localeCompare(b, "de"));
+}
+
+function notificationDetailCard(filters, category) {
+  const include = filters.map((entry) => {
+    const detail = structuredClone(entry);
+    if (category === "nina") {
+      detail.options = {
+        type: "custom:button-card",
+        icon: "mdi:alert-outline",
+        show_state: false,
+        show_label: true,
+        show_icon: true,
+        name: "[[[ return entity?.attributes?.headline || entity?.attributes?.friendly_name || 'NINA-Warnung'; ]]]",
+        label: "[[[ return [entity?.attributes?.severity, entity?.attributes?.sender_name].filter(Boolean).join(' · '); ]]]",
+        custom_fields: {
+          description: "[[[ return entity?.attributes?.description || 'Keine Beschreibung vorhanden.'; ]]]",
+          instruction: "[[[ return entity?.attributes?.instruction || ''; ]]]",
+          period: "[[[ const start = entity?.attributes?.onset || entity?.attributes?.sent; const end = entity?.attributes?.expires; return [start && `Von: ${start}`, end && `Bis: ${end}`].filter(Boolean).join(' · '); ]]]",
+        },
+        styles: {
+          card: [
+            { padding: "18px" },
+            { "text-align": "left" },
+            { "border-left": "5px solid var(--error-color)" },
+          ],
+          grid: [
+            { "grid-template-areas": "'i n' 'i l' 'description description' 'instruction instruction' 'period period'" },
+            { "grid-template-columns": "42px 1fr" },
+          ],
+          name: [{ "white-space": "normal" }, { "font-weight": "700" }],
+          label: [{ "white-space": "normal" }, { color: "var(--secondary-text-color)" }],
+          custom_fields: {
+            description: [{ "white-space": "pre-wrap" }, { "margin-top": "14px" }, { "line-height": "1.45" }],
+            instruction: [{ "white-space": "pre-wrap" }, { "margin-top": "12px" }, { "font-weight": "600" }, { "line-height": "1.45" }],
+            period: [{ "white-space": "normal" }, { "margin-top": "12px" }, { color: "var(--secondary-text-color)" }, { "font-size": "12px" }],
+          },
+        },
+        tap_action: { action: "more-info" },
+      };
+    } else {
+      detail.options = {
+        ...(detail.options || {}),
+        button_type: "state",
+        show_state: true,
+        tap_action: { action: "more-info" },
+      };
+      delete detail.options.button_action;
+    }
+    return detail;
+  });
+  return {
+    type: "custom:auto-entities",
+    unique: true,
+    show_empty: false,
+    card: { type: "vertical-stack" },
+    card_param: "cards",
+    filter: {
+      include,
+      exclude: [{ state: "unavailable" }, { state: "unknown" }],
+    },
+    else: {
+      type: "markdown",
+      content: "Aktuell ist keine passende Meldung aktiv.",
+    },
+  };
+}
+
+function notificationDetailPopups(filtersByCategory, hass) {
+  const calendars = notificationCalendarEntities(hass);
+  return Object.entries(filtersByCategory).flatMap(([category, filters]) => {
+    if (!filters.length || !NOTIFICATION_POPUPS[category]) return [];
+    const [hash, name, icon] = NOTIFICATION_POPUPS[category];
+    const cards = [];
+    if (category === "waste" && calendars.length) {
+      cards.push({
+        type: "calendar",
+        title: "Abfallkalender",
+        initial_view: "listWeek",
+        entities: calendars,
+      });
+    }
+    cards.push(notificationDetailCard(filters, category));
+    return [{
+      type: "custom:bubble-card",
+      card_type: "pop-up",
+      popup_mode: "adaptive-dialog",
+      hash,
+      button_type: "name",
+      name,
+      icon,
+      show_header: true,
+      scrolling_effect: true,
+      cards,
+    }];
+  });
+}
+
 function applyNotificationOptions(dashboard, config, hass) {
   const cards = dashboard.views?.[0]?.sections?.[0]?.cards;
   if (!Array.isArray(cards)) return dashboard;
@@ -444,47 +582,58 @@ function applyNotificationOptions(dashboard, config, hass) {
     .filter(Boolean);
 
   const emitted = new Set();
+  const detailFilters = Object.fromEntries(
+    Object.keys(NOTIFICATION_POPUPS).map((category) => [category, []]),
+  );
+  const emit = (category, entries) => {
+    detailFilters[category].push(...entries.map((entry) => structuredClone(entry)));
+    return entries.map((entry) => withNotificationPopup(entry, category));
+  };
   autoEntities.filter.include = includes.flatMap((entry) => {
     const entityId = entry.entity_id || "";
     if (["sensor.*battery", "sensor.*batterie"].includes(entityId) || entry.attributes?.device_class === "battery") {
       entry.state = `<= ${batteryThreshold}`;
       entry.not = { state: "0" };
-      return settings.batteries ? [entry] : [];
+      return settings.batteries ? emit("batteries", [entry]) : [];
     }
     if (["binary_sensor.*contact", "binary_sensor.*kontakt"].includes(entityId) || ["door", "window", "opening"].includes(entry.attributes?.device_class)) {
       entry.state = "on";
       entry.last_changed = `> ${contactMinutes}`;
-      return settings.contacts ? [entry] : [];
+      return settings.contacts ? emit("contacts", [entry]) : [];
     }
     if (["sensor.*kohlendioxid", "sensor.*co2*"].includes(entityId) || entry.attributes?.device_class === "carbon_dioxide") {
       entry.state = `> ${co2Threshold}`;
-      return settings.co2 ? [entry] : [];
+      return settings.co2 ? emit("co2", [entry]) : [];
     }
     if (entityId === "sensor.*abfall") {
-      return settings.waste ? wasteEntities.map((entity_id) => ({
+      const entries = wasteEntities.map((entity_id) => ({
         ...entry,
         entity_id,
         state: "/.*([Hh]eute|[Mm]orgen).*/",
-      })) : [];
+      }));
+      return settings.waste ? emit("waste", entries) : [];
     }
     if (entityId === "sensor.*ups_status") {
       if (emitted.has("ups")) return [];
       emitted.add("ups");
-      return settings.ups ? upsEntities.map((entity_id) => ({
+      const entries = upsEntities.map((entity_id) => ({
         ...entry,
         entity_id,
         not: { state: "/^(ONLINE|Online|online)$/" },
-      })) : [];
+      }));
+      return settings.ups ? emit("ups", entries) : [];
     }
     if (entityId === "sensor.*temperature") {
       entry.entity_id = frostEntity;
       entry.state = `<= ${frostThreshold}`;
-      return settings.frost && Boolean(frostEntity) ? [entry] : [];
+      return settings.frost && Boolean(frostEntity) ? emit("frost", [entry]) : [];
     }
     if (entityId.startsWith("binary_sensor.nina_warning_")) {
       if (emitted.has("nina")) return [];
       emitted.add("nina");
-      return settings.nina ? [{ ...entry, entity_id: ninaEntities }] : [];
+      return settings.nina && Boolean(ninaEntities)
+        ? emit("nina", [{ ...entry, entity_id: ninaEntities }])
+        : [];
     }
     return [entry];
   });
@@ -493,6 +642,13 @@ function applyNotificationOptions(dashboard, config, hass) {
     { state: "unknown" },
     ...batteryExclusions.map((entity_id) => ({ options: {}, entity_id })),
   ];
+  const popupHashes = new Set(Object.values(NOTIFICATION_POPUPS).map(([hash]) => hash));
+  for (let index = cards.length - 1; index >= 0; index -= 1) {
+    if (popupHashes.has(cards[index]?.hash)) cards.splice(index, 1);
+  }
+  if (config.show_notifications !== false) {
+    cards.push(...notificationDetailPopups(detailFilters, hass));
+  }
   return dashboard;
 }
 
