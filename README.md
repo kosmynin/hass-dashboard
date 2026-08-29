@@ -9,7 +9,7 @@ Ein gemeinsames HACS-Custom-Integration-Paket für das deutsche Smartphone-Dashb
 2. Home Assistant neu starten.
 3. Unter **Einstellungen → Geräte & Dienste → Integration hinzufügen** „Smartphone Dashboard“ wählen.
 4. Unter **Einstellungen → Dashboards → Ressourcen** verbindlich das Modul
-   `/smartphone-dashboard/smartphone-dashboard-loader.js?v=22.0.2` eintragen.
+   `/smartphone-dashboard/smartphone-dashboard-loader.js?v=22.0.3` eintragen.
 5. Eine alte `/local/smartphone-dashboard-loader.js`-Resource entfernen, damit
    nicht zwei Versionen konkurrieren.
 6. Home Assistant neu starten, Browserdaten aktualisieren und das primäre
@@ -21,6 +21,12 @@ Integration injiziert den Loader zusätzlich als Komfortfunktion; wegen des
 bekannten Cold-load-Rennens bei Custom-Strategies ist die Resource-Eintragung
 oben trotzdem verbindlich. Bei YAML-Lovelace dieselbe URL unter
 `lovelace.resources` eintragen.
+
+Home Assistant lädt Custom-Ressourcen derzeit parallel und wartet nur fünf
+Sekunden auf eine Strategy. Trifft dieser bekannte Frontend-Fehler trotz des
+kleinen Sofort-Loaders ein, erkennt v22.0.3 die zugehörige Fehlerkarte und lädt
+die Dashboard-Seite genau einmal neu. Eine Session-Sperre verhindert
+Reload-Schleifen.
 
 Der berechtigungsgefilterte Backend-Lesezugriff für die erste Strategy-Erzeugung
 hat ein Zeitlimit von 1,5 Sekunden. Bei Timeout werden ausschließlich explizite

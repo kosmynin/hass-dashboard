@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.2";
+const STRATEGY_VERSION = "22.0.3";
 const CONFIG_VERSION = 22;
 let cachedDisplayNotificationConfig;
 const NOTIFICATION_HELPERS = {

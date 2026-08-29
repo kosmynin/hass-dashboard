@@ -6,7 +6,9 @@
 const TYPE = "smartphone-dashboard";
 const ELEMENT = `ll-strategy-dashboard-${TYPE}`;
 const LEGACY_ELEMENT = `ll-strategy-${TYPE}`;
-const CORE_URL = new URL("./smartphone-dashboard-strategy.js?v=22.0.2", import.meta.url).href;
+const VERSION = "22.0.3";
+const CORE_URL = new URL(`./smartphone-dashboard-strategy.js?v=${VERSION}`, import.meta.url).href;
+const RECOVERY_KEY = `smartphone-dashboard:timeout-reload:${VERSION}:${location.pathname}`;
 
 let corePromise;
 
@@ -15,12 +17,21 @@ function loadCore() {
   return corePromise;
 }
 
+function clearRecoveryMarker() {
+  try {
+    sessionStorage.removeItem(RECOVERY_KEY);
+  } catch (_error) {
+    // Session Storage kann in besonders restriktiven Browserprofilen gesperrt sein.
+  }
+}
+
 class SmartphoneDashboardLoader extends HTMLElement {
   static getCreateSuggestions() {
     return { title: "Handy", icon: "mdi:cellphone" };
   }
 
   static async generate(config, hass) {
+    clearRecoveryMarker();
     const core = await loadCore();
     return core.SmartphoneDashboardStrategy.generate(config, hass);
   }
@@ -52,6 +63,32 @@ if (!window.customStrategies.some((item) => item.type === TYPE)) {
   });
 }
 
+function containsStrategyTimeout(root) {
+  const text = root.textContent || "";
+  if (text.includes("Timeout waiting for strategy element") && text.includes(ELEMENT)) {
+    return true;
+  }
+  for (const element of root.querySelectorAll?.("*") || []) {
+    if (element.shadowRoot && containsStrategyTimeout(element.shadowRoot)) return true;
+  }
+  return false;
+}
+
+function recoverLateRegistration() {
+  // HA wartet derzeit nur fünf Sekunden und lädt Ressourcen parallel. Nur nach
+  // diesem Zeitfenster nach der exakt zugehörigen Fehlerkarte suchen.
+  if (performance.now() < 4500 || !containsStrategyTimeout(document)) return;
+  try {
+    if (sessionStorage.getItem(RECOVERY_KEY)) return;
+    sessionStorage.setItem(RECOVERY_KEY, "1");
+  } catch (_error) {
+    return;
+  }
+  console.warn("Smartphone-Dashboard: verspätete Strategy-Registrierung erkannt; einmaliger Reload");
+  location.reload();
+}
+
 // Download früh starten, ohne die sofortige Registrierung zu verzögern.
 void loadCore();
-console.info("Smartphone-Dashboard-Loader v22.0.2 registriert");
+for (const delay of [0, 250, 1000, 2500]) setTimeout(recoverLateRegistration, delay);
+console.info(`Smartphone-Dashboard-Loader v${VERSION} registriert`);
