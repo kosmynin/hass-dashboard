@@ -2,7 +2,57 @@ import assert from "node:assert/strict";
 globalThis.HTMLElement = class { attachShadow() { this.shadowRoot = { activeElement: null, querySelector: () => null, querySelectorAll: () => [] }; return this.shadowRoot; } dispatchEvent() {} };
 globalThis.customElements = { registry: new Map(), get(name) { return this.registry.get(name); }, define(name, value) { this.registry.set(name, value); }, whenDefined() { return Promise.resolve(); } };
 globalThis.window = globalThis;
-const { SmartphoneDashboardStrategy, SmartphoneDashboardStrategyEditor, partitionConflictPatch, applyNotificationOptions, mergeBackendNotifications } = await import("../custom_components/smartphone_dashboard/frontend/smartphone-dashboard-strategy.js");
+const { SmartphoneDashboardStrategy, SmartphoneDashboardStrategyEditor, partitionConflictPatch, applyNotificationOptions, mergeBackendNotifications, detectedRooms, applyRoomOptions, configuredFeatures } = await import("../custom_components/smartphone_dashboard/frontend/smartphone-dashboard-strategy.js");
+
+const roomHass = {
+  states: { "light.kitchen": { state: "off", attributes: { friendly_name: "Küche" } } },
+  areas: { kitchen: { area_id: "kitchen", name: "Küche", icon: "mdi:silverware-fork-knife" } },
+  devices: {},
+  entities: { kitchen_light: { entity_id: "light.kitchen", area_id: "kitchen" } },
+};
+const sanitizedRooms = detectedRooms(roomHass, [{
+  area_id: "kitchen",
+  main_light: "light.removed",
+  hidden_entities: ["sensor.removed"],
+}]);
+assert.equal(sanitizedRooms[0].main_light, "light.kitchen");
+assert.deepEqual(sanitizedRooms[0].hidden_entities, []);
+const roomDashboard = { views: [{ sections: [{ cards: [
+  { type: "custom:bubble-card", card_type: "separator", name: "Räume" },
+  { type: "grid", columns: 2, cards: [] },
+] }] }] };
+applyRoomOptions(roomDashboard, { rooms: sanitizedRooms }, roomHass);
+const roomCard = roomDashboard.views[0].sections[0].cards[1].cards[0];
+assert.equal(roomCard.type, "custom:bubble-card");
+assert.equal(roomCard.button_type, "slider");
+assert.equal(roomCard.entity, "light.kitchen");
+assert.equal("template" in roomCard, false);
+
+const personDashboard = await SmartphoneDashboardStrategy.generate({}, {
+  states: { "person.boris": { state: "home", attributes: { friendly_name: "Boris" } } },
+  areas: {}, devices: {}, entities: {}, services: {},
+});
+const personCards = personDashboard.views[0].sections[0].cards;
+const personHeadingIndex = personCards.findIndex((card) => card.heading === "Personen");
+assert.notEqual(personHeadingIndex, -1);
+assert.equal(personCards[personHeadingIndex + 1].cards[0].entity, "person.boris");
+
+const staleFeatures = configuredFeatures({ features: {
+  media: { auto_discover: false, entities: ["media_player.removed"] },
+  printer: { auto_discover: false, printer_ids: ["removed-printer"] },
+} }, { states: {}, devices: {}, entities: {} });
+assert.deepEqual(staleFeatures.find((item) => item.key === "media").entities, []);
+assert.deepEqual(staleFeatures.find((item) => item.key === "printer").printer_ids, []);
+
+const navigationDashboard = await SmartphoneDashboardStrategy.generate({}, {
+  states: { "media_player.living_room": { state: "idle", attributes: { friendly_name: "Wohnzimmer" } } },
+  areas: {}, devices: {}, entities: {}, services: {},
+});
+const navigationCards = navigationDashboard.views[0].sections[0].cards;
+const navigationHeadingIndex = navigationCards.findIndex((card) => card.name === "Weitere Bereiche");
+assert.notEqual(navigationHeadingIndex, -1);
+assert.equal(navigationCards[navigationHeadingIndex + 1].type, "grid");
+assert.equal(navigationCards[navigationHeadingIndex + 1].cards[0].name, "Medien");
 
 const first = partitionConflictPatch({ A: "local", B: 2 }, { A: "remote", B: 1 }, { A: "base", B: 1 });
 assert.deepEqual(first.overlap, ["A"]);
@@ -26,8 +76,19 @@ const dashboard = { views: [{ sections: [{ cards: [
 applyNotificationOptions(dashboard, { notification_batteries: false, notification_contacts: true, notification_co2: true }, { states: {} });
 const filters = dashboard.views[0].sections[0].cards[1].filter.include;
 assert.equal(filters.some((item) => item.entity_id === "sensor.*battery" || item.attributes?.device_class === "battery"), false);
-assert.equal(filters.find((item) => item.entity_id === "binary_sensor.*contact").last_changed, ">15");
+assert.equal(filters.find((item) => item.entity_id === "binary_sensor.*contact").last_changed, "> 15");
+assert.equal(filters.find((item) => item.entity_id === "binary_sensor.*contact").state, "on");
 assert.equal(filters.find((item) => item.entity_id === "sensor.*co2*").state, "> 1000");
+const ninaDashboard = { views: [{ sections: [{ cards: [
+  { type: "heading", heading: "Meldungen" },
+  { type: "custom:auto-entities", filter: { include: [
+    { entity_id: "binary_sensor.nina_warning_*", state: "on", options: { styles: "headline description" } },
+  ], exclude: [] } },
+] }] }] };
+applyNotificationOptions(ninaDashboard, { notification_nina: true, nina_entities: "binary_sensor.nina_warning_*" }, { states: {} });
+const ninaFilter = ninaDashboard.views[0].sections[0].cards[1].filter.include[0];
+assert.equal(ninaFilter.state, "on");
+assert.match(ninaFilter.options.styles, /headline/);
 
 assert.deepEqual(mergeBackendNotifications({ notification_batteries: true, title: "Explizit" }, { notification_batteries: false, notification_contacts: false, title: "Backend" }), { notification_batteries: true, notification_contacts: false, title: "Explizit" });
 const generated = await SmartphoneDashboardStrategy.generate({ backend_key: "default" }, {
@@ -43,6 +104,8 @@ assert.equal(generatedFilters.some((item) => item.entity_id === "sensor.*battery
 assert.equal(generatedFilters.some((item) => item.entity_id === "sensor.waste"), true);
 assert.equal(generatedFilters.some((item) => item.entity_id === "sensor.ups"), true);
 assert.equal(generatedFilters.some((item) => item.entity_id === "sensor.frost"), true);
+assert.equal(generatedFilters.find((item) => item.entity_id === "sensor.waste").state, "/.*([Hh]eute|[Mm]orgen).*/");
+assert.deepEqual(generatedFilters.find((item) => item.entity_id === "sensor.ups").not, { state: "/^(ONLINE|Online|online)$/" });
 const generatedAuto = generated.views[0].sections[0].cards.find((card) => card.type === "custom:auto-entities");
 assert.equal(generatedAuto.card.type, "vertical-stack");
 assert.equal(generatedAuto.card_param, "cards");

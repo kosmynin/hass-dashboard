@@ -6,7 +6,7 @@
 const TYPE = "smartphone-dashboard";
 const ELEMENT = `ll-strategy-dashboard-${TYPE}`;
 const LEGACY_ELEMENT = `ll-strategy-${TYPE}`;
-const VERSION = "22.0.3";
+const VERSION = "22.0.4";
 const CORE_URL = new URL(`./smartphone-dashboard-strategy.js?v=${VERSION}`, import.meta.url).href;
 const RECOVERY_KEY = `smartphone-dashboard:timeout-reload:${VERSION}:${location.pathname}`;
 

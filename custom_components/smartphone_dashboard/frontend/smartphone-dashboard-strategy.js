@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.3";
+const STRATEGY_VERSION = "22.0.4";
 const CONFIG_VERSION = 22;
 let cachedDisplayNotificationConfig;
 const NOTIFICATION_HELPERS = {
@@ -138,7 +138,20 @@ const BASE_DASHBOARD = {
         { entity_id: "sensor.*abfall", options: { type: "custom:bubble-card", card_type: "button" } },
         { entity_id: "sensor.*ups_status", options: { type: "custom:bubble-card", card_type: "button" } },
         { entity_id: "sensor.*temperature", options: { type: "custom:bubble-card", card_type: "button" } },
-        { entity_id: "binary_sensor.nina_warning_*", options: { type: "custom:bubble-card", card_type: "button" } }
+        { entity_id: "binary_sensor.nina_warning_*", state: "on", options: {
+          type: "custom:bubble-card", card_type: "button", button_type: "state",
+          icon: "mdi:alert-outline", show_state: true,
+          styles: `\${(() => {
+            const entityId = typeof entity === 'string' ? entity : entity?.entity_id;
+            const warning = hass.states[entityId];
+            const headline = warning?.attributes?.headline || warning?.attributes?.friendly_name || 'NINA-Warnung';
+            const description = warning?.attributes?.description || warning?.attributes?.instruction || 'Amtliche Warnung aktiv';
+            const name = card.querySelector('.bubble-name');
+            const state = card.querySelector('.bubble-state');
+            if (name) name.innerText = headline;
+            if (state) state.innerText = description;
+          })()}`,
+        } }
       ], exclude: [] } },
       { type: "heading", heading: "Aktionen", icon: "mdi:gesture-tap" },
       { type: "grid", columns: 2, square: false, cards: [] },
@@ -225,16 +238,28 @@ function detectedRooms(hass, configuredRooms) {
     const current = existing.get(area.area_id);
     const areaEntities = entitiesForArea(hass, area.area_id);
     const firstLight = areaEntities.find((entityId) => entityId.startsWith("light."));
-    return {
+    const configuredLight = String(current?.main_light || "");
+    const mainLight = configuredLight.startsWith("light.") && hass?.states?.[configuredLight]
+      ? configuredLight
+      : firstLight || "";
+    const room = {
       area_id: area.area_id,
       name: area.name,
       icon: area.icon || "mdi:floor-plan",
-      main_light: firstLight || "",
+      main_light: mainLight,
       popup_hash: `#raum-${area.area_id}`,
       enabled: true,
       hidden_entities: [],
       ...current,
     };
+    // Registry-Daten und existierende Zustände sind maßgeblich. Gespeicherte
+    // Entity-IDs können nach Umbenennen oder Entfernen veraltet sein.
+    room.name = area.name;
+    room.main_light = mainLight;
+    room.hidden_entities = Array.isArray(room.hidden_entities)
+      ? room.hidden_entities.filter((entityId) => hass?.states?.[entityId])
+      : [];
+    return room;
   });
 }
 
@@ -292,17 +317,22 @@ function applyPersonOptions(dashboard, config, hass) {
   if (!Array.isArray(config.persons)) return dashboard;
   const cards = dashboard.views?.[0]?.sections?.[0]?.cards;
   if (!Array.isArray(cards)) return dashboard;
-  const index = cards.findIndex(
+  const headingIndex = cards.findIndex((card) => card?.heading === "Personen" || card?.name === "Personen");
+  const legacyIndex = cards.findIndex(
     (card) =>
       card?.type === "horizontal-stack" &&
       card.cards?.some((item) => item?.entity?.startsWith("person.")),
   );
+  const index = headingIndex >= 0 && cards[headingIndex + 1]?.type === "horizontal-stack"
+    ? headingIndex + 1
+    : legacyIndex;
   if (index < 0) return dashboard;
   const persons = detectedPersons(hass, config.persons).filter(
     (person) => person.enabled !== false,
   );
   if (!persons.length) {
-    cards.splice(index, 1);
+    if (headingIndex >= 0 && index === headingIndex + 1) cards.splice(headingIndex, 2);
+    else cards.splice(index, 1);
     return dashboard;
   }
   cards[index] = {
@@ -418,10 +448,12 @@ function applyNotificationOptions(dashboard, config, hass) {
     const entityId = entry.entity_id || "";
     if (["sensor.*battery", "sensor.*batterie"].includes(entityId) || entry.attributes?.device_class === "battery") {
       entry.state = `<= ${batteryThreshold}`;
+      entry.not = { state: "0" };
       return settings.batteries ? [entry] : [];
     }
     if (["binary_sensor.*contact", "binary_sensor.*kontakt"].includes(entityId) || ["door", "window", "opening"].includes(entry.attributes?.device_class)) {
-      entry.last_changed = `>${contactMinutes}`;
+      entry.state = "on";
+      entry.last_changed = `> ${contactMinutes}`;
       return settings.contacts ? [entry] : [];
     }
     if (["sensor.*kohlendioxid", "sensor.*co2*"].includes(entityId) || entry.attributes?.device_class === "carbon_dioxide") {
@@ -429,12 +461,20 @@ function applyNotificationOptions(dashboard, config, hass) {
       return settings.co2 ? [entry] : [];
     }
     if (entityId === "sensor.*abfall") {
-      return settings.waste ? wasteEntities.map((entity_id) => ({ ...entry, entity_id })) : [];
+      return settings.waste ? wasteEntities.map((entity_id) => ({
+        ...entry,
+        entity_id,
+        state: "/.*([Hh]eute|[Mm]orgen).*/",
+      })) : [];
     }
     if (entityId === "sensor.*ups_status") {
       if (emitted.has("ups")) return [];
       emitted.add("ups");
-      return settings.ups ? upsEntities.map((entity_id) => ({ ...entry, entity_id })) : [];
+      return settings.ups ? upsEntities.map((entity_id) => ({
+        ...entry,
+        entity_id,
+        not: { state: "/^(ONLINE|Online|online)$/" },
+      })) : [];
     }
     if (entityId === "sensor.*temperature") {
       entry.entity_id = frostEntity;
@@ -692,30 +732,25 @@ function applyRoomOptions(dashboard, config, hass) {
       type: "grid",
       columns: 2,
       square: false,
-      cards: rooms.map((room) =>
-        room.main_light
-          ? {
-              type: "custom:button-card",
-              template: "bubble_room_tile",
-              entity: room.main_light,
-              variables: {
-                card_name: room.name,
-                card_icon: room.icon,
-                navigation_path: room.popup_hash,
-              },
-            }
-          : {
-              type: "custom:bubble-card",
-              card_type: "button",
-              button_type: "name",
-              name: room.name,
-              icon: room.icon,
-              tap_action: { action: "navigate", navigation_path: room.popup_hash },
-              button_action: {
-                tap_action: { action: "navigate", navigation_path: room.popup_hash },
-              },
-            },
-      ),
+      cards: rooms.map((room) => ({
+        type: "custom:bubble-card",
+        card_type: "button",
+        button_type: room.main_light ? "slider" : "name",
+        name: room.name,
+        icon: room.icon,
+        ...(room.main_light ? {
+          entity: room.main_light,
+          light_slider_type: "brightness",
+          slider_fill_orientation: "left",
+          slider_value_position: "right",
+        } : {}),
+        tap_action: { action: "navigate", navigation_path: room.popup_hash },
+        ...(!room.main_light ? {
+          button_action: {
+            tap_action: { action: "navigate", navigation_path: room.popup_hash },
+          },
+        } : {}),
+      })),
     };
   }
 
@@ -753,17 +788,28 @@ function applyDashboardOptions(dashboard, config) {
   const visible = {
     persons: config.show_persons !== false,
     notifications: config.show_notifications !== false,
-    quickActions: config.show_quick_actions !== false,
+    quick_actions: config.show_quick_actions !== false,
     rooms: config.show_rooms !== false,
     navigation: config.show_navigation !== false,
   };
 
   const filtered = [];
-  let skipNextQuickAction = false;
-  let skipNextRoomGrid = false;
+  const sectionKey = (card) => ({
+    Personen: "persons",
+    Meldungen: "notifications",
+    Aktionen: "quick_actions",
+    Räume: "rooms",
+    "Weitere Bereiche": "navigation",
+  })[card?.heading || card?.name];
 
-  for (const card of cards) {
-    const name = card?.name;
+  for (let index = 0; index < cards.length; index += 1) {
+    const card = cards[index];
+    const key = sectionKey(card);
+    if (key && !visible[key]) {
+      const next = cards[index + 1];
+      if (next && !sectionKey(next) && next?.card_type !== "pop-up") index += 1;
+      continue;
+    }
     const isPersons =
       card?.type === "horizontal-stack" &&
       card.cards?.some((item) => item?.entity?.startsWith("person."));
@@ -777,24 +823,6 @@ function applyDashboardOptions(dashboard, config) {
     if (!visible.persons && isPersons) continue;
     if (!visible.notifications && isNotifications) continue;
     if (!visible.navigation && isNavigation) continue;
-
-    if (!visible.quickActions && name === "Aktionen") {
-      skipNextQuickAction = true;
-      continue;
-    }
-    if (skipNextQuickAction) {
-      skipNextQuickAction = false;
-      continue;
-    }
-
-    if (!visible.rooms && name === "Räume") {
-      skipNextRoomGrid = true;
-      continue;
-    }
-    if (skipNextRoomGrid) {
-      skipNextRoomGrid = false;
-      continue;
-    }
 
     filtered.push(card);
   }
@@ -993,6 +1021,8 @@ function normalizedSystemColors(value) {
 
 function configuredFeatures(config, hass) {
   const configured = config.features && typeof config.features === "object" ? config.features : {};
+  const existingEntities = new Set(Object.keys(hass?.states || {}));
+  const existingDevices = new Set(valuesOf(hass?.devices).map((device) => device.id));
   const requestedHashes = Object.fromEntries(Object.entries(FEATURE_META).map(([key, meta]) => [
     key,
     normalizedNavigationHash(configured[key]?.hash, meta[2]),
@@ -1004,7 +1034,9 @@ function configuredFeatures(config, hass) {
       Array.isArray(item.excluded_printer_ids) ? item.excluded_printer_ids : [],
     );
     const systemGroups = key === "system" ? normalizedSystemGroups(item.system_groups) : [];
-    const manualEntities = Array.isArray(item.entities) ? item.entities.filter(Boolean) : [];
+    const manualEntities = Array.isArray(item.entities)
+      ? item.entities.filter((entityId) => existingEntities.has(entityId))
+      : [];
     const entityRegistry = new Map(
       valuesOf(hass?.entities).map((entry) => [entry.entity_id, entry]),
     );
@@ -1015,7 +1047,7 @@ function configuredFeatures(config, hass) {
         )
       : [];
     const manualPrinterIds = key === "printer" && Array.isArray(item.printer_ids)
-      ? item.printer_ids.filter(Boolean)
+      ? item.printer_ids.filter((deviceId) => existingDevices.has(deviceId))
       : [];
     const automaticPrinterIds = key === "printer" && item.auto_discover !== false
       ? autoBambuPrinterIds(hass).filter((deviceId) => !excludedPrinters.has(deviceId))
@@ -1190,7 +1222,15 @@ function applyDynamicFeatures(dashboard, config, hass) {
     ["Medien", "System", "Alarm", "3D Drucker"].includes(x?.name),
   );
   const cleaned = cards.filter((card) => !legacyHashes.has(card?.hash) && !isOldNavigation(card));
+  const navigationHeadingIndex = cleaned.findIndex((card) => card?.name === "Weitere Bereiche");
+  const removeNavigationBlock = () => {
+    const index = cleaned.findIndex((card) => card?.name === "Weitere Bereiche");
+    if (index < 0) return;
+    const count = cleaned[index + 1]?.type === "grid" ? 2 : 1;
+    cleaned.splice(index, count);
+  };
   if (config.show_navigation === false) {
+    removeNavigationBlock();
     dashboard.views[0].sections[0].cards = cleaned;
     return dashboard;
   }
@@ -1199,6 +1239,7 @@ function applyDynamicFeatures(dashboard, config, hass) {
     .map((item) => ({ ...item, popup_cards: featurePopupCards(item, hass) }))
     .filter((item) => item.popup_cards.length);
   if (!features.length) {
+    removeNavigationBlock();
     dashboard.views[0].sections[0].cards = cleaned;
     return dashboard;
   }
@@ -1212,8 +1253,16 @@ function applyDynamicFeatures(dashboard, config, hass) {
     button_type: "name", name: item.name, icon: item.icon, show_header: true, scrolling_effect: true,
     cards: item.popup_cards,
   }));
-  const popupIndex = cleaned.findIndex((card) => card?.card_type === "pop-up");
-  cleaned.splice(popupIndex < 0 ? cleaned.length : popupIndex, 0, navigation);
+  if (navigationHeadingIndex >= 0 && cleaned[navigationHeadingIndex + 1]?.type === "grid") {
+    cleaned[navigationHeadingIndex + 1] = navigation;
+  } else {
+    const popupIndex = cleaned.findIndex((card) => card?.card_type === "pop-up");
+    const insertionIndex = popupIndex < 0 ? cleaned.length : popupIndex;
+    cleaned.splice(insertionIndex, 0,
+      { type: "custom:bubble-card", card_type: "separator", name: "Weitere Bereiche", icon: "mdi:view-grid-plus-outline" },
+      navigation,
+    );
+  }
   cleaned.push(...popups);
   dashboard.views[0].sections[0].cards = cleaned;
   return dashboard;
@@ -1222,26 +1271,30 @@ function applyDynamicFeatures(dashboard, config, hass) {
 function applyHomeSectionOrder(dashboard, config) {
   const cards = dashboard.views?.[0]?.sections?.[0]?.cards;
   if (!Array.isArray(cards) || !Array.isArray(config.home_sections)) return dashboard;
-  const featureHashes = new Set(Object.entries(FEATURE_META).flatMap(([key, meta]) => [
-    normalizedNavigationHash(config.features?.[key]?.hash, meta[2]),
-    meta[2],
-  ]));
-  const keyOf = (card) => {
+  const headerKey = (card) => {
+    const title = card?.heading || card?.name;
+    if (title === "Personen") return "persons";
+    if (title === "Meldungen") return "notifications";
+    if (title === "Aktionen") return "quick_actions";
+    if (title === "Räume") return "rooms";
+    if (title === "Weitere Bereiche") return "navigation";
+    return undefined;
+  };
+  const standaloneKey = (card) => {
     if (card?.card_type === "pop-up") return "popup";
     if (card?.type === "horizontal-stack" && card.cards?.some((x) => x?.entity?.startsWith("person."))) return "persons";
     if (card?.type === "vertical-stack" && card.cards?.[0]?.name === "Meldungen") return "notifications";
-    if (card?.name === "Aktionen") return "quick_actions";
-    if (card?.name === "Räume") return "rooms";
-    if (card?.type === "grid" && card.cards?.some((x) => featureHashes.has(x?.tap_action?.navigation_path))) return "navigation";
     return "other";
   };
   const blocks = [];
   for (let index = 0; index < cards.length; index += 1) {
     const card = cards[index];
-    const key = keyOf(card);
+    const sectionKey = headerKey(card);
+    const key = sectionKey || standaloneKey(card);
     const block = [card];
-    if (["quick_actions", "rooms"].includes(key) && cards[index + 1] && keyOf(cards[index + 1]) === "other") {
-      block.push(cards[++index]);
+    if (sectionKey && cards[index + 1] && !headerKey(cards[index + 1]) && cards[index + 1]?.card_type !== "pop-up") {
+      block.push(cards[index + 1]);
+      index += 1;
     }
     blocks.push({ key, cards: block, index: blocks.length });
   }
@@ -2737,4 +2790,6 @@ export {
   partitionConflictPatch,
   normalizeNinaGlob,
   synchronizationStatus,
+  detectedRooms,
+  applyRoomOptions,
 };

@@ -10,7 +10,7 @@ def test_manifest_and_hacs():
     hacs = json.loads((ROOT / "hacs.json").read_text())
     assert manifest["domain"] == "smartphone_dashboard"
     assert manifest["config_flow"] is True
-    assert manifest["version"] == "22.0.3"
+    assert manifest["version"] == "22.0.4"
     assert hacs["name"] == "Smartphone Dashboard"
 
 def test_python_syntax_and_runtime_files():
@@ -90,9 +90,16 @@ def test_generic_base_matches_notification_and_quick_action_transformers():
     assert 'show_empty: false' in strategy
     assert 'card_param: "cards"' in strategy
     assert 'entry.state = `<= ${batteryThreshold}`' in strategy
+    assert 'entry.not = { state: "0" }' in strategy
+    assert 'entry.state = "on"' in strategy
+    assert 'state: "/.*([Hh]eute|[Mm]orgen).*/"' in strategy
+    assert 'not: { state: "/^(ONLINE|Online|online)$/" }' in strategy
     assert 'entry["state 1"]' not in strategy
     assert 'card?.heading === "Aktionen"' in strategy
     assert 'hass?.states?.[entityId]' in strategy
+    assert 'template: "bubble_room_tile"' not in strategy
+    assert 'button_type: room.main_light ? "slider" : "name"' in strategy
+    assert 'hass?.states?.[configuredLight]' in strategy
 
 def test_storage_is_dashboard_scoped_and_notification_status_atomic():
     source = (COMPONENT / "config_manager.py").read_text()
