@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.11";
+const STRATEGY_VERSION = "22.0.12";
 const CONFIG_VERSION = 22;
 
 const ACTIVE_ROOM_STYLES = `
@@ -236,10 +236,22 @@ function valuesOf(value) {
   return [];
 }
 
+function entityRegistryEntries(hass) {
+  const entities = hass?.entities;
+  if (Array.isArray(entities)) return entities.filter((entry) => entry?.entity_id);
+  if (!entities || typeof entities !== "object") return [];
+  return Object.entries(entities)
+    .filter(([, entry]) => entry && typeof entry === "object")
+    .map(([entityId, entry]) => ({
+      ...entry,
+      entity_id: entry.entity_id || entityId,
+    }))
+    .filter((entry) => entry.entity_id);
+}
+
 function entityRegistryMap(hass) {
   return new Map(
-    valuesOf(hass?.entities)
-      .filter((entry) => entry?.entity_id)
+    entityRegistryEntries(hass)
       .map((entry) => [entry.entity_id, entry]),
   );
 }
@@ -248,7 +260,8 @@ function isEntityVisible(hass, entityId, registry = entityRegistryMap(hass)) {
   const state = hass?.states?.[entityId];
   if (!state) return false;
   const entry = registry.get(entityId);
-  return !entry?.hidden_by && !entry?.disabled_by && state.attributes?.hidden !== true;
+  return entry?.hidden !== true && !entry?.hidden_by && !entry?.disabled_by &&
+    state.attributes?.hidden !== true;
 }
 
 function hiddenDashboardEntityIds(hass) {
@@ -268,15 +281,13 @@ function normalizeRoomKey(value) {
 
 function entitiesForArea(hass, areaId) {
   const devices = new Map(valuesOf(hass?.devices).map((device) => [device.id, device]));
-  return valuesOf(hass?.entities)
+  const registry = entityRegistryMap(hass);
+  return entityRegistryEntries(hass)
     .filter((entry) => {
       const deviceArea = devices.get(entry.device_id)?.area_id;
       return (
         (entry.area_id || deviceArea) === areaId &&
-        !entry.disabled_by &&
-        !entry.hidden_by &&
-        hass?.states?.[entry.entity_id] &&
-        hass.states[entry.entity_id]?.attributes?.hidden !== true
+        isEntityVisible(hass, entry.entity_id, registry)
       );
     })
     .map((entry) => entry.entity_id)
@@ -431,7 +442,7 @@ function normalizeNinaGlob(value) {
 
 function registryEntityId(hass, domain, uniqueId) {
   const prefix = `${domain}.`;
-  return valuesOf(hass?.entities).find(
+  return entityRegistryEntries(hass).find(
     (entry) =>
       entry?.unique_id === uniqueId &&
       String(entry?.entity_id || "").startsWith(prefix),
@@ -1234,7 +1245,7 @@ function autoBambuPrinterIds(hass) {
     ))
     .map((device) => device.id)
     .filter((deviceId) => deviceId && (!registry.size || visibleDeviceIds.has(deviceId)));
-  const registryDeviceIds = valuesOf(hass?.entities)
+  const registryDeviceIds = entityRegistryEntries(hass)
     .filter((entity) =>
       entity.device_id &&
       isEntityVisible(hass, entity.entity_id, registry) &&
@@ -1716,7 +1727,7 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
     const registrySignature = JSON.stringify([
       valuesOf(hass?.areas).map((x) => [x.area_id, x.name]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
       valuesOf(hass?.devices).map((x) => [x.id, x.area_id, x.manufacturer, x.model, x.name, x.name_by_user]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
-      valuesOf(hass?.entities).map((x) => [x.entity_id, x.area_id, x.device_id, x.disabled_by, x.hidden_by, x.name, x.original_name, x.platform, x.unique_id]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+      entityRegistryEntries(hass).map((x) => [x.entity_id, x.area_id, x.device_id, x.disabled_by, x.hidden_by, x.hidden, x.name, x.original_name, x.platform, x.unique_id]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
       Object.entries(hass?.states || {}).map(([id, state]) => [id, state?.attributes?.friendly_name, state?.attributes?.device_class, state?.attributes?.unit_of_measurement, state?.attributes?.icon]).sort((a, b) => a[0].localeCompare(b[0])),
       Object.keys(hass?.services?.notify || {}).sort(),
     ]);

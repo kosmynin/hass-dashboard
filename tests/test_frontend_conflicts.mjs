@@ -19,8 +19,8 @@ const roomHass = {
   entities: {
     kitchen_light: { entity_id: "light.kitchen", area_id: "kitchen" },
     kitchen_temperature: { entity_id: "sensor.kitchen_temperature", area_id: "kitchen" },
-    kitchen_hidden: { entity_id: "sensor.kitchen_hidden", area_id: "kitchen", hidden_by: "user" },
-    hidden_room_only: { entity_id: "sensor.hidden_room_only", area_id: "hidden_room", hidden_by: "user" },
+    "sensor.kitchen_hidden": { entity_id: "sensor.kitchen_hidden", area_id: "kitchen", hidden: true },
+    "sensor.hidden_room_only": { entity_id: "sensor.hidden_room_only", area_id: "hidden_room", hidden: true },
   },
 };
 const sanitizedRooms = detectedRooms(roomHass, [{
@@ -68,14 +68,14 @@ const visibilityHass = {
   },
   areas: {}, devices: {}, services: {},
   entities: {
-    person_visible: { entity_id: "person.visible" },
-    person_hidden: { entity_id: "person.hidden", hidden_by: "user" },
-    script_visible: { entity_id: "script.visible" },
-    script_hidden: { entity_id: "script.hidden", hidden_by: "user" },
-    media_visible: { entity_id: "media_player.visible" },
-    media_hidden: { entity_id: "media_player.hidden", hidden_by: "integration" },
-    hidden_battery: { entity_id: "sensor.hidden_battery", hidden_by: "user" },
-    disabled_cpu: { entity_id: "sensor.disabled_system_cpu", disabled_by: "integration" },
+    "person.visible": { entity_id: "person.visible" },
+    "person.hidden": { entity_id: "person.hidden", hidden: true },
+    "script.visible": { entity_id: "script.visible" },
+    "script.hidden": { entity_id: "script.hidden", hidden: true },
+    "media_player.visible": { entity_id: "media_player.visible" },
+    "media_player.hidden": { entity_id: "media_player.hidden", hidden_by: "integration" },
+    "sensor.hidden_battery": { hidden: true },
+    "sensor.disabled_system_cpu": { entity_id: "sensor.disabled_system_cpu", disabled_by: "integration" },
   },
 };
 const visibilityDashboard = await SmartphoneDashboardStrategy.generate({

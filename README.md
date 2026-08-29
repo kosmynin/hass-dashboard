@@ -25,6 +25,11 @@ HACS installiert veröffentlichte Versionen aus dem Release-Asset
 `smartphone_dashboard.zip`. Das ZIP enthält direkt den Inhalt der Integration;
 der bewegliche `main`-Branch wird in der Versionsauswahl bewusst ausgeblendet.
 
+Entitäten, deren Home-Assistant-Schalter **Sichtbar** deaktiviert ist, werden in
+keinem automatisch erzeugten Bereich, Pop-up, Schnellzugriff oder Meldefilter
+angezeigt. Änderungen dieser Einstellung werden ohne Dashboard-Neukonfiguration
+übernommen.
+
 Home Assistant lädt Custom-Ressourcen derzeit parallel und wartet nur fünf
 Sekunden auf eine Strategy. Trifft dieser bekannte Frontend-Fehler trotz des
 kleinen Sofort-Loaders ein, erkennt der Loader die zugehörige Fehlerkarte und lädt

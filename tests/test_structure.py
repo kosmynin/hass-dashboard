@@ -10,7 +10,7 @@ def test_manifest_and_hacs():
     hacs = json.loads((ROOT / "hacs.json").read_text())
     assert manifest["domain"] == "smartphone_dashboard"
     assert manifest["config_flow"] is True
-    assert manifest["version"] == "22.0.11"
+    assert manifest["version"] == "22.0.12"
     assert hacs["name"] == "Smartphone Dashboard"
     assert hacs["zip_release"] is True
     assert hacs["filename"] == "smartphone_dashboard.zip"
@@ -123,6 +123,7 @@ def test_generic_base_matches_notification_and_quick_action_transformers():
     assert "ACTIVE_ROOM_STYLES" in strategy
     assert "function isEntityVisible" in strategy
     assert "hiddenDashboardEntityIds(hass)" in strategy
+    assert "entry?.hidden !== true" in strategy
     assert "isEntityVisible(hass, configuredLight)" in strategy
 
 def test_storage_is_dashboard_scoped_and_notification_status_atomic():
