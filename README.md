@@ -48,8 +48,5 @@ der 17 bisherigen Helfer abgelegt.
 
 Siehe [INSTALLATION.md](INSTALLATION.md).
 
-> Das öffentliche HACS-Repository liegt unter
-> `https://github.com/kosmynin/hass-dashboard`. Das GitLab-Projekt
-> `https://gitlab.com/kosmynin/hass-dashboard-strategy` bleibt das
-> Entwicklungsrepository. Beide Repositories werden auf demselben Stand
-> gehalten.
+> Das öffentliche Quell- und HACS-Repository liegt unter
+> `https://github.com/kosmynin/hass-dashboard`.

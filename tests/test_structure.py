@@ -99,8 +99,8 @@ def test_notification_backend_uses_only_default_dashboard_and_revisioned_seed():
 
 def test_public_metadata_and_no_placeholder():
     manifest = json.loads((COMPONENT / "manifest.json").read_text())
-    assert manifest["documentation"] == "https://gitlab.com/kosmynin/hass-dashboard-strategy"
-    assert manifest["issue_tracker"].endswith("/-/issues")
+    assert manifest["documentation"] == "https://github.com/kosmynin/hass-dashboard"
+    assert manifest["issue_tracker"] == "https://github.com/kosmynin/hass-dashboard/issues"
     assert manifest["codeowners"] == ["@kosmynin"]
     for path in ROOT.rglob("*"):
         if path.is_file() and "__pycache__" not in path.parts:

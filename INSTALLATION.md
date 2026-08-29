@@ -6,9 +6,8 @@ HACS-Repository:
 `https://github.com/kosmynin/hass-dashboard`
 
 Dieses öffentliche Repository in HACS als benutzerdefiniertes Repository vom
-Typ **Integration** eintragen. Das Entwicklungsrepository liegt unter
-`https://gitlab.com/kosmynin/hass-dashboard-strategy`; beide `main`-Branches
-werden gemeinsam veröffentlicht. Der Codeowner ist `@kosmynin`.
+Typ **Integration** eintragen. Quellcode, Releases und Fehlerberichte werden
+vollständig über GitHub verwaltet. Der Codeowner ist `@kosmynin`.
 
 HACS installiert ausschließlich `custom_components/smartphone_dashboard`, daher liegen alle Laufzeitdateien einschließlich Frontend innerhalb dieses Ordners. Nach Updates Home Assistant neu starten und den Browser hart neu laden.
 
