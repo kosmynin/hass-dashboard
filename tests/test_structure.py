@@ -10,10 +10,14 @@ def test_manifest_and_hacs():
     hacs = json.loads((ROOT / "hacs.json").read_text())
     assert manifest["domain"] == "smartphone_dashboard"
     assert manifest["config_flow"] is True
-    assert manifest["version"] == "22.0.10"
+    assert manifest["version"] == "22.0.11"
     assert hacs["name"] == "Smartphone Dashboard"
+    assert hacs["zip_release"] is True
+    assert hacs["filename"] == "smartphone_dashboard.zip"
+    assert hacs["hide_default_branch"] is True
     release = (ROOT / ".github/workflows/release.yml").read_text()
     assert 'tags:' in release and 'gh release create' in release
+    assert 'smartphone_dashboard.zip' in release and 'unzip -t' in release
 
 def test_python_syntax_and_runtime_files():
     for path in COMPONENT.glob("*.py"):

@@ -28,11 +28,22 @@ jobs:
               raise SystemExit(
                   f"Tag {tag} stimmt nicht mit Manifest {manifest['version']} überein"
               )
+      - name: HACS-Paket bauen
+        working-directory: custom_components/smartphone_dashboard
+        run: >-
+          zip -r "${GITHUB_WORKSPACE}/smartphone_dashboard.zip" .
+          -x '*/__pycache__/*' '*.pyc'
+      - name: HACS-Paket prüfen
+        run: |
+          unzip -t smartphone_dashboard.zip
+          unzip -Z1 smartphone_dashboard.zip | grep -Fxq 'manifest.json'
+          unzip -Z1 smartphone_dashboard.zip | grep -Fxq 'frontend/smartphone-dashboard-loader.js'
       - name: GitHub-Release erstellen
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
           gh release create "${GITHUB_REF_NAME}"
+          smartphone_dashboard.zip
           --verify-tag
           --title "Smartphone Dashboard ${GITHUB_REF_NAME}"
           --generate-notes
