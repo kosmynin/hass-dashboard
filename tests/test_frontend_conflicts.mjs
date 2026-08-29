@@ -87,8 +87,11 @@ const visibilityDashboard = await SmartphoneDashboardStrategy.generate({
   },
 }, visibilityHass);
 const visibilityCards = visibilityDashboard.views[0].sections[0].cards;
-const visibilityPersonHeading = visibilityCards.findIndex((card) => card.heading === "Personen");
-assert.deepEqual(visibilityCards[visibilityPersonHeading + 1].cards.map((card) => card.entity), ["person.visible"]);
+assert.equal(visibilityCards.some((card) => card.heading === "Personen"), false);
+const visibilityPersons = visibilityCards.find((card) =>
+  card.type === "horizontal-stack" && card.cards?.some((item) => item.entity?.startsWith("person."))
+);
+assert.deepEqual(visibilityPersons.cards.map((card) => card.entity), ["person.visible"]);
 assert.equal(visibilityCards.some((card) => card.entity === "script.visible"), true);
 assert.equal(visibilityCards.some((card) => card.entity === "script.hidden"), false);
 const mediaPopup = visibilityCards.find((card) => card.hash === "#medien");
@@ -104,9 +107,18 @@ const personDashboard = await SmartphoneDashboardStrategy.generate({}, {
   areas: {}, devices: {}, entities: {}, services: {},
 });
 const personCards = personDashboard.views[0].sections[0].cards;
-const personHeadingIndex = personCards.findIndex((card) => card.heading === "Personen");
-assert.notEqual(personHeadingIndex, -1);
-assert.equal(personCards[personHeadingIndex + 1].cards[0].entity, "person.boris");
+assert.equal(personCards.some((card) => card.heading === "Personen"), false);
+const personStack = personCards.find((card) =>
+  card.type === "horizontal-stack" && card.cards?.some((item) => item.entity?.startsWith("person."))
+);
+assert.equal(personStack.cards[0].entity, "person.boris");
+
+const hiddenPersonsDashboard = await SmartphoneDashboardStrategy.generate({ show_persons: false }, {
+  states: { "person.boris": { state: "home", attributes: { friendly_name: "Boris" } } },
+  areas: {}, devices: {}, entities: {}, services: {},
+});
+assert.equal(JSON.stringify(hiddenPersonsDashboard).includes("person.boris"), false);
+assert.equal(JSON.stringify(hiddenPersonsDashboard).includes('"heading":"Personen"'), false);
 
 const staleFeatures = configuredFeatures({ features: {
   media: { auto_discover: false, entities: ["media_player.removed"] },

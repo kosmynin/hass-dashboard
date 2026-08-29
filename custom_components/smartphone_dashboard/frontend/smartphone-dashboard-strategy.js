@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.12";
+const STRATEGY_VERSION = "22.0.13";
 const CONFIG_VERSION = 22;
 
 const ACTIVE_ROOM_STYLES = `
@@ -417,6 +417,10 @@ function applyPersonOptions(dashboard, config, hass) {
     type: "horizontal-stack",
     cards: persons.map(createPersonCard),
   };
+  // Die Überschrift dient im Basislayout nur als eindeutiger Platzhalter für
+  // die Generierung. Im fertigen Smartphone-Dashboard stehen die kompakten
+  // Personenkarten ohne zusätzlichen Titel.
+  if (headingIndex >= 0 && index === headingIndex + 1) cards.splice(headingIndex, 1);
   return dashboard;
 }
 
