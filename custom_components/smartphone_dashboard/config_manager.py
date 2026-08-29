@@ -46,7 +46,11 @@ class ConfigManager:
     async def async_import_legacy_helpers(self) -> dict[str, Any]:
         async with self._lock:
             previous_data = deepcopy(self.data)
-            snapshot = {entity_id: self.hass.states[entity_id].state for entity_id in HELPER_ENTITY_IDS if entity_id in self.hass.states and self.hass.states[entity_id].state not in ("unknown", "unavailable")}
+            snapshot: dict[str, str] = {}
+            for entity_id in HELPER_ENTITY_IDS:
+                state = self.hass.states.get(entity_id)
+                if state is not None and state.state not in ("unknown", "unavailable"):
+                    snapshot[entity_id] = state.state
             self.data["legacy_helpers"] = snapshot
             seeded_fields = set(self.data.get("migration", {}).get("seeded_fields", []))
             if snapshot:

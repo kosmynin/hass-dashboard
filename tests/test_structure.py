@@ -10,7 +10,7 @@ def test_manifest_and_hacs():
     hacs = json.loads((ROOT / "hacs.json").read_text())
     assert manifest["domain"] == "smartphone_dashboard"
     assert manifest["config_flow"] is True
-    assert manifest["version"] == "22.0.0"
+    assert manifest["version"] == "22.0.1"
     assert hacs["name"] == "Smartphone Dashboard"
 
 def test_python_syntax_and_runtime_files():
@@ -38,11 +38,17 @@ def test_storage_is_non_destructive_and_idempotent_by_design():
 
 def test_ws_contract_and_lifecycle():
     source = (COMPONENT / "__init__.py").read_text()
+    assert "CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)" in source
     assert "require_admin" in source
     assert 'vol.Required("revision")' in source
     assert "65536" in source and "level > 12" in source
     assert "async_stop()" in source and '"not_loaded"' in source
     assert "dashboard_key" in source and "quick_actions enthält eine ungültige Script-Entity" in source
+
+def test_legacy_import_uses_state_machine_get_api():
+    source = (COMPONENT / "config_manager.py").read_text()
+    assert "self.hass.states.get(entity_id)" in source
+    assert "self.hass.states[entity_id]" not in source
 
 def test_backend_notifications_are_active_and_legacy_yaml_is_not():
     runtime = (COMPONENT / "notification.py").read_text()
@@ -105,3 +111,8 @@ def test_public_metadata_and_no_placeholder():
     for path in ROOT.rglob("*"):
         if path.is_file() and "__pycache__" not in path.parts:
             assert ("CHANGE" + "_ME") not in path.read_text(errors="ignore")
+
+def test_local_brand_icon_exists():
+    icon = COMPONENT / "brand/icon.png"
+    assert icon.is_file()
+    assert icon.stat().st_size > 1024

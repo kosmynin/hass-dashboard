@@ -12,9 +12,12 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.auth.permissions.const import POLICY_READ
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import config_validation as cv
 from .config_manager import ConfigManager
 from .notification import NotificationCoordinator
 from .const import DOMAIN, FRONTEND_DIR, MODULE_URL, STATIC_URL, VERSION
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     """Register authenticated backend API and the embedded frontend."""
