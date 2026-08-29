@@ -1,13 +1,13 @@
 /**
  * Smartphone-Dashboard-Strategie für Home Assistant
  *
- * Als Integrations-Resource über /smartphone-dashboard/smartphone-dashboard-loader.js laden.
+ * Wird vom Integrations-Loader aus demselben versionsabhängigen Pfad geladen.
  */
 
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.5";
+const STRATEGY_VERSION = "22.0.6";
 const CONFIG_VERSION = 22;
 let cachedDisplayNotificationConfig;
 const NOTIFICATION_POPUPS = {

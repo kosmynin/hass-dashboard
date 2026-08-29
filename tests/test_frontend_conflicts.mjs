@@ -180,3 +180,27 @@ await new Promise((resolve) => setTimeout(resolve, 350));
 assert.equal(casCalls, 3);
 assert.equal(casEditor._backendBase.A, 0);
 assert.equal(casEditor._pendingBackendPatch.A, 1);
+
+class OldStrategy extends HTMLElement {
+  static async generate() { return { old: true }; }
+}
+class OldEditor extends HTMLElement {}
+const oldGenerate = OldStrategy.generate;
+customElements.registry.set("ll-strategy-dashboard-smartphone-dashboard", OldStrategy);
+customElements.registry.set("ll-strategy-smartphone-dashboard", class extends OldStrategy {});
+customElements.registry.set("smartphone-dashboard-strategy-editor", OldEditor);
+globalThis.location = { pathname: "/handy", reload() {} };
+globalThis.document = { textContent: "", querySelectorAll: () => [] };
+globalThis.sessionStorage = { getItem: () => null, setItem() {}, removeItem() {} };
+const nativeSetTimeout = globalThis.setTimeout;
+globalThis.setTimeout = () => 0;
+await import("../custom_components/smartphone_dashboard/frontend/smartphone-dashboard-loader.js");
+const upgradedStrategy = customElements.get("ll-strategy-dashboard-smartphone-dashboard");
+assert.equal(upgradedStrategy, OldStrategy);
+assert.notEqual(upgradedStrategy.generate, oldGenerate);
+const upgradedDashboard = await upgradedStrategy.generate({}, {
+  states: {}, areas: {}, devices: {}, entities: {}, services: {},
+});
+assert.equal(upgradedDashboard.title, "Handy");
+assert.equal(typeof OldEditor.prototype.setConfig, "function");
+globalThis.setTimeout = nativeSetTimeout;

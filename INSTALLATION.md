@@ -11,10 +11,11 @@ vollständig über GitHub verwaltet. Der Codeowner ist `@kosmynin`.
 
 HACS installiert ausschließlich `custom_components/smartphone_dashboard`, daher liegen alle Laufzeitdateien einschließlich Frontend innerhalb dieses Ordners. Nach Updates Home Assistant neu starten und den Browser hart neu laden.
 
-Der statische Pfad nutzt `hass.http.async_register_static_paths`. Trage
-`/smartphone-dashboard/smartphone-dashboard-loader.js?v=22.0.5` verbindlich als
-Modul-Resource ein und entferne die alte `/local/...`-Resource. Es wird
-absichtlich nicht automatisch in Lovelace-Resource-Storage geschrieben.
+Der statische Pfad nutzt `hass.http.async_register_static_paths`. Die Integration
+injiziert automatisch einen versionsabhängigen Pfad nach dem Muster
+`/smartphone-dashboard/v22.0.6/smartphone-dashboard-loader.js`. Entferne alle
+manuellen `/smartphone-dashboard/...`- und `/local/...`-Ressourcen, damit keine
+alte Datei zuerst das Custom Element registriert.
 
 Bei einem kalten Browserstart kann Home Assistants festes Fünf-Sekunden-Limit
 für Custom-Strategies vor dem Ressourcen-Loader ablaufen. Der Loader erkennt

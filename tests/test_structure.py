@@ -10,7 +10,7 @@ def test_manifest_and_hacs():
     hacs = json.loads((ROOT / "hacs.json").read_text())
     assert manifest["domain"] == "smartphone_dashboard"
     assert manifest["config_flow"] is True
-    assert manifest["version"] == "22.0.5"
+    assert manifest["version"] == "22.0.6"
     assert hacs["name"] == "Smartphone Dashboard"
 
 def test_python_syntax_and_runtime_files():
@@ -70,6 +70,9 @@ def test_one_runtime_version():
     assert f'STRATEGY_VERSION = "{version}"' in (COMPONENT / "frontend/smartphone-dashboard-strategy.js").read_text()
     assert f'const VERSION = "{version}"' in (COMPONENT / "frontend/smartphone-dashboard-loader.js").read_text()
     assert "?v=${VERSION}" in (COMPONENT / "frontend/smartphone-dashboard-loader.js").read_text()
+    constants = (COMPONENT / "const.py").read_text()
+    assert 'STATIC_URL = f"/smartphone-dashboard/v{VERSION}"' in constants
+    assert 'MODULE_URL = f"{STATIC_URL}/smartphone-dashboard-loader.js"' in constants
 
 def test_loader_recovers_exact_strategy_timeout_once():
     loader = (COMPONENT / "frontend/smartphone-dashboard-loader.js").read_text()
@@ -79,6 +82,9 @@ def test_loader_recovers_exact_strategy_timeout_once():
     assert "sessionStorage.setItem(RECOVERY_KEY" in loader
     assert "location.reload()" in loader
     assert "clearRecoveryMarker();" in loader
+    assert "installImplementation(ELEMENT, SmartphoneDashboardLoader)" in loader
+    assert "updateConstructor(existing, implementation)" in loader
+    assert "installImplementation(EDITOR_ELEMENT" in loader
 
 def test_generic_base_matches_notification_and_quick_action_transformers():
     strategy = (COMPONENT / "frontend/smartphone-dashboard-strategy.js").read_text()

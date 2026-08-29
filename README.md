@@ -8,19 +8,18 @@ Ein gemeinsames HACS-Custom-Integration-Paket für das deutsche Smartphone-Dashb
    Repository vom Typ **Integration** hinzufügen und installieren.
 2. Home Assistant neu starten.
 3. Unter **Einstellungen → Geräte & Dienste → Integration hinzufügen** „Smartphone Dashboard“ wählen.
-4. Unter **Einstellungen → Dashboards → Ressourcen** verbindlich das Modul
-   `/smartphone-dashboard/smartphone-dashboard-loader.js?v=22.0.5` eintragen.
-5. Eine alte `/local/smartphone-dashboard-loader.js`-Resource entfernen, damit
-   nicht zwei Versionen konkurrieren.
-6. Home Assistant neu starten, Browserdaten aktualisieren und das primäre
+4. Unter **Einstellungen → Dashboards → Ressourcen** alle manuellen Einträge für
+   `smartphone-dashboard-loader.js` entfernen. Die Integration registriert den
+   versionsabhängigen Modulpfad automatisch.
+5. Home Assistant neu starten, Browserdaten aktualisieren und das primäre
    Dashboard mit `strategy: {type: custom:smartphone-dashboard, backend_key: default}`
    anlegen. Dieses Dashboard ist für die globalen Benachrichtigungen maßgeblich.
 
-Das Frontend wird über einen offiziellen statischen HTTP-Pfad ausgeliefert. Die
-Integration injiziert den Loader zusätzlich als Komfortfunktion; wegen des
-bekannten Cold-load-Rennens bei Custom-Strategies ist die Resource-Eintragung
-oben trotzdem verbindlich. Bei YAML-Lovelace dieselbe URL unter
-`lovelace.resources` eintragen.
+Das Frontend wird über einen versionsabhängigen statischen HTTP-Pfad ausgeliefert
+und von der Integration automatisch injiziert. Der Versionsanteil liegt im Pfad
+statt nur im Query-Parameter, damit Proxy-, Service-Worker- und Browser-Caches
+bei einem Update garantiert eine neue URL sehen. Alte manuelle Lovelace-
+Ressourcen müssen entfernt werden, damit sie nicht vor der Integration laden.
 
 Home Assistant lädt Custom-Ressourcen derzeit parallel und wartet nur fünf
 Sekunden auf eine Strategy. Trifft dieser bekannte Frontend-Fehler trotz des

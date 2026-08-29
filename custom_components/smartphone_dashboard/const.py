@@ -2,12 +2,12 @@
 from pathlib import Path
 
 DOMAIN = "smartphone_dashboard"
-VERSION = "22.0.5"
+VERSION = "22.0.6"
 STORAGE_KEY = f"{DOMAIN}.config"
 STORAGE_VERSION = 3
 FRONTEND_DIR = Path(__file__).parent / "frontend"
-STATIC_URL = "/smartphone-dashboard"
-MODULE_URL = f"{STATIC_URL}/smartphone-dashboard-loader.js?v={VERSION}"
+STATIC_URL = f"/smartphone-dashboard/v{VERSION}"
+MODULE_URL = f"{STATIC_URL}/smartphone-dashboard-loader.js"
 
 HELPER_ENTITY_IDS = (
     "input_boolean.smartphone_meldung_batterien", "input_boolean.smartphone_meldung_kontakte",

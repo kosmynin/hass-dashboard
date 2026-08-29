@@ -1,20 +1,44 @@
 /**
  * Kleiner Sofort-Loader für die Smartphone-Dashboard-Strategy.
- * Diese Datei als Lovelace-Ressource laden; das Core-Modul liegt daneben.
+ * Wird von der Integration über einen versionsabhängigen Pfad injiziert.
  */
 
 const TYPE = "smartphone-dashboard";
 const ELEMENT = `ll-strategy-dashboard-${TYPE}`;
 const LEGACY_ELEMENT = `ll-strategy-${TYPE}`;
-const VERSION = "22.0.5";
+const VERSION = "22.0.6";
 const CORE_URL = new URL(`./smartphone-dashboard-strategy.js?v=${VERSION}`, import.meta.url).href;
 const RECOVERY_KEY = `smartphone-dashboard:timeout-reload:${VERSION}:${location.pathname}`;
+const EDITOR_ELEMENT = "smartphone-dashboard-strategy-editor";
 
 let corePromise;
 
 function loadCore() {
-  if (!corePromise) corePromise = import(CORE_URL);
+  if (!corePromise) {
+    corePromise = import(CORE_URL).then((core) => {
+      installImplementation(EDITOR_ELEMENT, core.SmartphoneDashboardStrategyEditor);
+      return core;
+    });
+  }
   return corePromise;
+}
+
+function updateConstructor(target, implementation) {
+  for (const [name, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(implementation))) {
+    if (["length", "name", "prototype"].includes(name)) continue;
+    Object.defineProperty(target, name, descriptor);
+  }
+  for (const [name, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(implementation.prototype))) {
+    if (name === "constructor") continue;
+    Object.defineProperty(target.prototype, name, descriptor);
+  }
+}
+
+function installImplementation(tag, implementation) {
+  const existing = customElements.get(tag);
+  if (!existing) customElements.define(tag, implementation);
+  else if (existing !== implementation) updateConstructor(existing, implementation);
+  return customElements.get(tag);
 }
 
 function clearRecoveryMarker() {
@@ -42,16 +66,11 @@ class SmartphoneDashboardLoader extends HTMLElement {
   }
 }
 
-if (!customElements.get(ELEMENT)) {
-  customElements.define(ELEMENT, SmartphoneDashboardLoader);
-}
-
-if (!customElements.get(LEGACY_ELEMENT)) {
-  customElements.define(
-    LEGACY_ELEMENT,
-    class SmartphoneDashboardLegacyLoader extends SmartphoneDashboardLoader {},
-  );
-}
+installImplementation(ELEMENT, SmartphoneDashboardLoader);
+installImplementation(
+  LEGACY_ELEMENT,
+  class SmartphoneDashboardLegacyLoader extends SmartphoneDashboardLoader {},
+);
 
 window.customStrategies = window.customStrategies || [];
 if (!window.customStrategies.some((item) => item.type === TYPE)) {
