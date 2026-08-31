@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.15";
+const STRATEGY_VERSION = "22.0.16";
 const CONFIG_VERSION = 22;
 
 const ACTIVE_ROOM_STYLES = `
@@ -49,8 +49,10 @@ const NINA_SUMMARY_STYLES = `\${(() => {
   const description = warning?.attributes?.description || warning?.attributes?.instruction || 'Amtliche Warnung aktiv';
   const name = card.querySelector('.bubble-name');
   const state = card.querySelector('.bubble-state');
+  const icon = card.querySelector('.bubble-icon');
   if (name) name.innerText = headline;
   if (state) state.innerText = description;
+  if (icon) icon.style.setProperty('color', 'var(--error-color)', 'important');
 })()}`;
 const WASTE_SUMMARY_STYLES = `\${(() => {
   const entityId = typeof entity === 'string' ? entity : entity?.entity_id;
@@ -116,8 +118,20 @@ const WASTE_SUMMARY_STYLES = `\${(() => {
   }
   const name = card.querySelector('.bubble-name');
   const state = card.querySelector('.bubble-state');
+  const icon = card.querySelector('.bubble-icon');
+  const normalizedTypes = types.toLowerCase();
+  const iconColor = /gelb|wertstoff|verpack/.test(normalizedTypes)
+    ? '#FFD700'
+    : /rest|grau/.test(normalizedTypes)
+      ? '#4A4A4A'
+      : /papier|pappe|blau/.test(normalizedTypes)
+        ? '#4169E1'
+        : /bio|braun|organisch/.test(normalizedTypes)
+          ? '#8B4513'
+          : 'var(--primary-text-color)';
   if (name) name.innerText = types;
   if (state) state.innerText = dateLabel ? 'Nächster Termin: ' + dateLabel : 'Kein Termin verfügbar';
+  if (icon) icon.style.setProperty('color', iconColor, 'important');
 })()}`;
 const NOTIFICATION_HELPERS = {
   notification_batteries: "input_boolean.smartphone_meldung_batterien",
@@ -608,6 +622,7 @@ function notificationDetailCard(filters, category, hiddenEntityIds = []) {
             { "grid-template-columns": "42px 1fr" },
           ],
           name: [{ "white-space": "normal" }, { "font-weight": "700" }],
+          icon: [{ color: "var(--error-color)" }],
           label: [{ "white-space": "normal" }, { color: "var(--secondary-text-color)" }],
           custom_fields: {
             description: [{ "white-space": "pre-wrap" }, { "margin-top": "14px" }, { "line-height": "1.45" }],
@@ -649,26 +664,25 @@ function notificationDetailCard(filters, category, hiddenEntityIds = []) {
   };
 }
 
-function notificationDetailPopups(filtersByCategory, hass, hiddenEntityIds = [], wasteDays = 1) {
+function notificationDetailPopups(filtersByCategory, hass, hiddenEntityIds = []) {
   const calendars = notificationCalendarEntities(hass);
   return Object.entries(filtersByCategory).flatMap(([category, filters]) => {
     if (!filters.length || !NOTIFICATION_POPUPS[category]) return [];
     const [hash, name, icon] = NOTIFICATION_POPUPS[category];
-    const cards = [];
+    const cards = [notificationDetailCard(filters, category, hiddenEntityIds)];
     if (category === "waste" && calendars.length) {
       cards.push({
         type: "custom:bubble-card",
         card_type: "calendar",
         entities: calendars.map((entity) => ({ entity, color: "var(--success-color)" })),
-        days: Math.max(1, wasteDays + 1),
-        limit: 4,
+        days: 45,
+        limit: 6,
         card_layout: "normal",
-        rows: 2,
+        rows: 4,
         show_end: false,
         show_progress: false,
       });
     }
-    cards.push(notificationDetailCard(filters, category, hiddenEntityIds));
     return [{
       type: "custom:bubble-card",
       card_type: "pop-up",
@@ -806,7 +820,15 @@ function applyNotificationOptions(dashboard, config, hass) {
       if (emitted.has("nina")) return [];
       emitted.add("nina");
       return settings.nina && Boolean(ninaEntities)
-        ? emit("nina", [{ ...entry, entity_id: ninaEntities }])
+        ? emit("nina", [{
+          ...entry,
+          entity_id: ninaEntities,
+          options: {
+            ...(entry.options || {}),
+            icon: "mdi:alert-outline",
+            styles: NINA_SUMMARY_STYLES,
+          },
+        }])
         : [];
     }
     return [entry];
@@ -822,7 +844,7 @@ function applyNotificationOptions(dashboard, config, hass) {
     if (popupHashes.has(cards[index]?.hash)) cards.splice(index, 1);
   }
   if (config.show_notifications !== false) {
-    cards.push(...notificationDetailPopups(detailFilters, hass, hiddenEntityIds, wasteDays));
+    cards.push(...notificationDetailPopups(detailFilters, hass, hiddenEntityIds));
   }
   return dashboard;
 }

@@ -173,10 +173,12 @@ applyNotificationOptions(ninaDashboard, { notification_nina: true, nina_entities
 const ninaFilter = ninaDashboard.views[0].sections[0].cards[1].filter.include[0];
 assert.equal(ninaFilter.state, "on");
 assert.match(ninaFilter.options.styles, /headline/);
+assert.match(ninaFilter.options.styles, /var\(--error-color\)/);
 assert.equal(ninaFilter.options.tap_action.navigation_path, "#meldung-nina");
 const ninaPopup = ninaDashboard.views[0].sections[0].cards.find((card) => card.hash === "#meldung-nina");
 assert.equal(ninaPopup.cards[0].filter.include[0].options.type, "custom:button-card");
 assert.match(ninaPopup.cards[0].filter.include[0].options.custom_fields.instruction, /instruction/);
+assert.deepEqual(ninaPopup.cards[0].filter.include[0].options.styles.icon, [{ color: "var(--error-color)" }]);
 
 assert.deepEqual(mergeBackendNotifications({ notification_batteries: true, title: "Explizit" }, { notification_batteries: false, notification_contacts: false, title: "Backend" }), { notification_batteries: true, notification_contacts: false, title: "Explizit" });
 const generated = await SmartphoneDashboardStrategy.generate({ backend_key: "default" }, {
@@ -247,13 +249,19 @@ applyNotificationOptions(wasteDashboard, {
   },
 });
 const wastePopup = wasteDashboard.views[0].sections[0].cards.find((card) => card.hash === "#meldung-abfall");
-assert.equal(wastePopup.cards[0].type, "custom:bubble-card");
-assert.equal(wastePopup.cards[0].card_type, "calendar");
-assert.deepEqual(wastePopup.cards[0].entities, [{ entity: "calendar.abfall", color: "var(--success-color)" }]);
-assert.equal(wastePopup.cards[0].limit, 4);
-assert.equal(wastePopup.cards[0].days, 4);
-assert.equal(wastePopup.cards[1].filter.include[0].options.show_state, true);
-assert.match(wastePopup.cards[1].filter.include[0].options.styles, /attributes\.upcoming/);
+assert.equal(wastePopup.cards[0].type, "custom:auto-entities");
+assert.equal(wastePopup.cards[0].filter.include[0].options.show_state, true);
+assert.match(wastePopup.cards[0].filter.include[0].options.styles, /attributes\.upcoming/);
+assert.match(wastePopup.cards[0].filter.include[0].options.styles, /#FFD700/);
+assert.match(wastePopup.cards[0].filter.include[0].options.styles, /#4A4A4A/);
+assert.match(wastePopup.cards[0].filter.include[0].options.styles, /#4169E1/);
+assert.match(wastePopup.cards[0].filter.include[0].options.styles, /#8B4513/);
+assert.equal(wastePopup.cards[1].type, "custom:bubble-card");
+assert.equal(wastePopup.cards[1].card_type, "calendar");
+assert.deepEqual(wastePopup.cards[1].entities, [{ entity: "calendar.abfall", color: "var(--success-color)" }]);
+assert.equal(wastePopup.cards[1].limit, 6);
+assert.equal(wastePopup.cards[1].days, 45);
+assert.equal(wastePopup.cards[1].rows, 4);
 
 const editor = new SmartphoneDashboardStrategyEditor();
 let timerFired = false;

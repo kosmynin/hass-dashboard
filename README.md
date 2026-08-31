@@ -43,8 +43,8 @@ Lovelace-Werte oder der letzte erfolgreich bereinigte Browserwert verwendet.
 Aktive Meldungen öffnen kategoriebasierte Detail-Popups. NINA zeigt dort die
 vollständige Beschreibung und Handlungsempfehlung. Abfallmeldungen zeigen
 Müllart und nächsten Termin, erscheinen nur innerhalb des konfigurierbaren
-Vorlaufs und binden passende `calendar.*`-Entitäten als kompakten
-Bubble-Card-Kalender ein.
+Vorlaufs und binden passende `calendar.*`-Entitäten darunter als kompakten
+Bubble-Card-Kalender mit bis zu sechs Terminen der kommenden 45 Tage ein.
 
 ## Migration und Benachrichtigungen
 
