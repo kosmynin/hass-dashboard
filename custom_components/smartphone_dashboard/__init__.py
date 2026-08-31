@@ -64,7 +64,7 @@ def _valid_config(value: dict[str, Any]) -> dict[str, Any]:
         elif item is not None and not isinstance(item, (str, int, float, bool)):
             raise vol.Invalid("Nicht unterstützter Wert")
     depth(value)
-    numeric_ranges = {"battery_threshold": (1, 100), "contact_minutes": (1, 1440), "co2_threshold": (400, 5000), "frost_threshold": (-30, 20), "max_columns": (1, 4)}
+    numeric_ranges = {"battery_threshold": (1, 100), "contact_minutes": (1, 1440), "co2_threshold": (400, 5000), "frost_threshold": (-30, 20), "waste_days": (0, 30), "max_columns": (1, 4)}
     for key, (minimum, maximum) in numeric_ranges.items():
         if key in value and (isinstance(value[key], bool) or not isinstance(value[key], (int, float)) or not math.isfinite(value[key]) or not minimum <= value[key] <= maximum): raise vol.Invalid(f"{key} ist außerhalb des gültigen Bereichs")
     boolean_keys = ("notification_batteries", "notification_contacts", "notification_co2", "notification_waste", "notification_ups", "notification_frost", "notification_nina")
@@ -139,7 +139,7 @@ PUBLIC_NOTIFICATION_TYPES = {
     "notification_batteries": bool, "notification_contacts": bool, "notification_co2": bool,
     "notification_waste": bool, "notification_ups": bool, "notification_frost": bool,
     "notification_nina": bool, "battery_threshold": (int, float),
-    "contact_minutes": (int, float), "co2_threshold": (int, float), "frost_threshold": (int, float),
+    "contact_minutes": (int, float), "co2_threshold": (int, float), "frost_threshold": (int, float), "waste_days": (int, float),
 }
 DISPLAY_ENTITY_LISTS = ("battery_exclusions", "waste_entities", "ups_entities")
 NINA_GLOB_RE = re.compile(r"^binary_sensor\.[a-zA-Z0-9_]+\*[a-zA-Z0-9_]*$")

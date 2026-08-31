@@ -10,7 +10,7 @@ def test_manifest_and_hacs():
     hacs = json.loads((ROOT / "hacs.json").read_text())
     assert manifest["domain"] == "smartphone_dashboard"
     assert manifest["config_flow"] is True
-    assert manifest["version"] == "22.0.13"
+    assert manifest["version"] == "22.0.14"
     assert hacs["name"] == "Smartphone Dashboard"
     assert hacs["zip_release"] is True
     assert hacs["filename"] == "smartphone_dashboard.zip"
@@ -105,12 +105,13 @@ def test_generic_base_matches_notification_and_quick_action_transformers():
     assert 'entry.state = `<= ${batteryThreshold}`' in strategy
     assert 'entry.not = { state: "0" }' in strategy
     assert 'entry.state = "on"' in strategy
-    assert 'state: "/.*([Hh]eute|[Mm]orgen).*/"' in strategy
+    assert 'attributes: { daysTo: `<= ${wasteDays}` }' in strategy
+    assert 'const dueState =' in strategy
     assert "const UPS_NON_ALERT_STATES" in strategy
     assert 'entity_id.startsWith("binary_sensor.")' in strategy
     assert 'state: problemSensor ? "on" : "off"' in strategy
     assert 'const NOTIFICATION_POPUPS' in strategy
-    assert 'initial_view: "listWeek"' in strategy
+    assert 'card_type: "calendar"' in strategy
     assert 'entity?.attributes?.instruction' in strategy
     assert 'entry["state 1"]' not in strategy
     assert 'card?.heading === "Aktionen"' in strategy

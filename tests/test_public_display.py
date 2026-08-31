@@ -14,10 +14,10 @@ exec(compile(ast.Module(body=nodes, type_ignores=[]), "public-display", "exec"),
 sanitize = namespace["_public_notification_config"]
 
 def test_public_display_is_strictly_sanitized():
-    config = {"notification_batteries": False, "battery_threshold": 7, "notification_recipients": "notify.private", "battery_exclusions": "sensor.allowed,sensor.denied", "frost_entity": "sensor.allowed", "waste_entities": "sensor.allowed,sensor.missing", "ups_entities": ["sensor.denied"], "nina_entities": "binary_sensor.nina_warning_*", "legacy_helpers": {"secret": "x"}, "errors": ["private"]}
+    config = {"notification_batteries": False, "battery_threshold": 7, "waste_days": 3, "notification_recipients": "notify.private", "battery_exclusions": "sensor.allowed,sensor.denied", "frost_entity": "sensor.allowed", "waste_entities": "sensor.allowed,sensor.missing", "ups_entities": ["sensor.denied"], "nina_entities": "binary_sensor.nina_warning_*", "legacy_helpers": {"secret": "x"}, "errors": ["private"]}
     existing = {"sensor.allowed", "sensor.denied", "binary_sensor.nina_warning_allowed"}
     result = sanitize(config, existing, lambda entity_id: entity_id not in {"sensor.denied"})
-    assert result["notification_batteries"] is False and result["battery_threshold"] == 7
+    assert result["notification_batteries"] is False and result["battery_threshold"] == 7 and result["waste_days"] == 3
     assert result["battery_exclusions"] == "sensor.allowed"
     assert result["frost_entity"] == "sensor.allowed"
     assert result["waste_entities"] == "sensor.allowed" and result["ups_entities"] == ""

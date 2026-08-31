@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.13";
+const STRATEGY_VERSION = "22.0.14";
 const CONFIG_VERSION = 22;
 
 const ACTIVE_ROOM_STYLES = `
@@ -52,6 +52,73 @@ const NINA_SUMMARY_STYLES = `\${(() => {
   if (name) name.innerText = headline;
   if (state) state.innerText = description;
 })()}`;
+const WASTE_SUMMARY_STYLES = `\${(() => {
+  const entityId = typeof entity === 'string' ? entity : entity?.entity_id;
+  const waste = hass.states[entityId];
+  const attributes = waste?.attributes || {};
+  const stateText = String(waste?.state || '').trim();
+  const parseDate = (value) => {
+    if (!value) return null;
+    if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+    const text = String(value).trim();
+    let match = text.match(/^(\\d{4})-(\\d{2})-(\\d{2})/);
+    if (match) return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+    match = text.match(/(?:^|\\D)(\\d{1,2})\\.(\\d{1,2})\\.(\\d{4})(?:\\D|$)/);
+    if (match) return new Date(Number(match[3]), Number(match[2]) - 1, Number(match[1]));
+    const parsed = new Date(text);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  };
+  const typeText = (value) => {
+    const values = Array.isArray(value) ? value : value == null ? [] : [value];
+    return values.map((item) => String(item).trim()).filter(Boolean).join(', ');
+  };
+  const dated = Object.entries(attributes).flatMap(([key, value]) => {
+    if (['attribution', 'last_update', 'daysTo', 'days_to', 'icon'].includes(key)) return [];
+    const keyDate = parseDate(key);
+    if (keyDate) return [{ date: keyDate, types: typeText(value) }];
+    const valueDate = parseDate(value);
+    return valueDate ? [{ date: valueDate, types: key }] : [];
+  }).sort((left, right) => left.date - right.date);
+  const upcoming = Array.isArray(attributes.upcoming) ? attributes.upcoming[0] : null;
+  const pickupDate = parseDate(upcoming?.date || attributes.date || attributes.next_date || attributes.start || attributes.start_time) || dated[0]?.date || null;
+  let types = typeText(upcoming?.types || dated[0]?.types || attributes.type || attributes.waste_type || attributes.summary || attributes.subject || attributes.types);
+  if (!types && !/^-?\\d+(?:\\.\\d+)?$/.test(stateText)) {
+    types = stateText
+      .replace(/\\s+in\\s+-?\\d+\\s+(?:days?|tag(?:e|en)?)(?:\\s.*)?$/i, '')
+      .replace(/(?:^|\\s)(?:heute|morgen|today|tomorrow)(?:\\s|$)/ig, ' ')
+      .trim();
+  }
+  if (!types) {
+    types = String(attributes.friendly_name || 'Abfall')
+      .replace(/^Waste Collection Schedule\\s*/i, '')
+      .trim() || 'Abfall';
+  }
+  let days = Number(upcoming?.daysTo ?? attributes.daysTo ?? attributes.days_to);
+  if (!Number.isFinite(days)) {
+    const match = stateText.match(/\\bin\\s+(-?\\d+)\\s+(?:days?|tag(?:e|en)?)\\b/i);
+    if (match) days = Number(match[1]);
+    else if (/^-?\\d+$/.test(stateText)) days = Number(stateText);
+    else if (/\\b(?:heute|today)\\b/i.test(stateText)) days = 0;
+    else if (/\\b(?:morgen|tomorrow)\\b/i.test(stateText)) days = 1;
+  }
+  let dateLabel = '';
+  if (pickupDate) {
+    const today = new Date();
+    const start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const target = new Date(pickupDate.getFullYear(), pickupDate.getMonth(), pickupDate.getDate());
+    const difference = Math.round((target - start) / 86400000);
+    const formatted = target.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' });
+    dateLabel = difference === 0 ? 'heute · ' + formatted : difference === 1 ? 'morgen · ' + formatted : target.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit' });
+  } else if (Number.isFinite(days)) {
+    dateLabel = days === 0 ? 'heute' : days === 1 ? 'morgen' : 'in ' + days + ' Tagen';
+  } else if (stateText && !['unknown', 'unavailable'].includes(stateText.toLowerCase())) {
+    dateLabel = stateText;
+  }
+  const name = card.querySelector('.bubble-name');
+  const state = card.querySelector('.bubble-state');
+  if (name) name.innerText = types;
+  if (state) state.innerText = dateLabel ? 'Nächster Termin: ' + dateLabel : 'Kein Termin verfügbar';
+})()}`;
 const NOTIFICATION_HELPERS = {
   notification_batteries: "input_boolean.smartphone_meldung_batterien",
   notification_contacts: "input_boolean.smartphone_meldung_kontakte",
@@ -71,6 +138,7 @@ const NOTIFICATION_HELPERS = {
   ups_entities: "input_text.smartphone_usv_sensoren",
   nina_entities: "input_text.smartphone_nina_muster",
 };
+const BACKEND_NOTIFICATION_KEYS = [...Object.keys(NOTIFICATION_HELPERS), "waste_days"];
 
 // Sofort registrieren: Home Assistant wartet maximal fünf Sekunden auf das
 // Strategy-Element. Die Funktionsdeklarationen darunter werden beim Aufruf
@@ -139,7 +207,7 @@ function resolveBackendKey(config) {
 
 function mergeBackendNotifications(explicitConfig, backendConfig) {
   const merged = { ...(explicitConfig || {}) };
-  for (const key of Object.keys(NOTIFICATION_HELPERS)) {
+  for (const key of BACKEND_NOTIFICATION_KEYS) {
     if (!Object.prototype.hasOwnProperty.call(merged, key) && Object.prototype.hasOwnProperty.call(backendConfig || {}, key)) merged[key] = backendConfig[key];
   }
   return merged;
@@ -581,7 +649,7 @@ function notificationDetailCard(filters, category, hiddenEntityIds = []) {
   };
 }
 
-function notificationDetailPopups(filtersByCategory, hass, hiddenEntityIds = []) {
+function notificationDetailPopups(filtersByCategory, hass, hiddenEntityIds = [], wasteDays = 1) {
   const calendars = notificationCalendarEntities(hass);
   return Object.entries(filtersByCategory).flatMap(([category, filters]) => {
     if (!filters.length || !NOTIFICATION_POPUPS[category]) return [];
@@ -589,10 +657,15 @@ function notificationDetailPopups(filtersByCategory, hass, hiddenEntityIds = [])
     const cards = [];
     if (category === "waste" && calendars.length) {
       cards.push({
-        type: "calendar",
-        title: "Abfallkalender",
-        initial_view: "listWeek",
-        entities: calendars,
+        type: "custom:bubble-card",
+        card_type: "calendar",
+        entities: calendars.map((entity) => ({ entity, color: "var(--success-color)" })),
+        days: Math.max(1, wasteDays + 1),
+        limit: 4,
+        card_layout: "normal",
+        rows: 2,
+        show_end: false,
+        show_progress: false,
       });
     }
     cards.push(notificationDetailCard(filters, category, hiddenEntityIds));
@@ -635,6 +708,10 @@ function applyNotificationOptions(dashboard, config, hass) {
   const batteryThreshold = Number(notificationSetting(config, hass, "battery_threshold")) || 6;
   const contactMinutes = Number(notificationSetting(config, hass, "contact_minutes")) || 15;
   const co2Threshold = Number(notificationSetting(config, hass, "co2_threshold")) || 1000;
+  const configuredWasteDays = Number(notificationSetting(config, hass, "waste_days"));
+  const wasteDays = Number.isFinite(configuredWasteDays)
+    ? Math.min(30, Math.max(0, Math.trunc(configuredWasteDays)))
+    : 1;
   const frostSetting = notificationSetting(config, hass, "frost_threshold");
   const frostThreshold = Number.isFinite(Number(frostSetting))
     ? Number(frostSetting)
@@ -678,10 +755,26 @@ function applyNotificationOptions(dashboard, config, hass) {
       return settings.co2 ? emit("co2", [entry]) : [];
     }
     if (entityId === "sensor.*abfall") {
+      const dueNumbers = Array.from({ length: wasteDays + 1 }, (_value, index) => index).join("|");
+      const dueWords = wasteDays >= 1
+        ? "[Hh]eute|[Mm]orgen|[Tt]oday|[Tt]omorrow"
+        : "[Hh]eute|[Tt]oday";
+      const dueState = `/(?:${dueWords}|\\bin\\s+(?:${dueNumbers})\\s+(?:[Tt]ag(?:e|en)?|days?)\\b|^(?:${dueNumbers})$)/`;
       const entries = wasteEntities.map((entity_id) => ({
         ...entry,
         entity_id,
-        state: "/.*([Hh]eute|[Mm]orgen).*/",
+        or: [
+          { attributes: { daysTo: `<= ${wasteDays}` }, not: { attributes: { daysTo: "< 0" } } },
+          { attributes: { days_to: `<= ${wasteDays}` }, not: { attributes: { days_to: "< 0" } } },
+          { state: dueState },
+        ],
+        options: {
+          ...(entry.options || {}),
+          button_type: "state",
+          show_state: true,
+          icon: "mdi:trash-can-outline",
+          styles: WASTE_SUMMARY_STYLES,
+        },
       }));
       return settings.waste ? emit("waste", entries) : [];
     }
@@ -729,7 +822,7 @@ function applyNotificationOptions(dashboard, config, hass) {
     if (popupHashes.has(cards[index]?.hash)) cards.splice(index, 1);
   }
   if (config.show_notifications !== false) {
-    cards.push(...notificationDetailPopups(detailFilters, hass, hiddenEntityIds));
+    cards.push(...notificationDetailPopups(detailFilters, hass, hiddenEntityIds, wasteDays));
   }
   return dashboard;
 }
@@ -1698,6 +1791,7 @@ const EDITOR_DEFAULTS = {
   contact_minutes: 15,
   co2_threshold: 1000,
   frost_threshold: 4,
+  waste_days: 1,
   notification_recipients: "",
   battery_exclusions: "",
   frost_entity: "",
@@ -1913,7 +2007,7 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
   _effectiveSetting(key) {
     const helperValue = notificationSetting(this._config, this._hass, key);
     const value = helperValue === undefined ? this._config[key] : helperValue;
-    if (["battery_threshold", "contact_minutes", "co2_threshold", "frost_threshold"].includes(key)) {
+    if (["battery_threshold", "contact_minutes", "co2_threshold", "frost_threshold", "waste_days"].includes(key)) {
       const number = Number(value);
       return Number.isFinite(number) && String(value).trim() !== ""
         ? number
@@ -2725,7 +2819,8 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
             <label class="native-field">Melden nach Minuten<input data-notification-number="contact_minutes" type="number" min="1" max="1440"></label>
             <div class="switch-row"><div class="switch-copy"><div class="switch-title">CO₂</div><div class="switch-description">Hohe CO₂-Werte melden.</div></div><ha-switch data-switch="notification_co2"></ha-switch></div>
             <label class="native-field">CO₂-Grenzwert in ppm<input data-notification-number="co2_threshold" type="number" min="400" max="5000" step="50"></label>
-            <div class="switch-row"><div class="switch-copy"><div class="switch-title">Abfall</div><div class="switch-description">An Abholungen heute und morgen erinnern.</div></div><ha-switch data-switch="notification_waste"></ha-switch></div>
+            <div class="switch-row"><div class="switch-copy"><div class="switch-title">Abfall</div><div class="switch-description">Nur an Abholungen innerhalb des gewählten Vorlaufs erinnern.</div></div><ha-switch data-switch="notification_waste"></ha-switch></div>
+            <label class="native-field">Abfall-Vorlauf in Tagen<input data-notification-number="waste_days" type="number" min="0" max="30"></label>
             <div class="switch-row"><div class="switch-copy"><div class="switch-title">USV</div><div class="switch-description">Abweichenden USV-Status melden.</div></div><ha-switch data-switch="notification_ups"></ha-switch></div>
             <div class="switch-row"><div class="switch-copy"><div class="switch-title">Frostwarnung</div><div class="switch-description">Bei niedriger Außentemperatur warnen.</div></div><ha-switch data-switch="notification_frost"></ha-switch></div>
             <label class="native-field">Frost-Grenzwert in °C<input data-notification-number="frost_threshold" type="number" min="-30" max="20"></label>
@@ -2749,6 +2844,7 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
             <label class="native-field">Batterie-Grenzwert in Prozent<input data-notification-number="battery_threshold" type="number" min="1" max="100"></label>
             <label class="native-field">Kontakt offen seit Minuten<input data-notification-number="contact_minutes" type="number" min="1" max="1440"></label>
             <label class="native-field">CO₂-Grenzwert in ppm<input data-notification-number="co2_threshold" type="number" min="400" max="5000" step="50"></label>
+            <label class="native-field">Abfall-Vorlauf in Tagen<input data-notification-number="waste_days" type="number" min="0" max="30"></label>
             <label class="native-field">Frost-Grenzwert in °C<input data-notification-number="frost_threshold" type="number" min="-30" max="20"></label>
             <div class="entity-title">Automation</div>
             <div data-notify-selector-host></div>

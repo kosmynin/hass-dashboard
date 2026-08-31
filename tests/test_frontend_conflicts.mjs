@@ -184,7 +184,7 @@ const generated = await SmartphoneDashboardStrategy.generate({ backend_key: "def
   callWS: async (request) => {
     assert.equal(request.dashboard_key, "default");
     assert.equal(request.type, "smartphone_dashboard/config/display");
-    return { config: { notification_batteries: false, notification_waste: true, notification_ups: true, notification_frost: true, notification_nina: true, battery_exclusions: "sensor.excluded_battery", waste_entities: "sensor.waste", ups_entities: "sensor.ups", frost_entity: "sensor.frost", nina_entities: "binary_sensor.nina_warning_*" } };
+    return { config: { notification_batteries: false, notification_waste: true, notification_ups: true, notification_frost: true, notification_nina: true, battery_exclusions: "sensor.excluded_battery", waste_entities: "sensor.waste", waste_days: 3, ups_entities: "sensor.ups", frost_entity: "sensor.frost", nina_entities: "binary_sensor.nina_warning_*" } };
   },
 });
 const generatedFilters = generated.views[0].sections[0].cards.find((card) => card.type === "custom:auto-entities").filter.include;
@@ -192,12 +192,16 @@ assert.equal(generatedFilters.some((item) => item.entity_id === "sensor.*battery
 assert.equal(generatedFilters.some((item) => item.entity_id === "sensor.waste"), true);
 assert.equal(generatedFilters.some((item) => item.entity_id === "sensor.ups"), true);
 assert.equal(generatedFilters.some((item) => item.entity_id === "sensor.frost"), true);
-assert.equal(generatedFilters.find((item) => item.entity_id === "sensor.waste").state, "/.*([Hh]eute|[Mm]orgen).*/");
+assert.equal(generatedFilters.find((item) => item.entity_id === "sensor.waste").or[0].attributes.daysTo, "<= 3");
+assert.equal(generatedFilters.find((item) => item.entity_id === "sensor.waste").or[0].not.attributes.daysTo, "< 0");
+assert.match(generatedFilters.find((item) => item.entity_id === "sensor.waste").or[2].state, /days/);
 const upsNormalFilter = generatedFilters.find((item) => item.entity_id === "sensor.ups").not.or;
 assert.equal(upsNormalFilter.some((item) => item.state === "online"), true);
 assert.equal(upsNormalFilter.some((item) => item.state === "on"), true);
 assert.equal(upsNormalFilter.some((item) => item.state === "unavailable"), true);
 assert.equal(generatedFilters.find((item) => item.entity_id === "sensor.waste").options.tap_action.navigation_path, "#meldung-abfall");
+assert.equal(generatedFilters.find((item) => item.entity_id === "sensor.waste").options.show_state, true);
+assert.match(generatedFilters.find((item) => item.entity_id === "sensor.waste").options.styles, /Nächster Termin/);
 assert.equal(generated.views[0].sections[0].cards.some((card) => card.hash === "#meldung-abfall"), true);
 assert.equal(generated.views[0].sections[0].cards.some((card) => card.hash === "#meldung-usv"), true);
 const generatedAuto = generated.views[0].sections[0].cards.find((card) => card.type === "custom:auto-entities");
@@ -235,15 +239,21 @@ const wasteDashboard = { views: [{ sections: [{ cards: [
 applyNotificationOptions(wasteDashboard, {
   notification_waste: true,
   waste_entities: "sensor.abfall",
+  waste_days: 3,
 }, {
   states: {
-    "sensor.abfall": { state: "Biomüll morgen", attributes: { friendly_name: "Abfall" } },
+    "sensor.abfall": { state: "Biomüll in 1 days", attributes: { friendly_name: "Waste Collection Schedule Abfall", "2026-09-01": "Biomüll", daysTo: 1 } },
     "calendar.abfall": { state: "on", attributes: { friendly_name: "Abfallkalender" } },
   },
 });
 const wastePopup = wasteDashboard.views[0].sections[0].cards.find((card) => card.hash === "#meldung-abfall");
-assert.equal(wastePopup.cards[0].type, "calendar");
-assert.deepEqual(wastePopup.cards[0].entities, ["calendar.abfall"]);
+assert.equal(wastePopup.cards[0].type, "custom:bubble-card");
+assert.equal(wastePopup.cards[0].card_type, "calendar");
+assert.deepEqual(wastePopup.cards[0].entities, [{ entity: "calendar.abfall", color: "var(--success-color)" }]);
+assert.equal(wastePopup.cards[0].limit, 4);
+assert.equal(wastePopup.cards[0].days, 4);
+assert.equal(wastePopup.cards[1].filter.include[0].options.show_state, true);
+assert.match(wastePopup.cards[1].filter.include[0].options.styles, /attributes\.upcoming/);
 
 const editor = new SmartphoneDashboardStrategyEditor();
 let timerFired = false;

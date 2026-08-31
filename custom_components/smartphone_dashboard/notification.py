@@ -11,9 +11,9 @@ from typing import Any
 from homeassistant.const import EVENT_STATE_CHANGED
 from homeassistant.core import Event, HomeAssistant, callback
 from .config_manager import ConfigManager
-from .notification_core import pending_fingerprints, retained_fingerprints, ups_state_is_alert, valid_nina_glob
+from .notification_core import pending_fingerprints, retained_fingerprints, ups_state_is_alert, valid_nina_glob, waste_collection_details
 
-DEFAULTS = {"battery": 6, "contact": 15, "co2": 1000, "frost": 4, "nina": "binary_sensor.nina_warning_*"}
+DEFAULTS = {"battery": 6, "contact": 15, "co2": 1000, "frost": 4, "waste_days": 1, "nina": "binary_sensor.nina_warning_*"}
 _LOGGER = logging.getLogger(__name__)
 LEGACY_TO_CONFIG = {
     "input_boolean.smartphone_meldung_batterien": "notification_batteries", "input_boolean.smartphone_meldung_kontakte": "notification_contacts",
@@ -131,10 +131,19 @@ class NotificationCoordinator:
 
     def _configured_alerts(self, now: datetime) -> list[dict[str, str]]:
         alerts = []
+        strategy = self.manager.data.get("dashboards", {}).get("default", {}).get("config", {})
+        try:
+            waste_days = int(strategy.get("waste_days", DEFAULTS["waste_days"]))
+        except (TypeError, ValueError):
+            waste_days = DEFAULTS["waste_days"]
+        waste_days = min(30, max(0, waste_days))
         for entity_id in filter(None, map(str.strip, self._state("input_text.smartphone_abfall_sensoren").split(","))):
             state = self.hass.states.get(entity_id)
-            if self._enabled("abfall") and state and str(state.state).lower() in ("today", "tomorrow", "heute", "morgen", "0", "1"):
-                alerts.append({"fingerprint": f"waste:{entity_id}:{state.state}", "message": f"🗑️ {state.attributes.get('friendly_name', entity_id)}: {state.state}"})
+            if self._enabled("abfall") and state:
+                details = waste_collection_details(state.state, state.attributes, state.attributes.get("friendly_name", entity_id), now.date())
+                if isinstance(details["days"], int) and 0 <= details["days"] <= waste_days:
+                    fingerprint_date = details["date"] or str(state.state)
+                    alerts.append({"fingerprint": f"waste:{entity_id}:{fingerprint_date}", "message": f"🗑️ {details['type']}: {details['date_label']}"})
         for entity_id in filter(None, map(str.strip, self._state("input_text.smartphone_usv_sensoren").split(","))):
             state = self.hass.states.get(entity_id)
             if self._enabled("usv") and state and ups_state_is_alert(entity_id, state.state, state.attributes.get("device_class")):
