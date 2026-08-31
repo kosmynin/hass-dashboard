@@ -213,6 +213,23 @@ assert.equal(generatedAuto.show_empty, false);
 assert.equal(generatedAuto.else.name, "Keine Meldungen");
 assert.equal(generatedAuto.filter.exclude.some((item) => item.entity_id === "sensor.excluded_battery"), true);
 
+const batteryDashboard = { views: [{ sections: [{ cards: [
+  { type: "heading", heading: "Meldungen" },
+  { type: "custom:auto-entities", filter: { include: [
+    { entity_id: "sensor.*battery", options: { type: "custom:bubble-card", card_type: "button" } },
+  ], exclude: [] } },
+] }] }] };
+applyNotificationOptions(batteryDashboard, { notification_batteries: true, battery_threshold: 10 }, { states: {} });
+const batteryFilter = batteryDashboard.views[0].sections[0].cards.find((card) => card.type === "custom:auto-entities").filter.include[0];
+assert.equal(batteryFilter.options.button_type, "state");
+assert.equal(batteryFilter.options.show_state, true);
+assert.equal(batteryFilter.options.icon, "mdi:battery-alert");
+assert.match(batteryFilter.options.styles, /criticalLimit = Math\.max\(1, 10 \/ 2\)/);
+assert.match(batteryFilter.options.styles, /bubble-button-background/);
+assert.match(batteryFilter.options.styles, /opacity: 0 !important/);
+assert.match(batteryFilter.options.styles, /var\(--error-color\)/);
+assert.match(batteryFilter.options.styles, /var\(--warning-color, #ff9800\)/);
+
 const binaryUpsDashboard = { views: [{ sections: [{ cards: [
   { type: "heading", heading: "Meldungen" },
   { type: "custom:auto-entities", filter: { include: [

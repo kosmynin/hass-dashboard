@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.16";
+const STRATEGY_VERSION = "22.0.17";
 const CONFIG_VERSION = 22;
 
 const ACTIVE_ROOM_STYLES = `
@@ -133,6 +133,34 @@ const WASTE_SUMMARY_STYLES = `\${(() => {
   if (state) state.innerText = dateLabel ? 'Nächster Termin: ' + dateLabel : 'Kein Termin verfügbar';
   if (icon) icon.style.setProperty('color', iconColor, 'important');
 })()}`;
+function batterySummaryStyles(threshold) {
+  const limit = Number.isFinite(Number(threshold)) ? Number(threshold) : 6;
+  return `\${(() => {
+    const entityId = typeof entity === 'string' ? entity : entity?.entity_id;
+    const value = Number(hass.states[entityId]?.state);
+    const criticalLimit = Math.max(1, ${limit} / 2);
+    const iconColor = Number.isFinite(value) && value <= criticalLimit
+      ? 'var(--error-color)'
+      : 'var(--warning-color, #ff9800)';
+    card.style.setProperty('--smartphone-battery-icon-color', iconColor);
+  })()}
+  .bubble-button-card-container {
+    background: var(--bubble-button-main-background-color, var(--secondary-background-color)) !important;
+  }
+  .bubble-button-background {
+    opacity: 0 !important;
+    background-color: transparent !important;
+  }
+  .bubble-icon {
+    color: var(--smartphone-battery-icon-color, var(--warning-color, #ff9800)) !important;
+  }
+  .bubble-name {
+    color: var(--primary-text-color) !important;
+  }
+  .bubble-state {
+    color: var(--secondary-text-color) !important;
+  }`;
+}
 const NOTIFICATION_HELPERS = {
   notification_batteries: "input_boolean.smartphone_meldung_batterien",
   notification_contacts: "input_boolean.smartphone_meldung_kontakte",
@@ -757,6 +785,13 @@ function applyNotificationOptions(dashboard, config, hass) {
     if (["sensor.*battery", "sensor.*batterie"].includes(entityId) || entry.attributes?.device_class === "battery") {
       entry.state = `<= ${batteryThreshold}`;
       entry.not = { state: "0" };
+      entry.options = {
+        ...(entry.options || {}),
+        button_type: "state",
+        show_state: true,
+        icon: "mdi:battery-alert",
+        styles: batterySummaryStyles(batteryThreshold),
+      };
       return settings.batteries ? emit("batteries", [entry]) : [];
     }
     if (["binary_sensor.*contact", "binary_sensor.*kontakt"].includes(entityId) || ["door", "window", "opening"].includes(entry.attributes?.device_class)) {

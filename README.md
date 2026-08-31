@@ -45,6 +45,8 @@ vollständige Beschreibung und Handlungsempfehlung. Abfallmeldungen zeigen
 Müllart und nächsten Termin, erscheinen nur innerhalb des konfigurierbaren
 Vorlaufs und binden passende `calendar.*`-Entitäten darunter als kompakten
 Bubble-Card-Kalender mit bis zu sechs Terminen der kommenden 45 Tage ein.
+Batteriemeldungen bleiben neutral; ausschließlich ihr Symbol wird unterhalb des
+Grenzwerts orange und bei höchstens dessen Hälfte rot dargestellt.
 
 ## Migration und Benachrichtigungen
 
