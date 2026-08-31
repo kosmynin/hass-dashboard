@@ -14,6 +14,7 @@ from .config_manager import ConfigManager
 from .notification_core import pending_fingerprints, retained_fingerprints, ups_state_is_alert, valid_nina_glob, waste_collection_details
 
 DEFAULTS = {"battery": 6, "contact": 15, "co2": 1000, "frost": 4, "waste_days": 1, "nina": "binary_sensor.nina_warning_*"}
+NOTIFICATION_TITLE = "Homeassistant"
 _LOGGER = logging.getLogger(__name__)
 LEGACY_TO_CONFIG = {
     "input_boolean.smartphone_meldung_batterien": "notification_batteries", "input_boolean.smartphone_meldung_kontakte": "notification_contacts",
@@ -189,7 +190,7 @@ class NotificationCoordinator:
                             errors.append(f"{recipient}: Zustellung wartet auf erneuten Versuch")
                             continue
                         try:
-                            await self.hass.services.async_call("notify", recipient.removeprefix("notify."), {"title": "Smartphone Dashboard", "message": alert["message"]}, blocking=True)
+                            await self.hass.services.async_call("notify", recipient.removeprefix("notify."), {"title": NOTIFICATION_TITLE, "message": alert["message"]}, blocking=True)
                             successful.append(alert["fingerprint"]); self._retry_after.pop(retry_key, None); self._retry_count.pop(retry_key, None)
                         except Exception as err:
                             count = min(6, self._retry_count.get(retry_key, 0) + 1); self._retry_count[retry_key] = count
