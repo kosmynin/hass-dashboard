@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.20";
+const STRATEGY_VERSION = "22.0.21";
 const CONFIG_VERSION = 22;
 
 const ACTIVE_ROOM_STYLES = `
@@ -567,11 +567,30 @@ function isUpsHistoryEntity(entityId, state) {
 function upsNonAlertFilters() {
   return [
     ...UPS_NON_ALERT_STATES.map((normalState) => ({ state: normalState })),
+    ...upsHistoryFilters(),
+  ];
+}
+
+function upsHistoryFilters() {
+  return [
     { attributes: { device_class: "date" } },
     { attributes: { device_class: "timestamp" } },
     { state: "/^\\d{4}-\\d{2}-\\d{2}(?:[T ].*)?$/" },
     { entity_id: "/(?:umschaltung|letzte[rns]?|last).{0,64}(?:batter|netz|mains|switch)/" },
     { name: "/(?:[Uu]mschaltung|[Ll]etzte[rns]?|[Ll]ast).{0,64}(?:[Bb]atter|[Nn]etz|[Mm]ains|[Ss]witch)/" },
+  ];
+}
+
+function upsHistoryExcludeFilters(entityIds = []) {
+  const [dateClass, timestampClass, timestampState, entityPattern, namePattern] = upsHistoryFilters();
+  return [
+    entityPattern,
+    namePattern,
+    ...entityIds.flatMap((entity_id) => [
+      { entity_id, ...dateClass },
+      { entity_id, ...timestampClass },
+      { entity_id, ...timestampState },
+    ]),
   ];
 }
 
@@ -704,6 +723,9 @@ function notificationDetailCard(filters, category, hiddenEntityIds = []) {
         { state: "unavailable" },
         { state: "unknown" },
         ...hiddenEntityIds.map((entity_id) => ({ entity_id })),
+        ...(category === "ups"
+          ? upsHistoryExcludeFilters(filters.map((entry) => entry.entity_id).filter(Boolean))
+          : []),
       ],
     },
     else: {
@@ -898,6 +920,7 @@ function applyNotificationOptions(dashboard, config, hass) {
     { state: "unknown" },
     ...hiddenEntityIds.map((entity_id) => ({ options: {}, entity_id })),
     ...batteryExclusions.map((entity_id) => ({ options: {}, entity_id })),
+    ...upsHistoryExcludeFilters(upsEntities),
   ];
   const popupHashes = new Set(Object.values(NOTIFICATION_POPUPS).map(([hash]) => hash));
   for (let index = cards.length - 1; index >= 0; index -= 1) {

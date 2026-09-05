@@ -271,6 +271,11 @@ assert.equal(upsDynamicHistoryRules.some((item) => item.attributes?.device_class
 assert.equal(upsDynamicHistoryRules.some((item) => item.attributes?.device_class === "date"), true);
 assert.equal(upsDynamicHistoryRules.some((item) => item.name?.includes("[Uu]mschaltung")), true);
 assert.equal(upsDynamicHistoryRules.some((item) => item.entity_id?.includes("umschaltung")), true);
+const upsHistorySummary = upsHistoryDashboard.views[0].sections[0].cards.find((card) => card.type === "custom:auto-entities");
+assert.equal(upsHistorySummary.filter.exclude.some((item) => item.name?.includes("[Uu]mschaltung")), true);
+assert.equal(upsHistorySummary.filter.exclude.some((item) => item.entity_id === "sensor.ups_status" && item.attributes?.device_class === "timestamp"), true);
+const upsHistoryPopup = upsHistoryDashboard.views[0].sections[0].cards.find((card) => card.hash === "#meldung-usv");
+assert.equal(upsHistoryPopup.cards[0].filter.exclude.some((item) => item.name?.includes("[Uu]mschaltung")), true);
 
 const wasteDashboard = { views: [{ sections: [{ cards: [
   { type: "heading", heading: "Meldungen" },
