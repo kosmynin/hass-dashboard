@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.18";
+const STRATEGY_VERSION = "22.0.19";
 const CONFIG_VERSION = 22;
 
 const ACTIVE_ROOM_STYLES = `
@@ -564,6 +564,17 @@ function isUpsHistoryEntity(entityId, state) {
   return /(?:umschaltung|letzte[rs]?|last).{0,32}(?:batter|netz|mains|switch)/.test(descriptor);
 }
 
+function upsNonAlertFilters() {
+  return [
+    ...UPS_NON_ALERT_STATES.map((normalState) => ({ state: normalState })),
+    { attributes: { device_class: "date" } },
+    { attributes: { device_class: "timestamp" } },
+    { state: "/^\\d{4}-\\d{2}-\\d{2}(?:[T ].*)?$/" },
+    { entity_id: "/(?:umschaltung|letzte[rns]?|last).{0,64}(?:batter|netz|mains|switch)/" },
+    { name: "/(?:[Uu]mschaltung|[Ll]etzte[rns]?|[Ll]ast).{0,64}(?:[Bb]atter|[Nn]etz|[Mm]ains|[Ss]witch)/" },
+  ];
+}
+
 function registryEntityId(hass, domain, uniqueId) {
   const prefix = `${domain}.`;
   return entityRegistryEntries(hass).find(
@@ -852,7 +863,10 @@ function applyNotificationOptions(dashboard, config, hass) {
         return {
           ...entry,
           entity_id,
-          not: { or: UPS_NON_ALERT_STATES.map((normalState) => ({ state: normalState })) },
+          // Diese Regeln werden von Auto-Entities bei jeder Zustandsänderung
+          // erneut ausgewertet. So bleiben historische Umschalt-Sensoren auch
+          // dann verborgen, wenn ihre Attribute beim HA-Start noch fehlen.
+          not: { or: upsNonAlertFilters() },
         };
       }).filter(Boolean);
       return settings.ups ? emit("ups", entries) : [];

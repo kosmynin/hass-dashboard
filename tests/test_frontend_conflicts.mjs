@@ -266,6 +266,11 @@ applyNotificationOptions(upsHistoryDashboard, {
 });
 const upsHistoryFilters = upsHistoryDashboard.views[0].sections[0].cards.find((card) => card.type === "custom:auto-entities").filter.include;
 assert.deepEqual(upsHistoryFilters.map((item) => item.entity_id), ["sensor.ups_status"]);
+const upsDynamicHistoryRules = upsHistoryFilters[0].not.or;
+assert.equal(upsDynamicHistoryRules.some((item) => item.attributes?.device_class === "timestamp"), true);
+assert.equal(upsDynamicHistoryRules.some((item) => item.attributes?.device_class === "date"), true);
+assert.equal(upsDynamicHistoryRules.some((item) => item.name?.includes("[Uu]mschaltung")), true);
+assert.equal(upsDynamicHistoryRules.some((item) => item.entity_id?.includes("umschaltung")), true);
 
 const wasteDashboard = { views: [{ sections: [{ cards: [
   { type: "heading", heading: "Meldungen" },
