@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.17";
+const STRATEGY_VERSION = "22.0.18";
 const CONFIG_VERSION = 22;
 
 const ACTIVE_ROOM_STYLES = `
@@ -32,6 +32,7 @@ const UPS_NON_ALERT_STATES = [
 const UPS_PROBLEM_DEVICE_CLASSES = new Set([
   "problem", "safety", "smoke", "tamper", "moisture",
 ]);
+const UPS_HISTORY_DEVICE_CLASSES = new Set(["date", "timestamp"]);
 let cachedDisplayNotificationConfig;
 const NOTIFICATION_POPUPS = {
   batteries: ["#meldung-batterien", "Batterien", "mdi:battery-alert"],
@@ -554,6 +555,15 @@ function normalizeNinaGlob(value) {
     : "";
 }
 
+function isUpsHistoryEntity(entityId, state) {
+  const deviceClass = String(state?.attributes?.device_class || "").toLowerCase();
+  if (UPS_HISTORY_DEVICE_CLASSES.has(deviceClass)) return true;
+  const rawState = String(state?.state || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}(?:[T ]|$)/.test(rawState)) return true;
+  const descriptor = `${entityId} ${state?.attributes?.friendly_name || ""}`.toLowerCase();
+  return /(?:umschaltung|letzte[rs]?|last).{0,32}(?:batter|netz|mains|switch)/.test(descriptor);
+}
+
 function registryEntityId(hass, domain, uniqueId) {
   const prefix = `${domain}.`;
   return entityRegistryEntries(hass).find(
@@ -832,6 +842,7 @@ function applyNotificationOptions(dashboard, config, hass) {
       emitted.add("ups");
       const entries = upsEntities.map((entity_id) => {
         const state = hass?.states?.[entity_id];
+        if (isUpsHistoryEntity(entity_id, state)) return null;
         if (entity_id.startsWith("binary_sensor.")) {
           const problemSensor = UPS_PROBLEM_DEVICE_CLASSES.has(
             String(state?.attributes?.device_class || "").toLowerCase(),
@@ -843,7 +854,7 @@ function applyNotificationOptions(dashboard, config, hass) {
           entity_id,
           not: { or: UPS_NON_ALERT_STATES.map((normalState) => ({ state: normalState })) },
         };
-      });
+      }).filter(Boolean);
       return settings.ups ? emit("ups", entries) : [];
     }
     if (entityId === "sensor.*temperature") {

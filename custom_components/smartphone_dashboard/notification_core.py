@@ -9,19 +9,28 @@ UPS_NORMAL_STATES = frozenset((
 ))
 UPS_IGNORED_STATES = frozenset(("", "unknown", "unavailable", "none"))
 UPS_PROBLEM_DEVICE_CLASSES = frozenset(("problem", "safety", "smoke", "tamper", "moisture"))
+UPS_HISTORY_DEVICE_CLASSES = frozenset(("date", "timestamp"))
 
 def valid_nina_glob(value: str) -> bool:
     return bool(re.fullmatch(r"binary_sensor\.[a-zA-Z0-9_]+\*[a-zA-Z0-9_]*", value))
 
-def ups_state_is_alert(entity_id: str, state: object, device_class: object = None) -> bool:
+def ups_state_is_alert(entity_id: str, state: object, device_class: object = None, friendly_name: object = None) -> bool:
     """Interpret common UPS status and binary sensor conventions consistently."""
     normalized = str(state).strip().lower()
     if normalized in UPS_IGNORED_STATES:
         return False
+    normalized_device_class = str(device_class or "").strip().lower()
+    if normalized_device_class in UPS_HISTORY_DEVICE_CLASSES:
+        return False
+    if re.match(r"^\d{4}-\d{2}-\d{2}(?:[T ]|$)", normalized):
+        return False
+    descriptor = f"{entity_id} {friendly_name or ''}".lower()
+    if re.search(r"(?:umschaltung|letzte[rs]?|last).{0,32}(?:batter|netz|mains|switch)", descriptor):
+        return False
     if entity_id.startswith("binary_sensor."):
         if normalized not in ("on", "off"):
             return False
-        problem_sensor = str(device_class or "").strip().lower() in UPS_PROBLEM_DEVICE_CLASSES
+        problem_sensor = normalized_device_class in UPS_PROBLEM_DEVICE_CLASSES
         return normalized == ("on" if problem_sensor else "off")
     return normalized not in UPS_NORMAL_STATES
 

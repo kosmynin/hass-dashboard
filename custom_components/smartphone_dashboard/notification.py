@@ -147,7 +147,7 @@ class NotificationCoordinator:
                     alerts.append({"fingerprint": f"waste:{entity_id}:{fingerprint_date}", "message": f"🗑️ {details['type']}: {details['date_label']}"})
         for entity_id in filter(None, map(str.strip, self._state("input_text.smartphone_usv_sensoren").split(","))):
             state = self.hass.states.get(entity_id)
-            if self._enabled("usv") and state and ups_state_is_alert(entity_id, state.state, state.attributes.get("device_class")):
+            if self._enabled("usv") and state and ups_state_is_alert(entity_id, state.state, state.attributes.get("device_class"), state.attributes.get("friendly_name")):
                 alerts.append({"fingerprint": f"ups:{entity_id}:{state.state}", "message": f"🔌 {state.attributes.get('friendly_name', entity_id)}: {state.state}"})
         frost_id = self._state("input_text.smartphone_frost_sensor")
         frost = self.hass.states.get(frost_id)

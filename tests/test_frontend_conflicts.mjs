@@ -249,6 +249,24 @@ const binaryUpsFilters = binaryUpsDashboard.views[0].sections[0].cards.find((car
 assert.equal(binaryUpsFilters.find((item) => item.entity_id === "binary_sensor.ups_online").state, "off");
 assert.equal(binaryUpsFilters.find((item) => item.entity_id === "binary_sensor.ups_problem").state, "on");
 
+const upsHistoryDashboard = { views: [{ sections: [{ cards: [
+  { type: "heading", heading: "Meldungen" },
+  { type: "custom:auto-entities", filter: { include: [
+    { entity_id: "sensor.*ups_status", options: { type: "custom:bubble-card", card_type: "button" } },
+  ], exclude: [] } },
+] }] }] };
+applyNotificationOptions(upsHistoryDashboard, {
+  notification_ups: true,
+  ups_entities: "sensor.ups_status,sensor.ups_umschaltung_von_batterie",
+}, {
+  states: {
+    "sensor.ups_status": { state: "ONLINE", attributes: { friendly_name: "UPS Status" } },
+    "sensor.ups_umschaltung_von_batterie": { state: "2026-09-01T20:00:00+02:00", attributes: { friendly_name: "UPS Umschaltung von Batterie", device_class: "timestamp" } },
+  },
+});
+const upsHistoryFilters = upsHistoryDashboard.views[0].sections[0].cards.find((card) => card.type === "custom:auto-entities").filter.include;
+assert.deepEqual(upsHistoryFilters.map((item) => item.entity_id), ["sensor.ups_status"]);
+
 const wasteDashboard = { views: [{ sections: [{ cards: [
   { type: "heading", heading: "Meldungen" },
   { type: "custom:auto-entities", filter: { include: [

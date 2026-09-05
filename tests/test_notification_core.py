@@ -22,6 +22,9 @@ def test_ups_states_cover_text_and_binary_sensor_conventions():
     assert ups_state_is_alert("binary_sensor.ups_problem", "on", "problem")
     assert not ups_state_is_alert("binary_sensor.ups_problem", "off", "problem")
     assert not ups_state_is_alert("binary_sensor.ups_online", "unavailable", "connectivity")
+    assert not ups_state_is_alert("sensor.ups_last_switch", "2026-09-01T20:00:00+02:00", "timestamp", "UPS Umschaltung von Batterie")
+    assert not ups_state_is_alert("sensor.ups_umschaltung_von_batterie", "2026-09-01T20:00:00+02:00", None, "UPS Umschaltung von Batterie")
+    assert not ups_state_is_alert("sensor.ups_umschaltung_von_batterie", "1. September 2026 um 20:00", None, "UPS Umschaltung von Batterie")
 
 def test_dedupe_and_successful_delivery_retention():
     assert pending_fingerprints(["a", "b", "b"], ["a"]) == ["b"]
