@@ -8,6 +8,7 @@ import logging
 import math
 import time
 from typing import Any
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_STATE_CHANGED
 from homeassistant.core import Event, HomeAssistant, callback
 from .config_manager import ConfigManager
@@ -29,8 +30,8 @@ LEGACY_TO_CONFIG = {
 }
 
 class NotificationCoordinator:
-    def __init__(self, hass: HomeAssistant, manager: ConfigManager) -> None:
-        self.hass, self.manager = hass, manager
+    def __init__(self, hass: HomeAssistant, manager: ConfigManager, entry: ConfigEntry) -> None:
+        self.hass, self.manager, self.entry = hass, manager, entry
         self._queue: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
         self._worker: asyncio.Task | None = None
         self._migration_task: asyncio.Task | None = None
@@ -41,8 +42,12 @@ class NotificationCoordinator:
     async def async_start(self) -> None:
         if self._worker: return
         self._unsub = self.hass.bus.async_listen(EVENT_STATE_CHANGED, self._state_changed)
-        self._worker = self.hass.async_create_task(self._run(), "smartphone_dashboard_notifications")
-        self._migration_task = self.hass.async_create_task(self._import_with_retry(), "smartphone_dashboard_legacy_import")
+        self._worker = self.entry.async_create_background_task(
+            self.hass, self._run(), "smartphone_dashboard_notifications"
+        )
+        self._migration_task = self.entry.async_create_background_task(
+            self.hass, self._import_with_retry(), "smartphone_dashboard_legacy_import"
+        )
         self._enqueue()
 
     async def async_stop(self) -> None:

@@ -32,7 +32,7 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     manager = ConfigManager(hass)
     await manager.async_load()
-    coordinator = NotificationCoordinator(hass, manager)
+    coordinator = NotificationCoordinator(hass, manager, entry)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {"manager": manager, "coordinator": coordinator}
     await coordinator.async_start()
     return True
