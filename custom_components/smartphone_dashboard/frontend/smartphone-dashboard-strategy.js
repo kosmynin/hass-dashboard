@@ -7,8 +7,8 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.21";
-const CONFIG_VERSION = 22;
+const STRATEGY_VERSION = "22.0.22";
+const CONFIG_VERSION = 23;
 
 const ACTIVE_ROOM_STYLES = `
   ha-card, .bubble-button-card-container, .bubble-name-container,
@@ -1405,8 +1405,8 @@ function configurationValidationErrors(config) {
 function autoFeatureEntities(hass, key, systemGroups = []) {
   if (key === "media") return entityIds(hass, "media_player");
   if (key === "security") return [
-    ...entityIds(hass, "camera"),
     ...entityIds(hass, "alarm_control_panel"),
+    ...entityIds(hass, "camera"),
     ...entityIds(hass, "lock"),
   ];
   const registry = entityRegistryMap(hass);
@@ -1523,6 +1523,23 @@ function normalizedSystemColors(value) {
   ]));
 }
 
+function securityMasterAlarm(configuredEntity, entities, hass) {
+  const alarmPanels = entities.filter((entityId) => entityId.startsWith("alarm_control_panel."));
+  if (!alarmPanels.length) return "";
+  if (alarmPanels.includes(configuredEntity)) return configuredEntity;
+  const namedMaster = alarmPanels.find((entityId) => {
+    const friendlyName = hass?.states?.[entityId]?.attributes?.friendly_name || "";
+    return /(?:^|[\s_.-])(master|haupt(?:alarm|anlage)?|zentrale?)(?:$|[\s_.-])/i.test(
+      `${entityId} ${friendlyName}`,
+    );
+  });
+  return namedMaster || [...alarmPanels].sort((left, right) => {
+    const leftName = hass?.states?.[left]?.attributes?.friendly_name || left;
+    const rightName = hass?.states?.[right]?.attributes?.friendly_name || right;
+    return leftName.localeCompare(rightName, "de");
+  })[0];
+}
+
 function configuredFeatures(config, hass) {
   const configured = config.features && typeof config.features === "object" ? config.features : {};
   const registry = entityRegistryMap(hass);
@@ -1557,6 +1574,10 @@ function configuredFeatures(config, hass) {
     const automaticPrinterIds = key === "printer" && item.auto_discover !== false
       ? autoBambuPrinterIds(hass).filter((deviceId) => !excludedPrinters.has(deviceId))
       : [];
+    const entities = [...new Set([
+      ...automaticEntities,
+      ...manualEntities,
+    ])];
     return {
       key,
       name: item.name || meta[0],
@@ -1566,10 +1587,7 @@ function configuredFeatures(config, hass) {
         : requestedHashes[key],
       enabled: item.enabled !== false,
       auto_discover: item.auto_discover !== false,
-      entities: [...new Set([
-        ...automaticEntities,
-        ...manualEntities,
-      ])],
+      entities,
       manual_entities: [...new Set(manualEntities)],
       automatic_entities: [...new Set(automaticEntities)],
       excluded_entities: [...excluded],
@@ -1582,6 +1600,9 @@ function configuredFeatures(config, hass) {
       excluded_printer_ids: [...excludedPrinters],
       system_groups: systemGroups,
       system_colors: key === "system" ? normalizedSystemColors(item.system_colors) : {},
+      master_alarm: key === "security"
+        ? securityMasterAlarm(item.master_alarm, entities, hass)
+        : "",
     };
   });
 }
@@ -1698,9 +1719,30 @@ function printerFeatureCards(item, hass) {
   return [...cards, ...auxiliary];
 }
 
+function securityFeatureCards(item, hass) {
+  const priority = (entityId) => {
+    if (entityId === item.master_alarm) return -1;
+    if (entityId.startsWith("alarm_control_panel.")) return 0;
+    if (entityId.startsWith("camera.")) return 1;
+    if (entityId.startsWith("lock.")) return 2;
+    return 3;
+  };
+  return [...item.entities]
+    .filter((entityId) => hass?.states?.[entityId])
+    .sort((left, right) => {
+      const difference = priority(left) - priority(right);
+      if (difference) return difference;
+      const leftName = hass.states[left]?.attributes?.friendly_name || left;
+      const rightName = hass.states[right]?.attributes?.friendly_name || right;
+      return leftName.localeCompare(rightName, "de");
+    })
+    .map((entityId) => featureEntityCard(entityId, hass));
+}
+
 function featurePopupCards(item, hass) {
   if (item.key === "printer") return printerFeatureCards(item, hass);
   if (item.key === "system") return systemFeatureCards(item, hass);
+  if (item.key === "security") return securityFeatureCards(item, hass);
   return item.entities
     .filter((id) => hass?.states?.[id])
     .map((id) => featureEntityCard(id, hass));
@@ -1740,11 +1782,21 @@ function applyDynamicFeatures(dashboard, config, hass) {
     tap_action: { action: "navigate", navigation_path: item.hash },
     button_action: { tap_action: { action: "navigate", navigation_path: item.hash } },
   })) };
-  const popups = features.map((item) => ({
-    type: "custom:bubble-card", card_type: "pop-up", popup_mode: "adaptive-dialog", hash: item.hash,
-    button_type: "name", name: item.name, icon: item.icon, show_header: true, scrolling_effect: true,
-    cards: item.popup_cards,
-  }));
+  const popups = features.map((item) => {
+    const securityHeader = item.key === "security" && item.master_alarm
+      ? {
+          entity: item.master_alarm,
+          button_type: "state",
+          show_state: true,
+          tap_action: { action: "more-info" },
+        }
+      : { button_type: "name", name: item.name, icon: item.icon };
+    return {
+      type: "custom:bubble-card", card_type: "pop-up", popup_mode: "adaptive-dialog", hash: item.hash,
+      ...securityHeader, show_header: true, scrolling_effect: true,
+      cards: item.popup_cards,
+    };
+  });
   if (navigationHeadingIndex >= 0 && cleaned[navigationHeadingIndex + 1]?.type === "grid") {
     cleaned[navigationHeadingIndex + 1] = navigation;
   } else {
@@ -3109,7 +3161,7 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
       const row = document.createElement("div");
       row.className = "person-item";
       const hashListId = `feature-hashes-${feature.key}`;
-      row.innerHTML = `<div class="switch-row"><div class="switch-copy"><div class="switch-title"></div><div class="switch-description"></div></div><ha-switch data-enabled></ha-switch></div><ha-textfield data-name label="Name"></ha-textfield><div data-feature-icon-host></div><label class="native-field">Navigations-Hash<input data-hash type="text" list="${hashListId}"></label><datalist id="${hashListId}"></datalist><div class="field-error" data-hash-error></div><div class="switch-row"><div class="switch-copy"><div class="switch-title">Neue Entitäten automatisch ergänzen</div></div><ha-switch data-auto></ha-switch></div>${feature.key === "printer" ? '<div data-printer-ids-host></div><label class="select-label">Automatisch erkannte Bambu-Lab Geräte-IDs<textarea class="readonly-list" data-auto-printer-ids rows="3" readonly></textarea></label><div data-excluded-printer-ids-host></div>' : ""}<div data-entities-host></div><label class="select-label">Automatisch erkannte Entitäten<textarea class="readonly-list" data-auto-entities rows="5" readonly></textarea></label><div data-excluded-host></div>`;
+      row.innerHTML = `<div class="switch-row"><div class="switch-copy"><div class="switch-title"></div><div class="switch-description"></div></div><ha-switch data-enabled></ha-switch></div><ha-textfield data-name label="Name"></ha-textfield><div data-feature-icon-host></div><label class="native-field">Navigations-Hash<input data-hash type="text" list="${hashListId}"></label><datalist id="${hashListId}"></datalist><div class="field-error" data-hash-error></div><div class="switch-row"><div class="switch-copy"><div class="switch-title">Neue Entitäten automatisch ergänzen</div></div><ha-switch data-auto></ha-switch></div>${feature.key === "security" ? '<div data-master-alarm-host></div>' : ""}${feature.key === "printer" ? '<div data-printer-ids-host></div><label class="select-label">Automatisch erkannte Bambu-Lab Geräte-IDs<textarea class="readonly-list" data-auto-printer-ids rows="3" readonly></textarea></label><div data-excluded-printer-ids-host></div>' : ""}<div data-entities-host></div><label class="select-label">Automatisch erkannte Entitäten<textarea class="readonly-list" data-auto-entities rows="5" readonly></textarea></label><div data-excluded-host></div>`;
       row.querySelector(".switch-title").textContent = feature.name;
       const featureItemCount = feature.entities.length + feature.printer_ids.length;
       row.querySelector(".switch-description").textContent = `${featureItemCount} Einträge · ${feature.hash}`;
@@ -3141,6 +3193,12 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
         [feature.key]: { ...(this._config.features?.[feature.key] || {}), ...changes },
       });
       row.querySelector("[data-feature-icon-host]").replaceWith(this._iconSelector("Icon", feature.icon, (value) => updateFeature({ icon: value })));
+      if (feature.key === "security") {
+        row.querySelector("[data-master-alarm-host]").replaceWith(this._entitySelector(
+          "Master-Alarmanlage im Kopfbereich", feature.master_alarm,
+          { domain: "alarm_control_panel" }, (value) => updateFeature({ master_alarm: value }),
+        ));
+      }
       const hashSuggestions = Object.keys(FEATURE_META).map((key) => FEATURE_META[key][2]);
       row.querySelector(`#${hashListId}`).append(...hashSuggestions.map((hash) => { const option = document.createElement("option"); option.value = hash; return option; }));
       row.querySelector("[data-entities-host]").replaceWith(this._entitySelector(

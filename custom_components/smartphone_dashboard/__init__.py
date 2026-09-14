@@ -116,6 +116,9 @@ def _valid_config(value: dict[str, Any]) -> dict[str, Any]:
             if bool_key in feature and not isinstance(feature[bool_key], bool): raise vol.Invalid(f"{feature_name}.{bool_key} muss ein Wahrheitswert sein")
         for text_key in ("icon", "hash", "title"):
             if text_key in feature and not isinstance(feature[text_key], str): raise vol.Invalid(f"{feature_name}.{text_key} muss Text sein")
+        if "master_alarm" in feature:
+            master_alarm = feature["master_alarm"]
+            if not isinstance(master_alarm, str) or (master_alarm and not re.fullmatch(r"alarm_control_panel\.[a-z0-9_]+", master_alarm)): raise vol.Invalid(f"{feature_name}.master_alarm ist ungültig")
         for list_key in ("printer_ids", "excluded_printer_ids"):
             if list_key in feature and (not isinstance(feature[list_key], list) or any(not isinstance(item, str) or not re.fullmatch(r"[a-zA-Z0-9_-]{1,128}", item) for item in feature[list_key])): raise vol.Invalid(f"{list_key} ist ungültig")
         if "system_colors" in feature:

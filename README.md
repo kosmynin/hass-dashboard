@@ -48,6 +48,11 @@ Bubble-Card-Kalender mit bis zu sechs Terminen der kommenden 45 Tage ein.
 Batteriemeldungen bleiben neutral; ausschließlich ihr Symbol wird unterhalb des
 Grenzwerts orange und bei höchstens dessen Hälfte rot dargestellt.
 
+Im Sicherheits-Pop-up stehen Alarm-Panels vor Kameras und Schlössern. Die
+Master-Alarmanlage wird anhand ihres Namens erkannt oder in den Einstellungen
+explizit gewählt; ihr Zustand und ihre Detailsteuerung sind direkt über den
+Kopfbereich erreichbar.
+
 ## Migration und Benachrichtigungen
 
 Vorhandene 17 Helfer werden idempotent gelesen und niemals gelöscht. Das Backend

@@ -33,6 +33,8 @@ def test_malformed_known_feature_shapes_are_rejected():
     assert rejected({"features": {"printer": {"printer_ids": [3]}}})
     assert rejected({"features": {"system": {"system_colors": {"cpu": "url(javascript:x)"}}}})
     assert rejected({"features": {"system": {"system_groups": [{"id": "x", "pattern": "["}]}}})
+    assert rejected({"features": {"security": {"master_alarm": "switch.alarmanlage"}}})
+    assert validate({"features": {"security": {"master_alarm": "alarm_control_panel.master"}}})
 
 def test_valid_forward_compatible_feature_data_survives():
     value = {"features": {"printer": {"enabled": True, "auto_discover": False, "printer_ids": ["device_1"], "future": {"finite": 2}}}}
