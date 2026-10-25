@@ -51,7 +51,13 @@ Grenzwerts orange und bei höchstens dessen Hälfte rot dargestellt.
 Im Sicherheits-Pop-up stehen Alarm-Panels vor Kameras und Schlössern. Die
 Master-Alarmanlage wird anhand ihres Namens erkannt oder in den Einstellungen
 explizit gewählt; ihr Zustand und ihre Detailsteuerung sind direkt über den
-Kopfbereich erreichbar.
+Kopfbereich erreichbar. Ausgeblendete Kameras und Kameras erkannter
+3D-Drucker werden dort nicht angezeigt.
+
+Entitätsbezogene Meldungen verwenden, soweit Home Assistant eine Zuordnung
+kennt, das kompakte Format **Bereich · Entität: Wert**. Der Gerätename wird
+dabei nicht zusätzlich wiederholt; ohne Bereich bleibt der Entitätsname als
+Fallback erhalten.
 
 ## Migration und Benachrichtigungen
 

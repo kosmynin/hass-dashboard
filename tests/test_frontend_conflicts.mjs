@@ -140,18 +140,35 @@ assert.equal(navigationCards[navigationHeadingIndex + 1].cards[0].name, "Medien"
 const securityHass = {
   states: {
     "camera.eingang": { state: "idle", attributes: { friendly_name: "Eingang" } },
+    "camera.bambu": { state: "idle", attributes: { friendly_name: "Bambu Lab Kamera" } },
+    "camera.ausgeblendet": { state: "idle", attributes: { friendly_name: "Ausgeblendete Kamera" } },
+    "camera.versteckt": { state: "idle", attributes: { friendly_name: "Versteckte Kamera" } },
     "alarm_control_panel.garage": { state: "disarmed", attributes: { friendly_name: "Garage" } },
     "alarm_control_panel.master": { state: "armed_home", attributes: { friendly_name: "Master Alarmanlage" } },
     "lock.haustuer": { state: "locked", attributes: { friendly_name: "Haustür" } },
   },
-  areas: {}, devices: {}, entities: {}, services: {},
+  areas: {},
+  devices: { bambu: { id: "bambu", manufacturer: "Bambu Lab", model: "X1 Carbon", name: "3D-Drucker" } },
+  entities: {
+    "camera.eingang": { entity_id: "camera.eingang" },
+    "camera.bambu": { entity_id: "camera.bambu", device_id: "bambu", platform: "bambu_lab" },
+    "camera.ausgeblendet": { entity_id: "camera.ausgeblendet" },
+    "camera.versteckt": { entity_id: "camera.versteckt", hidden_by: "user" },
+  },
+  services: {},
 };
-const securityFeature = configuredFeatures({ features: { security: { auto_discover: true } } }, securityHass)
+const securityConfig = { features: { security: {
+  auto_discover: true,
+  entities: ["camera.ausgeblendet"],
+  excluded_entities: ["camera.ausgeblendet"],
+} } };
+const securityFeature = configuredFeatures(securityConfig, securityHass)
   .find((item) => item.key === "security");
 assert.equal(securityFeature.master_alarm, "alarm_control_panel.master");
-const securityDashboard = await SmartphoneDashboardStrategy.generate({
-  features: { security: { auto_discover: true } },
-}, securityHass);
+assert.equal(securityFeature.entities.includes("camera.bambu"), false);
+assert.equal(securityFeature.entities.includes("camera.ausgeblendet"), false);
+assert.equal(securityFeature.entities.includes("camera.versteckt"), false);
+const securityDashboard = await SmartphoneDashboardStrategy.generate(securityConfig, securityHass);
 const securityPopup = securityDashboard.views[0].sections[0].cards.find((card) => card.hash === "#sicherheit");
 assert.equal(securityPopup.entity, "alarm_control_panel.master");
 assert.equal(securityPopup.button_type, "state");
@@ -161,6 +178,28 @@ assert.deepEqual(securityPopup.cards.map((card) => card.type), [
   "alarm-panel", "alarm-panel", "picture-entity", "custom:bubble-card",
 ]);
 assert.equal(securityPopup.cards[0].entity, "alarm_control_panel.master");
+
+const locationDashboard = { views: [{ sections: [{ cards: [
+  { type: "heading", heading: "Meldungen" },
+  { type: "custom:auto-entities", filter: { include: [
+    { entity_id: "sensor.*co2*", options: { type: "custom:bubble-card", card_type: "button" } },
+  ], exclude: [] } },
+] }] }] };
+applyNotificationOptions(locationDashboard, { notification_co2: true, co2_threshold: 1000 }, {
+  states: {
+    "sensor.airgradient_co2": { state: "1350", attributes: { friendly_name: "AirGradient ONE CO₂", device_class: "carbon_dioxide" } },
+  },
+  areas: { living: { area_id: "living", name: "Wohnzimmer" } },
+  devices: { airgradient: { id: "airgradient", area_id: "living", name: "AirGradient ONE" } },
+  entities: {
+    "sensor.airgradient_co2": { entity_id: "sensor.airgradient_co2", device_id: "airgradient", original_name: "CO₂" },
+  },
+});
+const locationFilter = locationDashboard.views[0].sections[0].cards
+  .find((card) => card.type === "custom:auto-entities").filter.include[0];
+assert.match(locationFilter.options.styles, /Wohnzimmer · CO₂/);
+assert.equal(locationFilter.options.button_type, "state");
+assert.equal(locationFilter.options.show_state, true);
 
 const first = partitionConflictPatch({ A: "local", B: 2 }, { A: "remote", B: 1 }, { A: "base", B: 1 });
 assert.deepEqual(first.overlap, ["A"]);

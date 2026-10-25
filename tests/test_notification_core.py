@@ -4,9 +4,15 @@ from pathlib import Path
 CORE = runpy.run_path(str(Path(__file__).parents[1] / "custom_components/smartphone_dashboard/notification_core.py"))
 pending_fingerprints = CORE["pending_fingerprints"]
 retained_fingerprints = CORE["retained_fingerprints"]
+area_entity_label = CORE["area_entity_label"]
 valid_nina_glob = CORE["valid_nina_glob"]
 ups_state_is_alert = CORE["ups_state_is_alert"]
 waste_collection_details = CORE["waste_collection_details"]
+
+def test_area_entity_label_replaces_device_with_area():
+    assert area_entity_label("Wohnzimmer", "AirGradient ONE CO₂", "AirGradient ONE", "sensor.co2") == "Wohnzimmer · CO₂"
+    assert area_entity_label("Küche", "Fenster", "Fenstersensor", "binary_sensor.fenster") == "Küche · Fenster"
+    assert area_entity_label(None, "AirGradient ONE CO₂", "AirGradient ONE", "sensor.co2") == "CO₂"
 
 def test_nina_glob_exactly_one_star():
     assert valid_nina_glob("binary_sensor.nina_warning_*")

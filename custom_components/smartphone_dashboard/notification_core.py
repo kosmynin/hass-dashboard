@@ -11,6 +11,26 @@ UPS_IGNORED_STATES = frozenset(("", "unknown", "unavailable", "none"))
 UPS_PROBLEM_DEVICE_CLASSES = frozenset(("problem", "safety", "smoke", "tamper", "moisture"))
 UPS_HISTORY_DEVICE_CLASSES = frozenset(("date", "timestamp"))
 
+def area_entity_label(
+    area_name: object,
+    entity_name: object,
+    device_name: object = None,
+    entity_id: object = "",
+) -> str:
+    """Build a concise area/entity label without repeating the device name."""
+    area = str(area_name or "").strip()
+    name = str(entity_name or "").strip()
+    device = str(device_name or "").strip()
+    if not name:
+        raw_id = str(entity_id or "")
+        name = raw_id.split(".", 1)[-1].replace("_", " ").strip() or raw_id
+    for prefix in (device, area):
+        if prefix and name.casefold().startswith(f"{prefix} ".casefold()):
+            name = name[len(prefix):].strip()
+    if area and name.casefold() != area.casefold():
+        return f"{area} · {name}"
+    return name or area or str(entity_id or "")
+
 def valid_nina_glob(value: str) -> bool:
     return bool(re.fullmatch(r"binary_sensor\.[a-zA-Z0-9_]+\*[a-zA-Z0-9_]*", value))
 

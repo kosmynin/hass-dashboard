@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.22";
+const STRATEGY_VERSION = "22.0.23";
 const CONFIG_VERSION = 23;
 
 const ACTIVE_ROOM_STYLES = `
@@ -373,6 +373,37 @@ function isEntityVisible(hass, entityId, registry = entityRegistryMap(hass)) {
   const entry = registry.get(entityId);
   return entry?.hidden !== true && !entry?.hidden_by && !entry?.disabled_by &&
     state.attributes?.hidden !== true;
+}
+
+function entityLocationLabel(hass, entityId) {
+  const entry = entityRegistryMap(hass).get(entityId);
+  const device = valuesOf(hass?.devices).find((item) => item?.id === entry?.device_id);
+  const areaId = entry?.area_id || device?.area_id;
+  const area = valuesOf(hass?.areas).find((item) => (item?.area_id || item?.id) === areaId);
+  const areaName = String(area?.name || "").trim();
+  const deviceName = String(device?.name_by_user || device?.name || "").trim();
+  const friendlyName = String(hass?.states?.[entityId]?.attributes?.friendly_name || "").trim();
+  let entityName = String(entry?.name || entry?.original_name || friendlyName || entityId.split(".")[1] || entityId).trim();
+  for (const prefix of [deviceName, areaName].filter(Boolean)) {
+    if (entityName.toLocaleLowerCase("de-DE").startsWith(`${prefix.toLocaleLowerCase("de-DE")} `)) {
+      entityName = entityName.slice(prefix.length).trim();
+    }
+  }
+  return areaName && entityName.toLocaleLowerCase("de-DE") !== areaName.toLocaleLowerCase("de-DE")
+    ? `${areaName} · ${entityName}`
+    : entityName || areaName || entityId;
+}
+
+function notificationLocationStyles(hass, entityIds) {
+  const labels = Object.fromEntries(
+    entityIds.map((entityId) => [entityId, entityLocationLabel(hass, entityId)]),
+  );
+  return `\${(() => {
+    const entityId = typeof entity === 'string' ? entity : entity?.entity_id;
+    const label = ${JSON.stringify(labels)}[entityId];
+    const name = card.querySelector('.bubble-name');
+    if (name && label) name.innerText = label;
+  })()}`;
 }
 
 function hiddenDashboardEntityIds(hass) {
@@ -814,6 +845,22 @@ function applyNotificationOptions(dashboard, config, hass) {
     .map((entityId) => entityId.trim())
     .filter(Boolean);
   const hiddenEntityIds = hiddenDashboardEntityIds(hass);
+  const notificationEntityIds = Object.entries(hass?.states || {})
+    .filter(([entityId, state]) => {
+      const deviceClass = String(state?.attributes?.device_class || "").toLowerCase();
+      const descriptor = `${entityId} ${state?.attributes?.friendly_name || ""}`.toLowerCase();
+      return ["battery", "carbon_dioxide", "door", "window", "opening"].includes(deviceClass) ||
+        /battery|batterie|kontakt|contact|co2|kohlendioxid/.test(descriptor) ||
+        upsEntities.includes(entityId) || entityId === frostEntity;
+    })
+    .map(([entityId]) => entityId);
+  const locationStyles = notificationLocationStyles(hass, notificationEntityIds);
+  const locationOptions = (options = {}) => ({
+    ...options,
+    button_type: "state",
+    show_state: true,
+    styles: [options.styles, locationStyles].filter(Boolean).join("\n"),
+  });
 
   const emitted = new Set();
   const detailFilters = Object.fromEntries(
@@ -833,17 +880,19 @@ function applyNotificationOptions(dashboard, config, hass) {
         button_type: "state",
         show_state: true,
         icon: "mdi:battery-alert",
-        styles: batterySummaryStyles(batteryThreshold),
+        styles: `${locationStyles}\n${batterySummaryStyles(batteryThreshold)}`,
       };
       return settings.batteries ? emit("batteries", [entry]) : [];
     }
     if (["binary_sensor.*contact", "binary_sensor.*kontakt"].includes(entityId) || ["door", "window", "opening"].includes(entry.attributes?.device_class)) {
       entry.state = "on";
       entry.last_changed = `> ${contactMinutes}`;
+      entry.options = locationOptions(entry.options);
       return settings.contacts ? emit("contacts", [entry]) : [];
     }
     if (["sensor.*kohlendioxid", "sensor.*co2*"].includes(entityId) || entry.attributes?.device_class === "carbon_dioxide") {
       entry.state = `> ${co2Threshold}`;
+      entry.options = locationOptions(entry.options);
       return settings.co2 ? emit("co2", [entry]) : [];
     }
     if (entityId === "sensor.*abfall") {
@@ -880,11 +929,12 @@ function applyNotificationOptions(dashboard, config, hass) {
           const problemSensor = UPS_PROBLEM_DEVICE_CLASSES.has(
             String(state?.attributes?.device_class || "").toLowerCase(),
           );
-          return { ...entry, entity_id, state: problemSensor ? "on" : "off" };
+          return { ...entry, entity_id, state: problemSensor ? "on" : "off", options: locationOptions(entry.options) };
         }
         return {
           ...entry,
           entity_id,
+          options: locationOptions(entry.options),
           // Diese Regeln werden von Auto-Entities bei jeder Zustandsänderung
           // erneut ausgewertet. So bleiben historische Umschalt-Sensoren auch
           // dann verborgen, wenn ihre Attribute beim HA-Start noch fehlen.
@@ -896,6 +946,7 @@ function applyNotificationOptions(dashboard, config, hass) {
     if (entityId === "sensor.*temperature") {
       entry.entity_id = frostEntity;
       entry.state = `<= ${frostThreshold}`;
+      entry.options = locationOptions(entry.options);
       return settings.frost && Boolean(frostEntity) ? emit("frost", [entry]) : [];
     }
     if (entityId.startsWith("binary_sensor.nina_warning_")) {
@@ -1404,11 +1455,15 @@ function configurationValidationErrors(config) {
 
 function autoFeatureEntities(hass, key, systemGroups = []) {
   if (key === "media") return entityIds(hass, "media_player");
-  if (key === "security") return [
-    ...entityIds(hass, "alarm_control_panel"),
-    ...entityIds(hass, "camera"),
-    ...entityIds(hass, "lock"),
-  ];
+  if (key === "security") {
+    const printerDeviceIds = new Set(autoBambuPrinterIds(hass));
+    return [
+      ...entityIds(hass, "alarm_control_panel"),
+      ...entityIds(hass, "camera").filter((entityId) =>
+        !isPrinterCameraEntity(hass, entityId, printerDeviceIds)),
+      ...entityIds(hass, "lock"),
+    ];
+  }
   const registry = entityRegistryMap(hass);
   if (key === "printer") return Object.keys(hass?.states || {}).filter((id) =>
     isEntityVisible(hass, id, registry) &&
@@ -1458,6 +1513,25 @@ function autoBambuPrinterIds(hass) {
     )
     .map((entity) => entity.device_id);
   return [...new Set([...deviceIds, ...registryDeviceIds])];
+}
+
+function isPrinterCameraEntity(hass, entityId, knownPrinterDeviceIds = new Set(autoBambuPrinterIds(hass))) {
+  if (!entityId.startsWith("camera.")) return false;
+  const registry = entityRegistryMap(hass);
+  const entry = registry.get(entityId);
+  if (entry?.device_id && knownPrinterDeviceIds.has(entry.device_id)) return true;
+  const device = valuesOf(hass?.devices).find((item) => item?.id === entry?.device_id);
+  const descriptor = [
+    entityId,
+    hass?.states?.[entityId]?.attributes?.friendly_name,
+    entry?.platform,
+    entry?.original_name,
+    device?.manufacturer,
+    device?.model,
+    device?.name,
+    device?.name_by_user,
+  ].filter(Boolean).join(" ");
+  return /bambu|3d[ _-]?druck|3d[ _-]?print|octoprint|klipper|moonraker/i.test(descriptor);
 }
 
 const FEATURE_META = {
@@ -1559,7 +1633,7 @@ function configuredFeatures(config, hass) {
     );
     const systemGroups = key === "system" ? normalizedSystemGroups(item.system_groups) : [];
     const manualEntities = Array.isArray(item.entities)
-      ? item.entities.filter((entityId) => existingEntities.has(entityId))
+      ? item.entities.filter((entityId) => existingEntities.has(entityId) && !excluded.has(entityId))
       : [];
     const entityRegistry = registry;
     const automaticEntities = item.auto_discover !== false
@@ -1574,10 +1648,15 @@ function configuredFeatures(config, hass) {
     const automaticPrinterIds = key === "printer" && item.auto_discover !== false
       ? autoBambuPrinterIds(hass).filter((deviceId) => !excludedPrinters.has(deviceId))
       : [];
-    const entities = [...new Set([
+    let entities = [...new Set([
       ...automaticEntities,
       ...manualEntities,
     ])];
+    if (key === "security") {
+      const printerDeviceIds = new Set(autoBambuPrinterIds(hass));
+      entities = entities.filter((entityId) =>
+        !isPrinterCameraEntity(hass, entityId, printerDeviceIds));
+    }
     return {
       key,
       name: item.name || meta[0],

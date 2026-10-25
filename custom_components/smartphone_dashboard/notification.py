@@ -11,8 +11,9 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_STATE_CHANGED
 from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.helpers import area_registry as ar, device_registry as dr, entity_registry as er
 from .config_manager import ConfigManager
-from .notification_core import pending_fingerprints, retained_fingerprints, ups_state_is_alert, valid_nina_glob, waste_collection_details
+from .notification_core import area_entity_label, pending_fingerprints, retained_fingerprints, ups_state_is_alert, valid_nina_glob, waste_collection_details
 
 DEFAULTS = {"battery": 6, "contact": 15, "co2": 1000, "frost": 4, "waste_days": 1, "nina": "binary_sensor.nina_warning_*"}
 NOTIFICATION_TITLE = "Homeassistant"
@@ -110,6 +111,19 @@ class NotificationCoordinator:
         if not math.isfinite(value): value = default
         return min(maximum, max(minimum, value))
 
+    def _entity_label(self, entity_id: str, attributes: dict[str, Any]) -> str:
+        entity_entry = er.async_get(self.hass).async_get(entity_id)
+        device = dr.async_get(self.hass).async_get(entity_entry.device_id) if entity_entry and entity_entry.device_id else None
+        area_id = (entity_entry.area_id if entity_entry else None) or (
+            dr.async_get_effective_area_id(self.hass, device) if device else None
+        )
+        area = ar.async_get(self.hass).async_get_area(area_id) if area_id else None
+        entity_name = (
+            (entity_entry.name or entity_entry.original_name) if entity_entry else None
+        ) or attributes.get("friendly_name") or entity_id
+        device_name = (device.name_by_user or device.name) if device else None
+        return area_entity_label(area.name if area else None, entity_name, device_name, entity_id)
+
     def evaluate(self) -> list[dict[str, str]]:
         alerts: list[dict[str, str]] = []
         battery_limit = self._number("input_number.smartphone_batterie_grenzwert", DEFAULTS["battery"], 1, 100)
@@ -122,15 +136,15 @@ class NotificationCoordinator:
             if self._enabled("batterien") and entity_id not in battery_exclusions and (attrs.get("device_class") == "battery" or entity_id.endswith(("battery", "batterie"))):
                 try:
                     value = float(state.state)
-                    if value <= battery_limit: alerts.append({"fingerprint": f"battery:{entity_id}", "message": f"🔋 {attrs.get('friendly_name', entity_id)}: {value:g}%"})
+                    if value <= battery_limit: alerts.append({"fingerprint": f"battery:{entity_id}", "message": f"🔋 {self._entity_label(entity_id, attrs)}: {value:g}%"})
                 except ValueError: pass
             if self._enabled("kontakte") and entity_id.startswith("binary_sensor.") and (attrs.get("device_class") in ("door", "window", "opening") or "contact" in entity_id or "kontakt" in entity_id) and state.state == "on":
                 minutes = (now - state.last_changed).total_seconds() / 60
-                if minutes >= contact_minutes: alerts.append({"fingerprint": f"contact:{entity_id}", "message": f"🚪 {attrs.get('friendly_name', entity_id)} ist seit {minutes:.0f} Minuten offen"})
+                if minutes >= contact_minutes: alerts.append({"fingerprint": f"contact:{entity_id}", "message": f"🚪 {self._entity_label(entity_id, attrs)} ist seit {minutes:.0f} Minuten offen"})
             if self._enabled("co2") and (attrs.get("device_class") == "carbon_dioxide" or any(token in f"{entity_id} {attrs.get('friendly_name','')}".lower() for token in ("co2", "kohlendioxid"))):
                 try:
                     value = float(state.state)
-                    if value >= co2_limit: alerts.append({"fingerprint": f"co2:{entity_id}", "message": f"💨 {attrs.get('friendly_name', entity_id)}: {value:g} ppm"})
+                    if value >= co2_limit: alerts.append({"fingerprint": f"co2:{entity_id}", "message": f"💨 {self._entity_label(entity_id, attrs)}: {value:g} ppm"})
                 except ValueError: pass
         alerts.extend(self._configured_alerts(now))
         return alerts
@@ -153,13 +167,13 @@ class NotificationCoordinator:
         for entity_id in filter(None, map(str.strip, self._state("input_text.smartphone_usv_sensoren").split(","))):
             state = self.hass.states.get(entity_id)
             if self._enabled("usv") and state and ups_state_is_alert(entity_id, state.state, state.attributes.get("device_class"), state.attributes.get("friendly_name")):
-                alerts.append({"fingerprint": f"ups:{entity_id}:{state.state}", "message": f"🔌 {state.attributes.get('friendly_name', entity_id)}: {state.state}"})
+                alerts.append({"fingerprint": f"ups:{entity_id}:{state.state}", "message": f"🔌 {self._entity_label(entity_id, state.attributes)}: {state.state}"})
         frost_id = self._state("input_text.smartphone_frost_sensor")
         frost = self.hass.states.get(frost_id)
         if self._enabled("frost") and frost:
             try:
                 value = float(frost.state); limit = self._number("input_number.smartphone_frost_grenzwert", DEFAULTS["frost"], -30, 20)
-                if value <= limit: alerts.append({"fingerprint": f"frost:{frost_id}", "message": f"❄️ Frost: {value:g} °C"})
+                if value <= limit: alerts.append({"fingerprint": f"frost:{frost_id}", "message": f"❄️ {self._entity_label(frost_id, frost.attributes)}: {value:g} °C"})
             except ValueError: pass
         pattern = self._state("input_text.smartphone_nina_muster", DEFAULTS["nina"])
         if self._enabled("nina") and valid_nina_glob(pattern):
