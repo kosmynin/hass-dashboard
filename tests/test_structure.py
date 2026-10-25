@@ -10,7 +10,7 @@ def test_manifest_and_hacs():
     hacs = json.loads((ROOT / "hacs.json").read_text())
     assert manifest["domain"] == "smartphone_dashboard"
     assert manifest["config_flow"] is True
-    assert manifest["version"] == "22.0.23"
+    assert manifest["version"] == "22.0.24"
     assert hacs["name"] == "Smartphone Dashboard"
     assert hacs["zip_release"] is True
     assert hacs["filename"] == "smartphone_dashboard.zip"
@@ -106,9 +106,9 @@ def test_generic_base_matches_notification_and_quick_action_transformers():
     assert 'show_empty: false' in strategy
     assert 'name: "Keine Meldungen"' in strategy
     assert 'card_param: "cards"' in strategy
-    assert 'entry.state = `<= ${batteryThreshold}`' in strategy
-    assert 'entry.not = { state: "0" }' in strategy
-    assert 'entry.state = "on"' in strategy
+    assert 'state: `<= ${batteryThreshold}`' in strategy
+    assert 'not: { state: "0" }' in strategy
+    assert 'state: "on"' in strategy
     assert 'attributes: { daysTo: `<= ${wasteDays}` }' in strategy
     assert 'const dueState =' in strategy
     assert "const UPS_NON_ALERT_STATES" in strategy

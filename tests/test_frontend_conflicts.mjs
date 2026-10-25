@@ -63,6 +63,7 @@ const visibilityHass = {
     "script.hidden": { state: "off", attributes: { friendly_name: "Verstecktes Script" } },
     "media_player.visible": { state: "idle", attributes: { friendly_name: "Sichtbare Medien" } },
     "media_player.hidden": { state: "idle", attributes: { friendly_name: "Versteckte Medien" } },
+    "sensor.visible_battery": { state: "80", attributes: { friendly_name: "Sichtbare Batterie", device_class: "battery", unit_of_measurement: "%" } },
     "sensor.hidden_battery": { state: "3", attributes: { friendly_name: "Versteckte Batterie", device_class: "battery", unit_of_measurement: "%" } },
     "sensor.disabled_system_cpu": { state: "12", attributes: { friendly_name: "Deaktivierte CPU", unit_of_measurement: "%" } },
   },
@@ -74,6 +75,7 @@ const visibilityHass = {
     "script.hidden": { entity_id: "script.hidden", hidden: true },
     "media_player.visible": { entity_id: "media_player.visible" },
     "media_player.hidden": { entity_id: "media_player.hidden", hidden_by: "integration" },
+    "sensor.visible_battery": { entity_id: "sensor.visible_battery" },
     "sensor.hidden_battery": { hidden: true },
     "sensor.disabled_system_cpu": { entity_id: "sensor.disabled_system_cpu", disabled_by: "integration" },
   },
@@ -197,7 +199,9 @@ applyNotificationOptions(locationDashboard, { notification_co2: true, co2_thresh
 });
 const locationFilter = locationDashboard.views[0].sections[0].cards
   .find((card) => card.type === "custom:auto-entities").filter.include[0];
-assert.match(locationFilter.options.styles, /Wohnzimmer · CO₂/);
+assert.equal(locationFilter.options.name, "Wohnzimmer · CO₂");
+assert.match(locationFilter.options.styles, /bubble-button-background/);
+assert.match(locationFilter.options.styles, /opacity: 0 !important/);
 assert.equal(locationFilter.options.button_type, "state");
 assert.equal(locationFilter.options.show_state, true);
 

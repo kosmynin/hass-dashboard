@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.23";
+const STRATEGY_VERSION = "22.0.24";
 const CONFIG_VERSION = 23;
 
 const ACTIVE_ROOM_STYLES = `
@@ -55,6 +55,23 @@ const NINA_SUMMARY_STYLES = `\${(() => {
   if (state) state.innerText = description;
   if (icon) icon.style.setProperty('color', 'var(--error-color)', 'important');
 })()}`;
+const ENTITY_NOTIFICATION_STYLES = `
+  .bubble-button-card-container {
+    background: var(--bubble-button-main-background-color, var(--secondary-background-color)) !important;
+  }
+  .bubble-button-background {
+    opacity: 0 !important;
+    background-color: transparent !important;
+  }
+  .bubble-name {
+    color: var(--primary-text-color) !important;
+  }
+  .bubble-state {
+    display: flex !important;
+    color: var(--secondary-text-color) !important;
+    opacity: 1 !important;
+  }
+`;
 const WASTE_SUMMARY_STYLES = `\${(() => {
   const entityId = typeof entity === 'string' ? entity : entity?.entity_id;
   const waste = hass.states[entityId];
@@ -392,18 +409,6 @@ function entityLocationLabel(hass, entityId) {
   return areaName && entityName.toLocaleLowerCase("de-DE") !== areaName.toLocaleLowerCase("de-DE")
     ? `${areaName} · ${entityName}`
     : entityName || areaName || entityId;
-}
-
-function notificationLocationStyles(hass, entityIds) {
-  const labels = Object.fromEntries(
-    entityIds.map((entityId) => [entityId, entityLocationLabel(hass, entityId)]),
-  );
-  return `\${(() => {
-    const entityId = typeof entity === 'string' ? entity : entity?.entity_id;
-    const label = ${JSON.stringify(labels)}[entityId];
-    const name = card.querySelector('.bubble-name');
-    if (name && label) name.innerText = label;
-  })()}`;
 }
 
 function hiddenDashboardEntityIds(hass) {
@@ -845,21 +850,29 @@ function applyNotificationOptions(dashboard, config, hass) {
     .map((entityId) => entityId.trim())
     .filter(Boolean);
   const hiddenEntityIds = hiddenDashboardEntityIds(hass);
-  const notificationEntityIds = Object.entries(hass?.states || {})
-    .filter(([entityId, state]) => {
-      const deviceClass = String(state?.attributes?.device_class || "").toLowerCase();
-      const descriptor = `${entityId} ${state?.attributes?.friendly_name || ""}`.toLowerCase();
-      return ["battery", "carbon_dioxide", "door", "window", "opening"].includes(deviceClass) ||
-        /battery|batterie|kontakt|contact|co2|kohlendioxid/.test(descriptor) ||
-        upsEntities.includes(entityId) || entityId === frostEntity;
-    })
-    .map(([entityId]) => entityId);
-  const locationStyles = notificationLocationStyles(hass, notificationEntityIds);
-  const locationOptions = (options = {}) => ({
+  const visibleStates = Object.entries(hass?.states || {}).filter(([entityId]) =>
+    isEntityVisible(hass, entityId));
+  const batteryEntityIds = visibleStates.filter(([entityId, state]) =>
+    entityId.startsWith("sensor.") &&
+    !batteryExclusions.includes(entityId) &&
+    (state?.attributes?.device_class === "battery" || /battery|batterie/i.test(entityId)),
+  ).map(([entityId]) => entityId);
+  const contactEntityIds = visibleStates.filter(([entityId, state]) =>
+    entityId.startsWith("binary_sensor.") &&
+    (["door", "window", "opening"].includes(state?.attributes?.device_class) ||
+      /contact|kontakt/i.test(entityId)),
+  ).map(([entityId]) => entityId);
+  const co2EntityIds = visibleStates.filter(([entityId, state]) =>
+    entityId.startsWith("sensor.") &&
+    (state?.attributes?.device_class === "carbon_dioxide" ||
+      /co2|kohlendioxid/i.test(`${entityId} ${state?.attributes?.friendly_name || ""}`)),
+  ).map(([entityId]) => entityId);
+  const locationOptions = (options = {}, entityId, extraStyles = "") => ({
     ...options,
     button_type: "state",
     show_state: true,
-    styles: [options.styles, locationStyles].filter(Boolean).join("\n"),
+    ...(entityId ? { name: entityLocationLabel(hass, entityId) } : {}),
+    styles: [options.styles, ENTITY_NOTIFICATION_STYLES, extraStyles].filter(Boolean).join("\n"),
   });
 
   const emitted = new Set();
@@ -873,27 +886,45 @@ function applyNotificationOptions(dashboard, config, hass) {
   autoEntities.filter.include = includes.flatMap((entry) => {
     const entityId = entry.entity_id || "";
     if (["sensor.*battery", "sensor.*batterie"].includes(entityId) || entry.attributes?.device_class === "battery") {
-      entry.state = `<= ${batteryThreshold}`;
-      entry.not = { state: "0" };
-      entry.options = {
-        ...(entry.options || {}),
-        button_type: "state",
-        show_state: true,
-        icon: "mdi:battery-alert",
-        styles: `${locationStyles}\n${batterySummaryStyles(batteryThreshold)}`,
-      };
-      return settings.batteries ? emit("batteries", [entry]) : [];
+      if (batteryEntityIds.length && emitted.has("batteries")) return [];
+      if (batteryEntityIds.length) emitted.add("batteries");
+      const entities = batteryEntityIds.length ? batteryEntityIds : [""];
+      const entries = entities.map((entity_id) => ({
+        ...entry,
+        entity_id: entity_id || entityId,
+        state: `<= ${batteryThreshold}`,
+        not: { state: "0" },
+        options: {
+          ...locationOptions(entry.options, entity_id || undefined, batterySummaryStyles(batteryThreshold)),
+          icon: "mdi:battery-alert",
+        },
+      }));
+      return settings.batteries ? emit("batteries", entries) : [];
     }
     if (["binary_sensor.*contact", "binary_sensor.*kontakt"].includes(entityId) || ["door", "window", "opening"].includes(entry.attributes?.device_class)) {
-      entry.state = "on";
-      entry.last_changed = `> ${contactMinutes}`;
-      entry.options = locationOptions(entry.options);
-      return settings.contacts ? emit("contacts", [entry]) : [];
+      if (contactEntityIds.length && emitted.has("contacts")) return [];
+      if (contactEntityIds.length) emitted.add("contacts");
+      const entities = contactEntityIds.length ? contactEntityIds : [""];
+      const entries = entities.map((entity_id) => ({
+        ...entry,
+        entity_id: entity_id || entityId,
+        state: "on",
+        last_changed: `> ${contactMinutes}`,
+        options: locationOptions(entry.options, entity_id || undefined),
+      }));
+      return settings.contacts ? emit("contacts", entries) : [];
     }
     if (["sensor.*kohlendioxid", "sensor.*co2*"].includes(entityId) || entry.attributes?.device_class === "carbon_dioxide") {
-      entry.state = `> ${co2Threshold}`;
-      entry.options = locationOptions(entry.options);
-      return settings.co2 ? emit("co2", [entry]) : [];
+      if (co2EntityIds.length && emitted.has("co2")) return [];
+      if (co2EntityIds.length) emitted.add("co2");
+      const entities = co2EntityIds.length ? co2EntityIds : [""];
+      const entries = entities.map((entity_id) => ({
+        ...entry,
+        entity_id: entity_id || entityId,
+        state: `> ${co2Threshold}`,
+        options: locationOptions(entry.options, entity_id || undefined),
+      }));
+      return settings.co2 ? emit("co2", entries) : [];
     }
     if (entityId === "sensor.*abfall") {
       const dueNumbers = Array.from({ length: wasteDays + 1 }, (_value, index) => index).join("|");
@@ -929,12 +960,12 @@ function applyNotificationOptions(dashboard, config, hass) {
           const problemSensor = UPS_PROBLEM_DEVICE_CLASSES.has(
             String(state?.attributes?.device_class || "").toLowerCase(),
           );
-          return { ...entry, entity_id, state: problemSensor ? "on" : "off", options: locationOptions(entry.options) };
+          return { ...entry, entity_id, state: problemSensor ? "on" : "off", options: locationOptions(entry.options, entity_id) };
         }
         return {
           ...entry,
           entity_id,
-          options: locationOptions(entry.options),
+          options: locationOptions(entry.options, entity_id),
           // Diese Regeln werden von Auto-Entities bei jeder Zustandsänderung
           // erneut ausgewertet. So bleiben historische Umschalt-Sensoren auch
           // dann verborgen, wenn ihre Attribute beim HA-Start noch fehlen.
@@ -946,7 +977,7 @@ function applyNotificationOptions(dashboard, config, hass) {
     if (entityId === "sensor.*temperature") {
       entry.entity_id = frostEntity;
       entry.state = `<= ${frostThreshold}`;
-      entry.options = locationOptions(entry.options);
+      entry.options = locationOptions(entry.options, frostEntity);
       return settings.frost && Boolean(frostEntity) ? emit("frost", [entry]) : [];
     }
     if (entityId.startsWith("binary_sensor.nina_warning_")) {
