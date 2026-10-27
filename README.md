@@ -62,9 +62,16 @@ Fallback erhalten.
 ## Migration und Benachrichtigungen
 
 Vorhandene 17 Helfer werden idempotent gelesen und niemals gelöscht. Das Backend
-wertet Meldungen selbst aus, dedupliziert Fingerprints und versendet seriell an
-die konfigurierten Notify-Dienste. Die alte Paketautomation muss deaktiviert
-werden, um Doppelversand zu vermeiden; die mitgelieferte YAML dient nur noch der
+wertet Meldungen selbst aus und pflegt unter einer festen Kennung genau eine
+zusammengefasste Persistent Notification, solange Meldungen aktiv sind. Sie wird
+bei Änderungen aktualisiert und nach vollständiger Entwarnung entfernt.
+
+Optionale Notify-Dienste erhalten ebenfalls nur eine Sammelmeldung. Für die
+iOS-Companion-App nutzt sie eine feste Kennung und Gruppe: Neue Zustände ersetzen
+die vorhandene Mitteilung, reine Aktualisierungen erfolgen leise, das App-Badge
+zeigt die Zahl aktiver Meldungen und wird bei Entwarnung zusammen mit der
+Mitteilung entfernt. Die alte Paketautomation muss deaktiviert werden, um
+Doppelversand zu vermeiden; die mitgelieferte YAML dient nur noch der
 Legacy-Migration und ist keine Laufzeitvoraussetzung.
 Die Datei `smartphone_dashboard_legacy_reference.yaml` ist ausdrücklich eine
 inaktive Referenz und darf nicht als aktive Automation eingebunden werden.

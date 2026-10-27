@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.27";
+const STRATEGY_VERSION = "22.0.28";
 const CONFIG_VERSION = 23;
 
 const ACTIVE_ROOM_STYLES = `
@@ -671,14 +671,15 @@ function packageEntity(hass, { domain, uniqueId, entityId, alias, attributeId })
 function synchronizationStatus(config, hass) {
   const helperIds = Object.values(NOTIFICATION_HELPERS);
   const installedHelpers = helperIds.filter((entityId) => hass?.states?.[entityId]).length;
-  const recipients = csv(notificationSetting(config, hass, "notification_recipients"));
+  const recipients = csv(notificationSetting(config, hass, "notification_recipients"))
+    .filter((service) => service !== "notify.persistent_notification");
   const missingServices = recipients.filter((service) => !/^notify\.[a-z0-9_]+$/.test(service) || !hass?.services?.notify?.[service.slice(7)]);
   const problems = [];
-  if (!recipients.length) problems.push("keine Benachrichtigungsdienste konfiguriert");
   if (missingServices.length) problems.push(`Notify-Dienste fehlen: ${missingServices.join(", ")}`);
+  const pushDetail = recipients.length === 1 ? "1 optionaler Push-Dienst" : `${recipients.length} optionale Push-Dienste`;
   return { active: problems.length === 0, installedHelpers, totalHelpers: helperIds.length,
-    title: problems.length ? "Backend-Synchronisierung unvollständig" : "Backend-Synchronisierung aktiv",
-    detail: problems.length ? problems.join(" · ") : `Backend bereit · ${installedHelpers} optionale Legacy-Helfer · ${recipients.length} Notify-Dienste` };
+    title: problems.length ? "Benachrichtigungssystem unvollständig" : "Benachrichtigungssystem aktiv",
+    detail: problems.length ? problems.join(" · ") : `Eine Persistent Notification · ${pushDetail} · ${installedHelpers} optionale Legacy-Helfer` };
 }
 
 function withNotificationPopup(entry, category) {
@@ -3142,7 +3143,7 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
         </details>
 
         <details data-panel="synchronization" ${panelOpen("synchronization")}>
-          <summary><ha-icon icon="mdi:sync"></ha-icon>Automation & Synchronisierung</summary>
+          <summary><ha-icon icon="mdi:bell-sync-outline"></ha-icon>Benachrichtigungen & Synchronisierung</summary>
           <div class="panel">
             <div class="sync-status ${synchronization.active ? "" : "incomplete"}" data-sync-status>
               <ha-icon icon="${synchronization.active ? "mdi:check-circle-outline" : "mdi:alert-circle-outline"}"></ha-icon>
@@ -3154,14 +3155,14 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
             <label class="native-field">CO₂-Grenzwert in ppm<input data-notification-number="co2_threshold" type="number" min="400" max="5000" step="50"></label>
             <label class="native-field">Abfall-Vorlauf in Tagen<input data-notification-number="waste_days" type="number" min="0" max="30"></label>
             <label class="native-field">Frost-Grenzwert in °C<input data-notification-number="frost_threshold" type="number" min="-30" max="20"></label>
-            <div class="entity-title">Automation</div>
+            <div class="entity-title">Benachrichtigungen</div>
             <div data-notify-selector-host></div>
             <div data-battery-selector-host></div>
             <div data-frost-selector-host></div>
             <div data-waste-selector-host></div>
             <div data-ups-selector-host></div>
             <label class="native-field">NINA-Entitätsmuster<input data-nina-entities type="text" list="nina-entity-suggestions"><datalist id="nina-entity-suggestions"></datalist><span class="hint">Genau ein * als Platzhalter verwenden, zum Beispiel binary_sensor.nina_warning_*.</span><span class="field-error" data-nina-error></span></label>
-            <p class="hint">Diese Werte werden gemeinsam von Dashboard und Benachrichtigungsautomation verwendet.</p>
+            <p class="hint">Das Backend pflegt genau eine zusammengefasste Persistent Notification. Optionale iPhone-Push-Mitteilungen werden ersetzt statt gestapelt und bei Entwarnung entfernt.</p>
             <p class="hint" data-notification-service-status aria-live="polite"></p>
           </div>
         </details>
@@ -3258,13 +3259,13 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
     );
     const notificationList = (key) => this._selectorValue({ currentTarget: { value: this._effectiveSetting(key) } }, true);
     const saveNotificationList = (key) => (value) => void this._updateNotificationSetting(key, value.join(","));
-    const notifyOptions = Object.keys(this._hass?.services?.notify || {}).sort().map((service) => ({
+    const notifyOptions = Object.keys(this._hass?.services?.notify || {}).filter((service) => service !== "persistent_notification").sort().map((service) => ({
       value: `notify.${service}`,
       label: `notify.${service}`,
     }));
     this.shadowRoot.querySelector("[data-notify-selector-host]").replaceWith(this._createSelector({
-      label: "Benachrichtigungsdienste",
-      value: notificationList("notification_recipients"),
+      label: "iPhone-/Push-Dienste (optional)",
+      value: notificationList("notification_recipients").filter((service) => service !== "notify.persistent_notification"),
       multiple: true,
       selector: { select: { multiple: true, custom_value: true, mode: "dropdown", options: notifyOptions } },
       fallbackOptions: notifyOptions,

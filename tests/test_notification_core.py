@@ -8,6 +8,11 @@ area_entity_label = CORE["area_entity_label"]
 valid_nina_glob = CORE["valid_nina_glob"]
 ups_state_is_alert = CORE["ups_state_is_alert"]
 waste_collection_details = CORE["waste_collection_details"]
+normalized_alerts = CORE["normalized_alerts"]
+alert_set_digest = CORE["alert_set_digest"]
+aggregate_alert_message = CORE["aggregate_alert_message"]
+mobile_notification_data = CORE["mobile_notification_data"]
+mobile_clear_data = CORE["mobile_clear_data"]
 
 def test_area_entity_label_replaces_device_with_area():
     assert area_entity_label("Wohnzimmer", "AirGradient ONE CO₂", "AirGradient ONE", "sensor.co2") == "Wohnzimmer · CO₂"
@@ -45,6 +50,39 @@ def test_delivery_state_is_per_recipient_and_partial_failures_retry():
     assert pending_fingerprints(fingerprints, delivered["notify.phone_b"]) == fingerprints
     delivered["notify.phone_b"] = retained_fingerprints(fingerprints, delivered["notify.phone_b"], fingerprints)
     assert all(not pending_fingerprints(fingerprints, values) for values in delivered.values())
+
+def test_aggregate_alerts_are_deduplicated_and_digest_is_order_independent():
+    alerts = [
+        {"fingerprint": "battery:a", "message": "Batterie niedrig"},
+        {"fingerprint": "co2:b", "message": "CO2 hoch"},
+        {"fingerprint": "battery:a", "message": "Duplikat"},
+        {"fingerprint": "", "message": "Ungueltig"},
+    ]
+    assert normalized_alerts(alerts) == [
+        {"fingerprint": "battery:a", "message": "Batterie niedrig"},
+        {"fingerprint": "co2:b", "message": "CO2 hoch"},
+    ]
+    assert alert_set_digest(alerts) == alert_set_digest(list(reversed(alerts)))
+    assert alert_set_digest([{"fingerprint": "battery:a", "message": "Neuer Wert"}]) == alert_set_digest(
+        [{"fingerprint": "battery:a", "message": "Alter Wert"}]
+    )
+
+def test_aggregate_message_and_iphone_replacement_payloads():
+    alerts = [
+        {"fingerprint": "a", "message": "Erste Meldung"},
+        {"fingerprint": "b", "message": "Zweite Meldung"},
+    ]
+    assert aggregate_alert_message(alerts) == "• Erste Meldung\n• Zweite Meldung"
+    assert aggregate_alert_message(alerts, bullet="- ") == "- Erste Meldung\n- Zweite Meldung"
+    assert aggregate_alert_message(alerts, max_characters=20).endswith("\n…")
+    active = mobile_notification_data(2)
+    passive = mobile_notification_data(1, passive=True)
+    assert active["tag"] == passive["tag"] == mobile_clear_data()["tag"]
+    assert active["group"] == passive["group"] == mobile_clear_data()["group"]
+    assert active["subtitle"] == "2 aktive Meldungen"
+    assert active["push"] == {"interruption-level": "active", "badge": 2}
+    assert passive["push"] == {"interruption-level": "passive", "badge": 1}
+    assert mobile_clear_data()["push"] == {"badge": 0}
 
 def test_waste_collection_details_support_default_and_dated_attributes():
     details = waste_collection_details(

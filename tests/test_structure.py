@@ -10,7 +10,7 @@ def test_manifest_and_hacs():
     hacs = json.loads((ROOT / "hacs.json").read_text())
     assert manifest["domain"] == "smartphone_dashboard"
     assert manifest["config_flow"] is True
-    assert manifest["version"] == "22.0.27"
+    assert manifest["version"] == "22.0.28"
     assert hacs["name"] == "Smartphone Dashboard"
     assert hacs["zip_release"] is True
     assert hacs["filename"] == "smartphone_dashboard.zip"
@@ -59,9 +59,12 @@ def test_legacy_import_uses_state_machine_get_api():
 def test_backend_notifications_are_active_and_legacy_yaml_is_not():
     runtime = (COMPONENT / "notification.py").read_text()
     assert 'NOTIFICATION_TITLE = "Homeassistant"' in runtime
-    assert '{"title": NOTIFICATION_TITLE, "message": alert["message"]}' in runtime
+    assert 'PERSISTENT_NOTIFICATION_ID = "smartphone_dashboard_alerts"' in runtime
+    assert '"persistent_notification",' in runtime
+    assert '"message": "clear_notification"' in runtime
+    assert "aggregate_alert_message" in runtime and "mobile_notification_data" in runtime
     assert "asyncio.Queue" in runtime and "blocking=True" in runtime
-    assert "pending_fingerprints" in runtime and "valid_nina_glob" in runtime
+    assert "alert_set_digest" in runtime and "valid_nina_glob" in runtime
     assert "entry.async_create_background_task" in runtime
     assert "hass.async_create_task" not in runtime
     assert not list((COMPONENT / "compatibility").glob("*notifications_package.yaml"))

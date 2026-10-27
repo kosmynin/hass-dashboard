@@ -13,10 +13,23 @@ from homeassistant.const import EVENT_STATE_CHANGED
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers import area_registry as ar, device_registry as dr, entity_registry as er
 from .config_manager import ConfigManager
-from .notification_core import area_entity_label, pending_fingerprints, retained_fingerprints, ups_state_is_alert, valid_nina_glob, waste_collection_details
+from .notification_core import (
+    aggregate_alert_message,
+    alert_set_digest,
+    area_entity_label,
+    mobile_clear_data,
+    mobile_notification_data,
+    normalized_alerts,
+    ups_state_is_alert,
+    valid_nina_glob,
+    waste_collection_details,
+)
 
 DEFAULTS = {"battery": 6, "contact": 15, "co2": 1000, "frost": 4, "waste_days": 1, "nina": "binary_sensor.nina_warning_*"}
 NOTIFICATION_TITLE = "Homeassistant"
+PERSISTENT_NOTIFICATION_ID = "smartphone_dashboard_alerts"
+DIGEST_PREFIX = "digest:"
+CLEAR_DIGEST = "clear"
 _LOGGER = logging.getLogger(__name__)
 LEGACY_TO_CONFIG = {
     "input_boolean.smartphone_meldung_batterien": "notification_batteries", "input_boolean.smartphone_meldung_kontakte": "notification_contacts",
@@ -187,35 +200,157 @@ class NotificationCoordinator:
                     alerts.append({"fingerprint": f"nina:{hashlib.sha256(fingerprint_source.encode()).hexdigest()[:24]}", "message": f"⚠️ {detail}" + (f" ({severity})" if severity else "")})
         return alerts
 
+    async def _sync_persistent_notification(self, alerts: list[dict[str, str]]) -> None:
+        if alerts:
+            await self.hass.services.async_call(
+                "persistent_notification",
+                "create",
+                {
+                    "notification_id": PERSISTENT_NOTIFICATION_ID,
+                    "title": NOTIFICATION_TITLE,
+                    "message": aggregate_alert_message(alerts, bullet="- "),
+                },
+                blocking=True,
+            )
+            return
+        await self.hass.services.async_call(
+            "persistent_notification",
+            "dismiss",
+            {"notification_id": PERSISTENT_NOTIFICATION_ID},
+            blocking=True,
+        )
+
     async def _run(self) -> None:
         while True:
             try: await asyncio.wait_for(self._queue.get(), timeout=60)
             except asyncio.TimeoutError: pass
             await asyncio.sleep(0.5)
             try:
-                alerts = self.evaluate(); fingerprints = [a["fingerprint"] for a in alerts]
-                recipients = [x.strip() for x in self._state("input_text.smartphone_benachrichtigung_empfaenger").split(",") if x.strip().startswith("notify.")]
-                active_retry_keys = {(recipient, fingerprint) for recipient in recipients for fingerprint in fingerprints}
-                self._retry_after = {key: value for key, value in self._retry_after.items() if key in active_retry_keys}
-                self._retry_count = {key: value for key, value in self._retry_count.items() if key in active_retry_keys}
-                delivered_map = {key: list(value) for key, value in self.manager.data.get("notifications", {}).get("delivered_by_recipient", {}).items() if key in recipients}
+                alerts = normalized_alerts(self.evaluate())
+                fingerprints = [alert["fingerprint"] for alert in alerts]
+                fingerprint_set = set(fingerprints)
+                digest = alert_set_digest(alerts)
+                digest_token = f"{DIGEST_PREFIX}{digest}" if digest else ""
+                recipients = [
+                    item for item in dict.fromkeys(
+                        x.strip() for x in self._state("input_text.smartphone_benachrichtigung_empfaenger").split(",")
+                    )
+                    if item.startswith("notify.") and item != "notify.persistent_notification"
+                ]
+                stored_deliveries = self.manager.data.get("notifications", {}).get(
+                    "delivered_by_recipient", {}
+                )
+                delivered_map = {
+                    key: list(value)
+                    for key, value in stored_deliveries.items()
+                    if key in recipients and isinstance(value, list)
+                }
                 errors = []
+                try:
+                    await self._sync_persistent_notification(alerts)
+                except Exception as err:
+                    errors.append(f"Persistent Notification: {err}")
+                active_retry_keys = set()
                 for recipient in recipients:
                     delivered = delivered_map.setdefault(recipient, [])
-                    pending = set(pending_fingerprints(fingerprints, delivered)); successful = []
-                    for alert in (item for item in alerts if item["fingerprint"] in pending):
-                        retry_key = (recipient, alert["fingerprint"])
+                    previous_digest = next(
+                        (item for item in delivered if item.startswith(DIGEST_PREFIX)), ""
+                    )
+                    previous_fingerprints = {
+                        item for item in delivered if not item.startswith(DIGEST_PREFIX)
+                    }
+                    service = recipient.removeprefix("notify.")
+                    mobile_app = service.startswith("mobile_app_")
+                    if alerts:
+                        if previous_digest == digest_token:
+                            continue
+                        retry_key = (recipient, digest_token)
+                        active_retry_keys.add(retry_key)
                         if self._retry_after.get(retry_key, 0) > time.monotonic():
                             errors.append(f"{recipient}: Zustellung wartet auf erneuten Versuch")
                             continue
+                        passive = bool(delivered) and not (fingerprint_set - previous_fingerprints)
+                        payload: dict[str, Any] = {
+                            "title": NOTIFICATION_TITLE,
+                            "message": aggregate_alert_message(alerts, max_characters=1800),
+                        }
+                        if mobile_app:
+                            payload["data"] = mobile_notification_data(len(alerts), passive=passive)
                         try:
-                            await self.hass.services.async_call("notify", recipient.removeprefix("notify."), {"title": NOTIFICATION_TITLE, "message": alert["message"]}, blocking=True)
-                            successful.append(alert["fingerprint"]); self._retry_after.pop(retry_key, None); self._retry_count.pop(retry_key, None)
+                            await self.hass.services.async_call(
+                                "notify", service, payload, blocking=True
+                            )
+                            delivered_map[recipient] = [digest_token, *fingerprints]
+                            self._retry_after.pop(retry_key, None)
+                            self._retry_count.pop(retry_key, None)
                         except Exception as err:
-                            count = min(6, self._retry_count.get(retry_key, 0) + 1); self._retry_count[retry_key] = count
-                            self._retry_after[retry_key] = time.monotonic() + min(3600, 30 * (2 ** (count - 1))); errors.append(f"{recipient}: {err}")
-                    delivered_map[recipient] = retained_fingerprints(fingerprints, delivered, successful)
-                await self.manager.async_update_notification_status(delivered_map, {"active": not errors and bool(recipients), "alerts": len(alerts), "recipients": recipients, "errors": errors[-10:]})
+                            count = min(6, self._retry_count.get(retry_key, 0) + 1)
+                            self._retry_count[retry_key] = count
+                            self._retry_after[retry_key] = time.monotonic() + min(3600, 30 * (2 ** (count - 1)))
+                            errors.append(f"{recipient}: {err}")
+                    elif delivered:
+                        if not mobile_app:
+                            delivered_map[recipient] = []
+                            continue
+                        retry_key = (recipient, CLEAR_DIGEST)
+                        active_retry_keys.add(retry_key)
+                        if self._retry_after.get(retry_key, 0) > time.monotonic():
+                            errors.append(f"{recipient}: Entfernen wartet auf erneuten Versuch")
+                            continue
+                        try:
+                            await self.hass.services.async_call(
+                                "notify",
+                                service,
+                                {"message": "clear_notification", "data": mobile_clear_data()},
+                                blocking=True,
+                            )
+                            delivered_map[recipient] = []
+                            self._retry_after.pop(retry_key, None)
+                            self._retry_count.pop(retry_key, None)
+                        except Exception as err:
+                            count = min(6, self._retry_count.get(retry_key, 0) + 1)
+                            self._retry_count[retry_key] = count
+                            self._retry_after[retry_key] = time.monotonic() + min(3600, 30 * (2 ** (count - 1)))
+                            errors.append(f"{recipient}: {err}")
+                for recipient, delivered in stored_deliveries.items():
+                    if recipient in recipients or not delivered or not recipient.startswith("notify.mobile_app_"):
+                        continue
+                    retry_key = (recipient, CLEAR_DIGEST)
+                    active_retry_keys.add(retry_key)
+                    if self._retry_after.get(retry_key, 0) > time.monotonic():
+                        errors.append(f"{recipient}: Entfernen wartet auf erneuten Versuch")
+                        delivered_map[recipient] = list(delivered)
+                        continue
+                    try:
+                        await self.hass.services.async_call(
+                            "notify",
+                            recipient.removeprefix("notify."),
+                            {"message": "clear_notification", "data": mobile_clear_data()},
+                            blocking=True,
+                        )
+                        self._retry_after.pop(retry_key, None)
+                        self._retry_count.pop(retry_key, None)
+                    except Exception as err:
+                        count = min(6, self._retry_count.get(retry_key, 0) + 1)
+                        self._retry_count[retry_key] = count
+                        self._retry_after[retry_key] = time.monotonic() + min(3600, 30 * (2 ** (count - 1)))
+                        delivered_map[recipient] = list(delivered)
+                        errors.append(f"{recipient}: {err}")
+                self._retry_after = {
+                    key: value for key, value in self._retry_after.items()
+                    if key in active_retry_keys
+                }
+                self._retry_count = {
+                    key: value for key, value in self._retry_count.items()
+                    if key in active_retry_keys
+                }
+                await self.manager.async_update_notification_status(delivered_map, {
+                    "active": not errors,
+                    "alerts": len(alerts),
+                    "recipients": recipients,
+                    "persistent_notification_id": PERSISTENT_NOTIFICATION_ID,
+                    "errors": errors[-10:],
+                })
             except asyncio.CancelledError: raise
             except Exception as err:
                 _LOGGER.exception("Notification-Auswertung fehlgeschlagen")

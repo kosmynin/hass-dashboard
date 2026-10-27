@@ -2,7 +2,11 @@
 from __future__ import annotations
 from collections.abc import Mapping
 from datetime import date, datetime
+import hashlib
 import re
+
+MOBILE_NOTIFICATION_TAG = "smartphone_dashboard_alerts"
+MOBILE_NOTIFICATION_GROUP = "smartphone_dashboard"
 
 UPS_NORMAL_STATES = frozenset((
     "online", "on", "ok", "normal", "ol", "connected", "available", "mains", "line",
@@ -10,6 +14,58 @@ UPS_NORMAL_STATES = frozenset((
 UPS_IGNORED_STATES = frozenset(("", "unknown", "unavailable", "none"))
 UPS_PROBLEM_DEVICE_CLASSES = frozenset(("problem", "safety", "smoke", "tamper", "moisture"))
 UPS_HISTORY_DEVICE_CLASSES = frozenset(("date", "timestamp"))
+
+def normalized_alerts(alerts: list[Mapping[str, object]]) -> list[dict[str, str]]:
+    """Return valid alerts once per fingerprint while preserving display order."""
+    result: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for alert in alerts:
+        fingerprint = str(alert.get("fingerprint") or "").strip()
+        message = str(alert.get("message") or "").strip()
+        if not fingerprint or not message or fingerprint in seen:
+            continue
+        seen.add(fingerprint)
+        result.append({"fingerprint": fingerprint, "message": message})
+    return result
+
+def alert_set_digest(alerts: list[Mapping[str, object]]) -> str:
+    """Create a stable signature for the currently active alert set."""
+    fingerprints = sorted(alert["fingerprint"] for alert in normalized_alerts(alerts))
+    return hashlib.sha256("\0".join(fingerprints).encode()).hexdigest()[:32] if fingerprints else ""
+
+def aggregate_alert_message(
+    alerts: list[Mapping[str, object]],
+    bullet: str = "• ",
+    max_characters: int | None = None,
+) -> str:
+    """Format one readable aggregate and optionally limit mobile payload size."""
+    message = "\n".join(f"{bullet}{alert['message']}" for alert in normalized_alerts(alerts))
+    if not max_characters or len(message) <= max_characters:
+        return message
+    shortened = message[: max(1, max_characters - 2)].rsplit("\n", 1)[0].rstrip()
+    return f"{shortened}\n…" if shortened else "…"
+
+def mobile_notification_data(alert_count: int, passive: bool = False) -> dict[str, object]:
+    """Build replacement metadata understood by the iOS Companion app."""
+    count = max(0, int(alert_count))
+    subtitle = f"{count} aktive Meldung" if count == 1 else f"{count} aktive Meldungen"
+    return {
+        "tag": MOBILE_NOTIFICATION_TAG,
+        "group": MOBILE_NOTIFICATION_GROUP,
+        "subtitle": subtitle,
+        "push": {
+            "interruption-level": "passive" if passive else "active",
+            "badge": count,
+        },
+    }
+
+def mobile_clear_data() -> dict[str, object]:
+    """Build the iOS payload that clears the replaced aggregate notification."""
+    return {
+        "tag": MOBILE_NOTIFICATION_TAG,
+        "group": MOBILE_NOTIFICATION_GROUP,
+        "push": {"badge": 0},
+    }
 
 def area_entity_label(
     area_name: object,
