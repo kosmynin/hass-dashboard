@@ -13,11 +13,20 @@ alert_set_digest = CORE["alert_set_digest"]
 aggregate_alert_message = CORE["aggregate_alert_message"]
 mobile_notification_data = CORE["mobile_notification_data"]
 mobile_clear_data = CORE["mobile_clear_data"]
+is_battery_level_sensor = CORE["is_battery_level_sensor"]
 
 def test_area_entity_label_replaces_device_with_area():
     assert area_entity_label("Wohnzimmer", "AirGradient ONE CO₂", "AirGradient ONE", "sensor.co2") == "Wohnzimmer · CO₂"
     assert area_entity_label("Küche", "Fenster", "Fenstersensor", "binary_sensor.fenster") == "Küche · Fenster"
     assert area_entity_label(None, "AirGradient ONE CO₂", "AirGradient ONE", "sensor.co2") == "CO₂"
+
+def test_battery_voltage_is_never_a_battery_level_alert():
+    assert is_battery_level_sensor("sensor.remote_battery", {"device_class": "battery", "unit_of_measurement": "%"})
+    assert is_battery_level_sensor("sensor.fernbedienung_batterie", {"unit_of_measurement": "%"})
+    assert not is_battery_level_sensor("sensor.remote_battery_voltage", {"device_class": "voltage", "unit_of_measurement": "V"})
+    assert not is_battery_level_sensor("sensor.batteriespannung", {"friendly_name": "Batteriespannung", "unit_of_measurement": "V"})
+    assert not is_battery_level_sensor("sensor.remote_battery", {"device_class": "battery", "unit_of_measurement": "mV"})
+    assert not is_battery_level_sensor("sensor.battery_temperature", {"unit_of_measurement": "°C"})
 
 def test_nina_glob_exactly_one_star():
     assert valid_nina_glob("binary_sensor.nina_warning_*")

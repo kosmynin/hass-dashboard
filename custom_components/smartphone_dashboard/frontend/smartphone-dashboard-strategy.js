@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.29";
+const STRATEGY_VERSION = "22.0.30";
 const CONFIG_VERSION = 23;
 
 const ACTIVE_ROOM_STYLES = `
@@ -33,6 +33,16 @@ const UPS_PROBLEM_DEVICE_CLASSES = new Set([
   "problem", "safety", "smoke", "tamper", "moisture",
 ]);
 const UPS_HISTORY_DEVICE_CLASSES = new Set(["date", "timestamp"]);
+const BATTERY_VOLTAGE_EXCLUDE_FILTERS = [
+  { attributes: { device_class: "voltage" } },
+  { attributes: { unit_of_measurement: "V" } },
+  { attributes: { unit_of_measurement: "mV" } },
+  { entity_id: "sensor.*battery*voltage*" },
+  { entity_id: "sensor.*voltage*battery*" },
+  { entity_id: "sensor.*batterie*spannung*" },
+  { entity_id: "sensor.*spannung*batterie*" },
+  { entity_id: "sensor.*akku*spannung*" },
+];
 let cachedDisplayNotificationConfig;
 const NOTIFICATION_POPUPS = {
   batteries: ["#meldung-batterien", "Batterien", "mdi:battery-alert"],
@@ -271,6 +281,17 @@ function mergeBackendNotifications(explicitConfig, backendConfig) {
     if (!Object.prototype.hasOwnProperty.call(merged, key) && Object.prototype.hasOwnProperty.call(backendConfig || {}, key)) merged[key] = backendConfig[key];
   }
   return merged;
+}
+
+function isBatteryLevelEntity(entityId, state) {
+  const attributes = state?.attributes || {};
+  const deviceClass = String(attributes.device_class || "").toLowerCase();
+  const unit = String(attributes.unit_of_measurement || "").trim().toLowerCase().replaceAll(" ", "");
+  const descriptor = `${entityId} ${attributes.friendly_name || ""} ${attributes.name || ""}`.toLowerCase();
+  const batteryVoltage = /(?:battery|batterie|akku).{0,12}(?:voltage|spannung)|(?:voltage|spannung).{0,12}(?:battery|batterie|akku)/.test(descriptor);
+  if (deviceClass === "voltage" || ["v", "mv", "kv"].includes(unit) || batteryVoltage) return false;
+  const namedBattery = /battery|batterie/i.test(entityId);
+  return deviceClass === "battery" || (namedBattery && ["", "%", "percent"].includes(unit));
 }
 
 if (!customElements.get(STRATEGY_ELEMENT)) {
@@ -770,6 +791,7 @@ function notificationDetailCard(filters, category, hiddenEntityIds = []) {
         { state: "unavailable" },
         { state: "unknown" },
         ...hiddenEntityIds.map((entity_id) => ({ entity_id })),
+        ...(category === "batteries" ? BATTERY_VOLTAGE_EXCLUDE_FILTERS : []),
         ...(category === "ups"
           ? upsHistoryExcludeFilters(filters.map((entry) => entry.entity_id).filter(Boolean))
           : []),
@@ -868,7 +890,7 @@ function applyNotificationOptions(dashboard, config, hass) {
     entityId.startsWith("sensor.") &&
     !registry.get(entityId)?.disabled_by &&
     !batteryExclusions.includes(entityId) &&
-    (state?.attributes?.device_class === "battery" || /battery|batterie/i.test(entityId)),
+    isBatteryLevelEntity(entityId, state),
   ).map(([entityId]) => entityId);
   const notificationHiddenEntityIds = hiddenEntityIds.filter(
     (entityId) => !batteryEntityIds.includes(entityId),
@@ -1016,6 +1038,7 @@ function applyNotificationOptions(dashboard, config, hass) {
   autoEntities.filter.exclude = [
     { state: "unavailable" },
     { state: "unknown" },
+    ...BATTERY_VOLTAGE_EXCLUDE_FILTERS,
     ...notificationHiddenEntityIds.map((entity_id) => ({ options: {}, entity_id })),
     ...batteryExclusions.map((entity_id) => ({ options: {}, entity_id })),
     ...upsHistoryExcludeFilters(upsEntities),

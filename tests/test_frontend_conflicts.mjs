@@ -83,6 +83,8 @@ const visibilityHass = {
     "media_player.hidden": { state: "idle", attributes: { friendly_name: "Versteckte Medien" } },
     "sensor.visible_battery": { state: "80", attributes: { friendly_name: "Sichtbare Batterie", device_class: "battery", unit_of_measurement: "%" } },
     "sensor.hidden_battery": { state: "3", attributes: { friendly_name: "Versteckte Batterie", device_class: "battery", unit_of_measurement: "%" } },
+    "sensor.remote_battery_voltage": { state: "2.9", attributes: { friendly_name: "Remote Battery Voltage", device_class: "voltage", unit_of_measurement: "V" } },
+    "sensor.batteriespannung": { state: "2900", attributes: { friendly_name: "Batteriespannung", device_class: "battery", unit_of_measurement: "mV" } },
     "sensor.disabled_system_cpu": { state: "12", attributes: { friendly_name: "Deaktivierte CPU", unit_of_measurement: "%" } },
   },
   areas: {}, devices: {}, services: {},
@@ -95,6 +97,8 @@ const visibilityHass = {
     "media_player.hidden": { entity_id: "media_player.hidden", hidden_by: "integration" },
     "sensor.visible_battery": { entity_id: "sensor.visible_battery" },
     "sensor.hidden_battery": { hidden: true },
+    "sensor.remote_battery_voltage": { entity_id: "sensor.remote_battery_voltage" },
+    "sensor.batteriespannung": { entity_id: "sensor.batteriespannung" },
     "sensor.disabled_system_cpu": { entity_id: "sensor.disabled_system_cpu", disabled_by: "integration" },
   },
 };
@@ -120,9 +124,13 @@ assert.equal(visibilityCards.some((card) => card.hash === "#system"), false);
 const visibilityAuto = visibilityCards.find((card) => card.type === "custom:auto-entities");
 assert.equal(visibilityAuto.filter.include.some((item) => item.entity_id === "sensor.hidden_battery"), true);
 assert.equal(visibilityAuto.filter.exclude.some((item) => item.entity_id === "sensor.hidden_battery"), false);
+assert.equal(visibilityAuto.filter.include.some((item) => item.entity_id === "sensor.remote_battery_voltage"), false);
+assert.equal(visibilityAuto.filter.include.some((item) => item.entity_id === "sensor.batteriespannung"), false);
 const batteryPopup = visibilityCards.find((card) => card.hash === "#meldung-batterien");
 assert.equal(batteryPopup.cards[0].filter.include.some((item) => item.entity_id === "sensor.hidden_battery"), true);
 assert.equal(batteryPopup.cards[0].filter.exclude.some((item) => item.entity_id === "sensor.hidden_battery"), false);
+assert.equal(batteryPopup.cards[0].filter.include.some((item) => item.entity_id === "sensor.remote_battery_voltage"), false);
+assert.equal(batteryPopup.cards[0].filter.include.some((item) => item.entity_id === "sensor.batteriespannung"), false);
 
 const excludedHiddenBatteryDashboard = await SmartphoneDashboardStrategy.generate({
   battery_exclusions: "sensor.hidden_battery",

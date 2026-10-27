@@ -14,6 +14,25 @@ UPS_NORMAL_STATES = frozenset((
 UPS_IGNORED_STATES = frozenset(("", "unknown", "unavailable", "none"))
 UPS_PROBLEM_DEVICE_CLASSES = frozenset(("problem", "safety", "smoke", "tamper", "moisture"))
 UPS_HISTORY_DEVICE_CLASSES = frozenset(("date", "timestamp"))
+BATTERY_VOLTAGE_UNITS = frozenset(("v", "mv", "kv"))
+
+def is_battery_level_sensor(entity_id: str, attributes: Mapping[str, object]) -> bool:
+    """Identify battery percentages while rejecting battery-voltage sensors."""
+    device_class = str(attributes.get("device_class") or "").strip().lower()
+    unit = str(attributes.get("unit_of_measurement") or "").strip().lower().replace(" ", "")
+    descriptor = " ".join((
+        entity_id,
+        str(attributes.get("friendly_name") or ""),
+        str(attributes.get("name") or ""),
+    )).casefold()
+    battery_voltage = re.search(
+        r"(?:battery|batterie|akku).{0,12}(?:voltage|spannung)|(?:voltage|spannung).{0,12}(?:battery|batterie|akku)",
+        descriptor,
+    )
+    if device_class == "voltage" or unit in BATTERY_VOLTAGE_UNITS or battery_voltage:
+        return False
+    named_battery = bool(re.search(r"battery|batterie", entity_id, re.IGNORECASE))
+    return device_class == "battery" or (named_battery and unit in ("", "%", "percent"))
 
 def normalized_alerts(alerts: list[Mapping[str, object]]) -> list[dict[str, str]]:
     """Return valid alerts once per fingerprint while preserving display order."""

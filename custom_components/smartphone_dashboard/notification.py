@@ -17,6 +17,7 @@ from .notification_core import (
     aggregate_alert_message,
     alert_set_digest,
     area_entity_label,
+    is_battery_level_sensor,
     mobile_clear_data,
     mobile_notification_data,
     normalized_alerts,
@@ -147,7 +148,7 @@ class NotificationCoordinator:
         now = datetime.now().astimezone()
         for state in self.hass.states.async_all():
             entity_id, attrs = state.entity_id, state.attributes
-            if self._enabled("batterien") and entity_id not in battery_exclusions and (attrs.get("device_class") == "battery" or entity_id.endswith(("battery", "batterie"))):
+            if self._enabled("batterien") and entity_id not in battery_exclusions and is_battery_level_sensor(entity_id, attrs):
                 try:
                     value = float(state.state)
                     if value <= battery_limit: alerts.append({"fingerprint": f"battery:{entity_id}", "message": f"🔋 {self._entity_label(entity_id, attrs)}: {value:g}%"})

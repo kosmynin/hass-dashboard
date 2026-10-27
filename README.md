@@ -47,6 +47,8 @@ Vorlaufs und binden passende `calendar.*`-Entitäten darunter als kompakten
 Bubble-Card-Kalender mit bis zu sechs Terminen der kommenden 45 Tage ein.
 Batteriemeldungen bleiben neutral; ausschließlich ihr Symbol wird unterhalb des
 Grenzwerts orange und bei höchstens dessen Hälfte rot dargestellt.
+Batteriespannungen in Volt oder Millivolt werden grundsätzlich nicht als
+niedriger Batteriestand in den Meldungen geführt.
 
 Im Sicherheits-Pop-up stehen Alarm-Panels vor Kameras und Schlössern. Die
 Master-Alarmanlage wird anhand ihres Namens erkannt oder in den Einstellungen
