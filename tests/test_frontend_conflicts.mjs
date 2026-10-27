@@ -7,7 +7,10 @@ const { SmartphoneDashboardStrategy, SmartphoneDashboardStrategyEditor, partitio
 const roomHass = {
   states: {
     "light.kitchen": { state: "off", attributes: { friendly_name: "Küche" } },
-    "sensor.kitchen_temperature": { state: "21.5", attributes: { friendly_name: "Küchentemperatur", device_class: "temperature", unit_of_measurement: "°C" } },
+    "sensor.air_pm25": { state: "8", attributes: { friendly_name: "Air Quality PM2.5", device_class: "pm25", unit_of_measurement: "µg/m³" } },
+    "sensor.air_co2": { state: "620", attributes: { friendly_name: "Air Quality Kohlendioxid", device_class: "carbon_dioxide", unit_of_measurement: "ppm" } },
+    "sensor.air_humidity": { state: "48", attributes: { friendly_name: "Air Quality Luftfeuchtigkeit", device_class: "humidity", unit_of_measurement: "%" } },
+    "sensor.kitchen_temperature": { state: "21.5", attributes: { friendly_name: "Air Quality Temperatur", device_class: "temperature", unit_of_measurement: "°C" } },
     "sensor.kitchen_hidden": { state: "42", attributes: { friendly_name: "Versteckt", unit_of_measurement: "%" } },
     "sensor.hidden_room_only": { state: "1", attributes: { friendly_name: "Einzige versteckte Entität", unit_of_measurement: "%" } },
   },
@@ -15,10 +18,13 @@ const roomHass = {
     kitchen: { area_id: "kitchen", name: "Küche", icon: "mdi:silverware-fork-knife" },
     hidden_room: { area_id: "hidden_room", name: "Versteckter Raum", icon: "mdi:eye-off" },
   },
-  devices: {},
+  devices: { air_quality: { id: "air_quality", area_id: "kitchen", name: "Air Quality" } },
   entities: {
     kitchen_light: { entity_id: "light.kitchen", area_id: "kitchen" },
-    kitchen_temperature: { entity_id: "sensor.kitchen_temperature", area_id: "kitchen" },
+    kitchen_temperature: { entity_id: "sensor.kitchen_temperature", device_id: "air_quality", original_name: "Temperatur" },
+    air_humidity: { entity_id: "sensor.air_humidity", device_id: "air_quality", original_name: "Luftfeuchtigkeit" },
+    air_co2: { entity_id: "sensor.air_co2", device_id: "air_quality", original_name: "Kohlendioxid" },
+    air_pm25: { entity_id: "sensor.air_pm25", device_id: "air_quality", original_name: "PM2.5" },
     "sensor.kitchen_hidden": { entity_id: "sensor.kitchen_hidden", area_id: "kitchen", hidden: true },
     "sensor.hidden_room_only": { entity_id: "sensor.hidden_room_only", area_id: "hidden_room", hidden: true },
   },
@@ -46,6 +52,18 @@ assert.match(roomCard.styles, /primary-text-color/);
 const roomPopup = roomDashboard.views[0].sections[0].cards.find((card) => card.hash === "#raum-kitchen");
 const sensorGrid = roomPopup.cards.find((card) => card.type === "grid");
 const sensorCard = sensorGrid.cards.find((card) => card.entity === "sensor.kitchen_temperature");
+assert.deepEqual(sensorGrid.cards.map((card) => card.entity), [
+  "sensor.kitchen_temperature",
+  "sensor.air_humidity",
+  "sensor.air_co2",
+  "sensor.air_pm25",
+]);
+assert.deepEqual(sensorGrid.cards.map((card) => card.custom_fields.title.card.name), [
+  "Temperatur",
+  "Luftfeuchtigkeit",
+  "Kohlendioxid",
+  "PM2.5",
+]);
 assert.equal(sensorCard.type, "custom:button-card");
 assert.equal("template" in sensorCard, false);
 assert.equal(sensorCard.custom_fields.title.card.entity, "sensor.kitchen_temperature");

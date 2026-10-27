@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.24";
+const STRATEGY_VERSION = "22.0.25";
 const CONFIG_VERSION = 23;
 
 const ACTIVE_ROOM_STYLES = `
@@ -392,7 +392,7 @@ function isEntityVisible(hass, entityId, registry = entityRegistryMap(hass)) {
     state.attributes?.hidden !== true;
 }
 
-function entityLocationLabel(hass, entityId) {
+function entityDisplayName(hass, entityId) {
   const entry = entityRegistryMap(hass).get(entityId);
   const device = valuesOf(hass?.devices).find((item) => item?.id === entry?.device_id);
   const areaId = entry?.area_id || device?.area_id;
@@ -406,6 +406,16 @@ function entityLocationLabel(hass, entityId) {
       entityName = entityName.slice(prefix.length).trim();
     }
   }
+  return entityName || entityId.split(".")[1] || entityId;
+}
+
+function entityLocationLabel(hass, entityId) {
+  const entry = entityRegistryMap(hass).get(entityId);
+  const device = valuesOf(hass?.devices).find((item) => item?.id === entry?.device_id);
+  const areaId = entry?.area_id || device?.area_id;
+  const area = valuesOf(hass?.areas).find((item) => (item?.area_id || item?.id) === areaId);
+  const areaName = String(area?.name || "").trim();
+  const entityName = entityDisplayName(hass, entityId);
   return areaName && entityName.toLocaleLowerCase("de-DE") !== areaName.toLocaleLowerCase("de-DE")
     ? `${areaName} · ${entityName}`
     : entityName || areaName || entityId;
@@ -1073,7 +1083,7 @@ function graphSensorCard(entity, hass, appearance = {}) {
           card_type: "button",
           button_type: "state",
           entity,
-          name: attributes.friendly_name || entity,
+          name: appearance.name || attributes.friendly_name || entity,
           icon,
           card_layout: "normal",
           styles: `
@@ -1131,11 +1141,29 @@ function genericRoomPopup(room, hass) {
   const covers = entities.filter((entityId) => entityId.startsWith("cover."));
   const fans = entities.filter((entityId) => entityId.startsWith("fan."));
   const cameras = entities.filter((entityId) => entityId.startsWith("camera."));
+  const sensorMetricRank = (entityId) => {
+    const attributes = hass?.states?.[entityId]?.attributes || {};
+    const deviceClass = String(attributes.device_class || "").toLowerCase();
+    const descriptor = `${entityId} ${entityDisplayName(hass, entityId)} ${deviceClass} ${attributes.unit_of_measurement || ""}`.toLowerCase();
+    if (deviceClass === "temperature" || /temperature|temperatur|°c|°f/.test(descriptor)) return 0;
+    if (deviceClass === "humidity" || /humidity|luftfeuchtigkeit/.test(descriptor)) return 1;
+    if (deviceClass === "carbon_dioxide" || /co2|co₂|carbon.dioxide|kohlendioxid|ppm/.test(descriptor)) return 2;
+    if (["pm25", "particulate_matter_2_5"].includes(deviceClass) || /pm[_. -]?2[_.]?5|particulate.*2[_.]?5|feinstaub.*2[_.]?5/.test(descriptor)) return 3;
+    if (deviceClass === "pm10" || /pm[_. -]?10|particulate.*10|feinstaub.*10/.test(descriptor)) return 4;
+    if (deviceClass === "pm1" || /pm[_. -]?1(?:\D|$)|particulate.*1(?:\D|$)|feinstaub.*1(?:\D|$)/.test(descriptor)) return 5;
+    if (/volatile_organic_compounds|voc|flüchtige.*verbindung/.test(descriptor)) return 6;
+    if (deviceClass === "pressure" || /luftdruck|pressure|hpa|mbar/.test(descriptor)) return 7;
+    if (deviceClass === "illuminance" || /beleuchtungsstärke|illuminance|\blux\b/.test(descriptor)) return 8;
+    if (deviceClass === "battery" || /battery|batterie|akku/.test(descriptor)) return 9;
+    return 100;
+  };
   const sensors = entities.filter((entityId) => {
     if (!entityId.startsWith("sensor.")) return false;
     const state = hass?.states?.[entityId];
     return Boolean(state?.attributes?.unit_of_measurement) && !["unknown", "unavailable"].includes(state?.state);
-  });
+  }).sort((left, right) =>
+    sensorMetricRank(left) - sensorMetricRank(right) ||
+    entityDisplayName(hass, left).localeCompare(entityDisplayName(hass, right), "de"));
   const cards = [];
 
   function sensorAppearance(entity) {
@@ -1238,7 +1266,10 @@ function genericRoomPopup(room, hass) {
       square: false,
       cards: sensors.map((entity) => {
         const appearance = sensorAppearance(entity);
-        return graphSensorCard(entity, hass, appearance);
+        return graphSensorCard(entity, hass, {
+          ...appearance,
+          name: entityDisplayName(hass, entity),
+        });
       }),
     });
   }
