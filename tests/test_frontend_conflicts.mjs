@@ -118,9 +118,19 @@ const mediaPopup = visibilityCards.find((card) => card.hash === "#medien");
 assert.deepEqual(mediaPopup.cards.map((card) => card.entity), ["media_player.visible"]);
 assert.equal(visibilityCards.some((card) => card.hash === "#system"), false);
 const visibilityAuto = visibilityCards.find((card) => card.type === "custom:auto-entities");
-assert.equal(visibilityAuto.filter.exclude.some((item) => item.entity_id === "sensor.hidden_battery"), true);
+assert.equal(visibilityAuto.filter.include.some((item) => item.entity_id === "sensor.hidden_battery"), true);
+assert.equal(visibilityAuto.filter.exclude.some((item) => item.entity_id === "sensor.hidden_battery"), false);
 const batteryPopup = visibilityCards.find((card) => card.hash === "#meldung-batterien");
-assert.equal(batteryPopup.cards[0].filter.exclude.some((item) => item.entity_id === "sensor.hidden_battery"), true);
+assert.equal(batteryPopup.cards[0].filter.include.some((item) => item.entity_id === "sensor.hidden_battery"), true);
+assert.equal(batteryPopup.cards[0].filter.exclude.some((item) => item.entity_id === "sensor.hidden_battery"), false);
+
+const excludedHiddenBatteryDashboard = await SmartphoneDashboardStrategy.generate({
+  battery_exclusions: "sensor.hidden_battery",
+}, visibilityHass);
+const excludedHiddenBatteryAuto = excludedHiddenBatteryDashboard.views[0].sections[0].cards
+  .find((card) => card.type === "custom:auto-entities");
+assert.equal(excludedHiddenBatteryAuto.filter.include.some((item) => item.entity_id === "sensor.hidden_battery"), false);
+assert.equal(excludedHiddenBatteryAuto.filter.exclude.some((item) => item.entity_id === "sensor.hidden_battery"), true);
 
 const personDashboard = await SmartphoneDashboardStrategy.generate({}, {
   states: { "person.boris": { state: "home", attributes: { friendly_name: "Boris" } } },

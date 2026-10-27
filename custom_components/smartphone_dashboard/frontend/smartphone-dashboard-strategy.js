@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.25";
+const STRATEGY_VERSION = "22.0.26";
 const CONFIG_VERSION = 23;
 
 const ACTIVE_ROOM_STYLES = `
@@ -860,13 +860,18 @@ function applyNotificationOptions(dashboard, config, hass) {
     .map((entityId) => entityId.trim())
     .filter(Boolean);
   const hiddenEntityIds = hiddenDashboardEntityIds(hass);
+  const registry = entityRegistryMap(hass);
   const visibleStates = Object.entries(hass?.states || {}).filter(([entityId]) =>
     isEntityVisible(hass, entityId));
-  const batteryEntityIds = visibleStates.filter(([entityId, state]) =>
+  const batteryEntityIds = Object.entries(hass?.states || {}).filter(([entityId, state]) =>
     entityId.startsWith("sensor.") &&
+    !registry.get(entityId)?.disabled_by &&
     !batteryExclusions.includes(entityId) &&
     (state?.attributes?.device_class === "battery" || /battery|batterie/i.test(entityId)),
   ).map(([entityId]) => entityId);
+  const notificationHiddenEntityIds = hiddenEntityIds.filter(
+    (entityId) => !batteryEntityIds.includes(entityId),
+  );
   const contactEntityIds = visibleStates.filter(([entityId, state]) =>
     entityId.startsWith("binary_sensor.") &&
     (["door", "window", "opening"].includes(state?.attributes?.device_class) ||
@@ -1010,7 +1015,7 @@ function applyNotificationOptions(dashboard, config, hass) {
   autoEntities.filter.exclude = [
     { state: "unavailable" },
     { state: "unknown" },
-    ...hiddenEntityIds.map((entity_id) => ({ options: {}, entity_id })),
+    ...notificationHiddenEntityIds.map((entity_id) => ({ options: {}, entity_id })),
     ...batteryExclusions.map((entity_id) => ({ options: {}, entity_id })),
     ...upsHistoryExcludeFilters(upsEntities),
   ];
@@ -1019,7 +1024,7 @@ function applyNotificationOptions(dashboard, config, hass) {
     if (popupHashes.has(cards[index]?.hash)) cards.splice(index, 1);
   }
   if (config.show_notifications !== false) {
-    cards.push(...notificationDetailPopups(detailFilters, hass, hiddenEntityIds));
+    cards.push(...notificationDetailPopups(detailFilters, hass, notificationHiddenEntityIds));
   }
   return dashboard;
 }
