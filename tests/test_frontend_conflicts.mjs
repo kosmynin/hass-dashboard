@@ -209,6 +209,20 @@ assert.deepEqual(securityPopup.cards.map((card) => card.type), [
 ]);
 assert.equal(securityPopup.cards[0].entity, "alarm_control_panel.master");
 
+const singleAlarmHass = {
+  ...securityHass,
+  states: Object.fromEntries(Object.entries(securityHass.states)
+    .filter(([entityId]) => entityId !== "alarm_control_panel.garage")),
+};
+const singleAlarmDashboard = await SmartphoneDashboardStrategy.generate(securityConfig, singleAlarmHass);
+const singleAlarmPopup = singleAlarmDashboard.views[0].sections[0].cards
+  .find((card) => card.hash === "#sicherheit");
+assert.equal(singleAlarmPopup.entity, "alarm_control_panel.master");
+assert.equal(singleAlarmPopup.cards.some((card) => card.type === "alarm-panel"), false);
+assert.deepEqual(singleAlarmPopup.cards.map((card) => card.type), [
+  "picture-entity", "custom:bubble-card",
+]);
+
 const locationDashboard = { views: [{ sections: [{ cards: [
   { type: "heading", heading: "Meldungen" },
   { type: "custom:auto-entities", filter: { include: [

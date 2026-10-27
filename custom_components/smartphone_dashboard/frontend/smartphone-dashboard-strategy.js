@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.26";
+const STRATEGY_VERSION = "22.0.27";
 const CONFIG_VERSION = 23;
 
 const ACTIVE_ROOM_STYLES = `
@@ -1866,6 +1866,11 @@ function printerFeatureCards(item, hass) {
 }
 
 function securityFeatureCards(item, hass) {
+  const alarmEntities = item.entities.filter((entityId) =>
+    entityId.startsWith("alarm_control_panel.") && hass?.states?.[entityId]);
+  const singleHeaderAlarm = alarmEntities.length === 1 && alarmEntities[0] === item.master_alarm
+    ? item.master_alarm
+    : "";
   const priority = (entityId) => {
     if (entityId === item.master_alarm) return -1;
     if (entityId.startsWith("alarm_control_panel.")) return 0;
@@ -1874,7 +1879,7 @@ function securityFeatureCards(item, hass) {
     return 3;
   };
   return [...item.entities]
-    .filter((entityId) => hass?.states?.[entityId])
+    .filter((entityId) => hass?.states?.[entityId] && entityId !== singleHeaderAlarm)
     .sort((left, right) => {
       const difference = priority(left) - priority(right);
       if (difference) return difference;
