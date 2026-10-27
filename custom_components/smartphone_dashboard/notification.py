@@ -52,6 +52,7 @@ class NotificationCoordinator:
         self._unsub = None
         self._retry_after = {}
         self._retry_count = {}
+        self._persistent_message: str | None = None
 
     async def async_start(self) -> None:
         if self._worker: return
@@ -201,6 +202,9 @@ class NotificationCoordinator:
         return alerts
 
     async def _sync_persistent_notification(self, alerts: list[dict[str, str]]) -> None:
+        message = aggregate_alert_message(alerts, bullet="- ") if alerts else ""
+        if message == self._persistent_message:
+            return
         if alerts:
             await self.hass.services.async_call(
                 "persistent_notification",
@@ -208,17 +212,18 @@ class NotificationCoordinator:
                 {
                     "notification_id": PERSISTENT_NOTIFICATION_ID,
                     "title": NOTIFICATION_TITLE,
-                    "message": aggregate_alert_message(alerts, bullet="- "),
+                    "message": message,
                 },
                 blocking=True,
             )
-            return
-        await self.hass.services.async_call(
-            "persistent_notification",
-            "dismiss",
-            {"notification_id": PERSISTENT_NOTIFICATION_ID},
-            blocking=True,
-        )
+        else:
+            await self.hass.services.async_call(
+                "persistent_notification",
+                "dismiss",
+                {"notification_id": PERSISTENT_NOTIFICATION_ID},
+                blocking=True,
+            )
+        self._persistent_message = message
 
     async def _run(self) -> None:
         while True:

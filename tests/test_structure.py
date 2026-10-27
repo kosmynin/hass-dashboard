@@ -10,7 +10,7 @@ def test_manifest_and_hacs():
     hacs = json.loads((ROOT / "hacs.json").read_text())
     assert manifest["domain"] == "smartphone_dashboard"
     assert manifest["config_flow"] is True
-    assert manifest["version"] == "22.0.28"
+    assert manifest["version"] == "22.0.29"
     assert hacs["name"] == "Smartphone Dashboard"
     assert hacs["zip_release"] is True
     assert hacs["filename"] == "smartphone_dashboard.zip"
@@ -60,6 +60,7 @@ def test_backend_notifications_are_active_and_legacy_yaml_is_not():
     runtime = (COMPONENT / "notification.py").read_text()
     assert 'NOTIFICATION_TITLE = "Homeassistant"' in runtime
     assert 'PERSISTENT_NOTIFICATION_ID = "smartphone_dashboard_alerts"' in runtime
+    assert "self._persistent_message" in runtime
     assert '"persistent_notification",' in runtime
     assert '"message": "clear_notification"' in runtime
     assert "aggregate_alert_message" in runtime and "mobile_notification_data" in runtime
