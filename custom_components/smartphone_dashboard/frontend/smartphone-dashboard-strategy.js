@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.30";
+const STRATEGY_VERSION = "22.0.31";
 const CONFIG_VERSION = 23;
 
 const ACTIVE_ROOM_STYLES = `
@@ -931,7 +931,6 @@ function applyNotificationOptions(dashboard, config, hass) {
         ...entry,
         entity_id: entity_id || entityId,
         state: `<= ${batteryThreshold}`,
-        not: { state: "0" },
         options: {
           ...locationOptions(entry.options, entity_id || undefined, batterySummaryStyles(batteryThreshold)),
           icon: "mdi:battery-alert",
@@ -959,7 +958,7 @@ function applyNotificationOptions(dashboard, config, hass) {
       const entries = entities.map((entity_id) => ({
         ...entry,
         entity_id: entity_id || entityId,
-        state: `> ${co2Threshold}`,
+        state: `>= ${co2Threshold}`,
         options: locationOptions(entry.options, entity_id || undefined),
       }));
       return settings.co2 ? emit("co2", entries) : [];

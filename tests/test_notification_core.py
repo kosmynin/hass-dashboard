@@ -14,6 +14,7 @@ aggregate_alert_message = CORE["aggregate_alert_message"]
 mobile_notification_data = CORE["mobile_notification_data"]
 mobile_clear_data = CORE["mobile_clear_data"]
 is_battery_level_sensor = CORE["is_battery_level_sensor"]
+dashboard_entity_enabled = CORE["dashboard_entity_enabled"]
 
 def test_area_entity_label_replaces_device_with_area():
     assert area_entity_label("Wohnzimmer", "AirGradient ONE CO₂", "AirGradient ONE", "sensor.co2") == "Wohnzimmer · CO₂"
@@ -27,6 +28,13 @@ def test_battery_voltage_is_never_a_battery_level_alert():
     assert not is_battery_level_sensor("sensor.batteriespannung", {"friendly_name": "Batteriespannung", "unit_of_measurement": "V"})
     assert not is_battery_level_sensor("sensor.remote_battery", {"device_class": "battery", "unit_of_measurement": "mV"})
     assert not is_battery_level_sensor("sensor.battery_temperature", {"unit_of_measurement": "°C"})
+
+def test_dashboard_visibility_is_shared_except_for_hidden_batteries():
+    assert dashboard_entity_enabled()
+    assert not dashboard_entity_enabled(hidden_by="user")
+    assert not dashboard_entity_enabled(state_hidden=True)
+    assert dashboard_entity_enabled(hidden_by="user", allow_hidden=True)
+    assert not dashboard_entity_enabled(disabled_by="integration", allow_hidden=True)
 
 def test_nina_glob_exactly_one_star():
     assert valid_nina_glob("binary_sensor.nina_warning_*")

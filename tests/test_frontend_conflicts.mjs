@@ -85,6 +85,8 @@ const visibilityHass = {
     "sensor.hidden_battery": { state: "3", attributes: { friendly_name: "Versteckte Batterie", device_class: "battery", unit_of_measurement: "%" } },
     "sensor.remote_battery_voltage": { state: "2.9", attributes: { friendly_name: "Remote Battery Voltage", device_class: "voltage", unit_of_measurement: "V" } },
     "sensor.batteriespannung": { state: "2900", attributes: { friendly_name: "Batteriespannung", device_class: "battery", unit_of_measurement: "mV" } },
+    "sensor.hidden_co2": { state: "1500", attributes: { friendly_name: "Verstecktes CO₂", device_class: "carbon_dioxide", unit_of_measurement: "ppm" } },
+    "binary_sensor.hidden_contact": { state: "on", attributes: { friendly_name: "Versteckter Kontakt", device_class: "door" } },
     "sensor.disabled_system_cpu": { state: "12", attributes: { friendly_name: "Deaktivierte CPU", unit_of_measurement: "%" } },
   },
   areas: {}, devices: {}, services: {},
@@ -99,6 +101,8 @@ const visibilityHass = {
     "sensor.hidden_battery": { hidden: true },
     "sensor.remote_battery_voltage": { entity_id: "sensor.remote_battery_voltage" },
     "sensor.batteriespannung": { entity_id: "sensor.batteriespannung" },
+    "sensor.hidden_co2": { entity_id: "sensor.hidden_co2", hidden_by: "user" },
+    "binary_sensor.hidden_contact": { entity_id: "binary_sensor.hidden_contact", hidden_by: "user" },
     "sensor.disabled_system_cpu": { entity_id: "sensor.disabled_system_cpu", disabled_by: "integration" },
   },
 };
@@ -126,6 +130,8 @@ assert.equal(visibilityAuto.filter.include.some((item) => item.entity_id === "se
 assert.equal(visibilityAuto.filter.exclude.some((item) => item.entity_id === "sensor.hidden_battery"), false);
 assert.equal(visibilityAuto.filter.include.some((item) => item.entity_id === "sensor.remote_battery_voltage"), false);
 assert.equal(visibilityAuto.filter.include.some((item) => item.entity_id === "sensor.batteriespannung"), false);
+assert.equal(visibilityAuto.filter.exclude.some((item) => item.entity_id === "sensor.hidden_co2"), true);
+assert.equal(visibilityAuto.filter.exclude.some((item) => item.entity_id === "binary_sensor.hidden_contact"), true);
 const batteryPopup = visibilityCards.find((card) => card.hash === "#meldung-batterien");
 assert.equal(batteryPopup.cards[0].filter.include.some((item) => item.entity_id === "sensor.hidden_battery"), true);
 assert.equal(batteryPopup.cards[0].filter.exclude.some((item) => item.entity_id === "sensor.hidden_battery"), false);
@@ -280,7 +286,7 @@ assert.equal(filters.some((item) => item.entity_id === "sensor.*battery" || item
 assert.equal(filters.find((item) => item.entity_id === "binary_sensor.*contact").last_changed, "> 15");
 assert.equal(filters.find((item) => item.entity_id === "binary_sensor.*contact").state, "on");
 assert.equal(filters.find((item) => item.entity_id === "binary_sensor.*contact").options.tap_action.navigation_path, "#meldung-kontakte");
-assert.equal(filters.find((item) => item.entity_id === "sensor.*co2*").state, "> 1000");
+assert.equal(filters.find((item) => item.entity_id === "sensor.*co2*").state, ">= 1000");
 const ninaDashboard = { views: [{ sections: [{ cards: [
   { type: "heading", heading: "Meldungen" },
   { type: "custom:auto-entities", filter: { include: [
@@ -342,6 +348,7 @@ const batteryFilter = batteryDashboard.views[0].sections[0].cards.find((card) =>
 assert.equal(batteryFilter.options.button_type, "state");
 assert.equal(batteryFilter.options.show_state, true);
 assert.equal(batteryFilter.options.icon, "mdi:battery-alert");
+assert.equal("not" in batteryFilter, false);
 assert.match(batteryFilter.options.styles, /criticalLimit = Math\.max\(1, 10 \/ 2\)/);
 assert.match(batteryFilter.options.styles, /bubble-button-background/);
 assert.match(batteryFilter.options.styles, /opacity: 0 !important/);

@@ -49,6 +49,10 @@ Batteriemeldungen bleiben neutral; ausschließlich ihr Symbol wird unterhalb des
 Grenzwerts orange und bei höchstens dessen Hälfte rot dargestellt.
 Batteriespannungen in Volt oder Millivolt werden grundsätzlich nicht als
 niedriger Batteriestand in den Meldungen geführt.
+Dashboard, Persistent Notification und optionale Push-Mitteilungen verwenden
+dieselben Aktivierungs-, Grenzwert- und Sichtbarkeitsregeln. Ausgeblendete
+Entitäten werden ignoriert; nur Batteriesensoren bleiben absichtlich sichtbar,
+solange sie nicht in den Batterie-Ausnahmen stehen.
 
 Im Sicherheits-Pop-up stehen Alarm-Panels vor Kameras und Schlössern. Die
 Master-Alarmanlage wird anhand ihres Namens erkannt oder in den Einstellungen

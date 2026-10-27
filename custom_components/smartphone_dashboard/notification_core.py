@@ -16,6 +16,18 @@ UPS_PROBLEM_DEVICE_CLASSES = frozenset(("problem", "safety", "smoke", "tamper", 
 UPS_HISTORY_DEVICE_CLASSES = frozenset(("date", "timestamp"))
 BATTERY_VOLTAGE_UNITS = frozenset(("v", "mv", "kv"))
 
+def dashboard_entity_enabled(
+    disabled_by: object = None,
+    hidden_by: object = None,
+    state_hidden: object = False,
+    *,
+    allow_hidden: bool = False,
+) -> bool:
+    """Apply the common dashboard/notification visibility policy."""
+    if disabled_by:
+        return False
+    return allow_hidden or not hidden_by and state_hidden is not True
+
 def is_battery_level_sensor(entity_id: str, attributes: Mapping[str, object]) -> bool:
     """Identify battery percentages while rejecting battery-voltage sensors."""
     device_class = str(attributes.get("device_class") or "").strip().lower()

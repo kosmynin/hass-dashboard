@@ -10,7 +10,7 @@ def test_manifest_and_hacs():
     hacs = json.loads((ROOT / "hacs.json").read_text())
     assert manifest["domain"] == "smartphone_dashboard"
     assert manifest["config_flow"] is True
-    assert manifest["version"] == "22.0.30"
+    assert manifest["version"] == "22.0.31"
     assert hacs["name"] == "Smartphone Dashboard"
     assert hacs["zip_release"] is True
     assert hacs["filename"] == "smartphone_dashboard.zip"
@@ -113,7 +113,8 @@ def test_generic_base_matches_notification_and_quick_action_transformers():
     assert 'state: `<= ${batteryThreshold}`' in strategy
     assert "BATTERY_VOLTAGE_EXCLUDE_FILTERS" in strategy
     assert "isBatteryLevelEntity" in strategy
-    assert 'not: { state: "0" }' in strategy
+    assert 'not: { state: "0" }' not in strategy
+    assert 'state: `>= ${co2Threshold}`' in strategy
     assert 'state: "on"' in strategy
     assert 'attributes: { daysTo: `<= ${wasteDays}` }' in strategy
     assert 'const dueState =' in strategy
@@ -134,6 +135,7 @@ def test_generic_base_matches_notification_and_quick_action_transformers():
     assert "ACTIVE_ROOM_STYLES" in strategy
     assert "function isEntityVisible" in strategy
     assert "hiddenDashboardEntityIds(hass)" in strategy
+    assert "_dashboard_entity_enabled" in (COMPONENT / "notification.py").read_text()
     assert "entry?.hidden !== true" in strategy
     assert "isEntityVisible(hass, configuredLight)" in strategy
 
