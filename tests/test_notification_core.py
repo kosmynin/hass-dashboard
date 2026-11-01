@@ -13,6 +13,7 @@ alert_set_digest = CORE["alert_set_digest"]
 aggregate_alert_message = CORE["aggregate_alert_message"]
 mobile_notification_data = CORE["mobile_notification_data"]
 mobile_clear_data = CORE["mobile_clear_data"]
+mobile_dashboard_url = CORE["mobile_dashboard_url"]
 mobile_live_activity_data = CORE["mobile_live_activity_data"]
 mobile_live_clear_data = CORE["mobile_live_clear_data"]
 live_activity_message = CORE["live_activity_message"]
@@ -110,7 +111,8 @@ def test_iphone_actions_are_scoped_to_recipient_and_alert_set():
     recipient = "notify.mobile_app_boris_iphone"
     digest = "a" * 32
     data = mobile_notification_data(2, recipient=recipient, digest=digest)
-    assert data["url"] == "/handy/handy"
+    assert data["url"] == mobile_dashboard_url(recipient)
+    assert data["url"].endswith("#meldungen")
     assert [action["title"] for action in data["actions"]] == [
         "Details", "30 Min. stumm", "Bis Änderung stumm",
     ]
@@ -132,13 +134,20 @@ def test_live_activity_is_compact_quiet_on_updates_and_red_for_nina():
         "Küche · Fenster seit 18 Minuten offen\n"
         "+1 weitere"
     )
-    data = mobile_live_activity_data(alerts, tag="smartphone_dashboard_live_1", silent=True)
+    recipient = "notify.mobile_app_boris_iphone"
+    data = mobile_live_activity_data(
+        alerts,
+        tag="smartphone_dashboard_live_1",
+        silent=True,
+        recipient=recipient,
+    )
     assert data["tag"] == "smartphone_dashboard_live_1"
     assert data["live_update"] is True
     assert data["critical_text"] == "3"
     assert data["notification_icon_color"] == "#FF453A"
     assert data["silent"] is True
-    assert data["url"] == "/handy/handy"
+    assert data["url"] == mobile_dashboard_url(recipient)
+    assert data["url"].endswith("#meldungen")
     assert mobile_live_clear_data(data["tag"]) == {"tag": "smartphone_dashboard_live_1"}
 
 def test_waste_collection_details_support_default_and_dated_attributes():

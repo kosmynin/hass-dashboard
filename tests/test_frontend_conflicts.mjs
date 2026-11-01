@@ -260,6 +260,14 @@ assert.match(locationFilter.options.styles, /bubble-button-background/);
 assert.match(locationFilter.options.styles, /opacity: 0 !important/);
 assert.equal(locationFilter.options.button_type, "state");
 assert.equal(locationFilter.options.show_state, true);
+const aggregateNotificationPopup = locationDashboard.views[0].sections[0].cards
+  .find((card) => card.hash === "#meldungen");
+assert.equal(aggregateNotificationPopup.name, "Meldungen");
+assert.equal(
+  aggregateNotificationPopup.cards[0].type,
+  "custom:smartphone-dashboard-notification-controls",
+);
+assert.equal(aggregateNotificationPopup.cards[1].type, "custom:auto-entities");
 
 const first = partitionConflictPatch({ A: "local", B: 2 }, { A: "remote", B: 1 }, { A: "base", B: 1 });
 assert.deepEqual(first.overlap, ["A"]);

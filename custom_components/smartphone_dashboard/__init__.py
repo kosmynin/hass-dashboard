@@ -27,6 +27,7 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     websocket_api.async_register_command(hass, websocket_get_display_config)
     websocket_api.async_register_command(hass, websocket_save_config)
     websocket_api.async_register_command(hass, websocket_import_legacy)
+    websocket_api.async_register_command(hass, websocket_notification_action)
     return True
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -48,6 +49,12 @@ def _manager(hass: HomeAssistant) -> ConfigManager | None:
     if not managers:
         return None
     return next(iter(managers.values()))["manager"]
+
+def _coordinator(hass: HomeAssistant) -> NotificationCoordinator | None:
+    runtimes = hass.data.get(DOMAIN, {})
+    if not runtimes:
+        return None
+    return next(iter(runtimes.values()))["coordinator"]
 
 def _valid_config(value: dict[str, Any]) -> dict[str, Any]:
     if len(json.dumps(value, ensure_ascii=False)) > 65536:
@@ -212,3 +219,20 @@ async def websocket_import_legacy(hass, connection, msg):
     if manager is None:
         connection.send_error(msg["id"], "not_loaded", "Integration ist nicht eingerichtet"); return
     connection.send_result(msg["id"], await manager.async_import_legacy_helpers())
+
+@websocket_api.websocket_command({
+    vol.Required("type"): f"{DOMAIN}/notifications/action",
+    vol.Required("action"): vol.In(("snooze", "mute")),
+    vol.Required("recipient_token"): vol.Match(r"^[a-f0-9]{12}$"),
+})
+@websocket_api.async_response
+async def websocket_notification_action(hass, connection, msg):
+    """Apply a safe per-device action opened from a Live Activity."""
+    coordinator = _coordinator(hass)
+    if coordinator is None:
+        connection.send_error(msg["id"], "not_loaded", "Integration ist nicht eingerichtet")
+        return
+    if not coordinator.queue_dashboard_action(msg["action"], msg["recipient_token"]):
+        connection.send_error(msg["id"], "invalid_recipient", "Smartphone wurde nicht erkannt")
+        return
+    connection.send_result(msg["id"], {"accepted": True, "action": msg["action"]})

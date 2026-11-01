@@ -8,7 +8,7 @@ import re
 MOBILE_NOTIFICATION_TAG = "smartphone_dashboard_alerts"
 MOBILE_NOTIFICATION_GROUP = "smartphone_dashboard"
 MOBILE_LIVE_ACTIVITY_TAG_PREFIX = "smartphone_dashboard_live"
-MOBILE_DASHBOARD_URL = "/handy/handy"
+MOBILE_DASHBOARD_URL = "/handy/handy#meldungen"
 MOBILE_ACTION_PREFIX = "SMARTPHONE_DASHBOARD"
 
 UPS_NORMAL_STATES = frozenset((
@@ -83,6 +83,13 @@ def notification_recipient_token(recipient: str) -> str:
     """Return a short opaque identifier suitable for notification action IDs."""
     return hashlib.sha256(recipient.encode()).hexdigest()[:12]
 
+def mobile_dashboard_url(recipient: str = "") -> str:
+    """Open the aggregate alert popup and identify the originating device."""
+    if not recipient:
+        return MOBILE_DASHBOARD_URL
+    token = notification_recipient_token(recipient)
+    return f"/handy/handy?sd_recipient={token}#meldungen"
+
 def mobile_action_ids(recipient: str, digest: str) -> dict[str, str]:
     """Build recipient- and alert-set-specific actionable notification IDs."""
     token = notification_recipient_token(recipient)
@@ -122,8 +129,8 @@ def mobile_notification_data(
         "tag": MOBILE_NOTIFICATION_TAG,
         "group": MOBILE_NOTIFICATION_GROUP,
         "subtitle": subtitle,
-        "url": MOBILE_DASHBOARD_URL,
-        "clickAction": MOBILE_DASHBOARD_URL,
+        "url": mobile_dashboard_url(recipient),
+        "clickAction": mobile_dashboard_url(recipient),
         "push": {
             "interruption-level": "passive" if passive else "active",
             "badge": count,
@@ -165,6 +172,7 @@ def mobile_live_activity_data(
     *,
     tag: str = MOBILE_LIVE_ACTIVITY_TAG_PREFIX,
     silent: bool = False,
+    recipient: str = "",
 ) -> dict[str, object]:
     """Build a Home Assistant Companion Live Activity / Live Update payload."""
     normalized = normalized_alerts(alerts)
@@ -183,7 +191,7 @@ def mobile_live_activity_data(
         "relevance_score": 1.0 if urgent else 0.8,
         "sticky": True,
         "alert_once": silent,
-        "url": MOBILE_DASHBOARD_URL,
+        "url": mobile_dashboard_url(recipient),
     }
     if silent:
         data["silent"] = True

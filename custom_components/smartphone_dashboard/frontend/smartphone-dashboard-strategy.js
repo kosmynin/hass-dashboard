@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.32";
+const STRATEGY_VERSION = "22.0.33";
 const CONFIG_VERSION = 23;
 
 const ACTIVE_ROOM_STYLES = `
@@ -53,6 +53,101 @@ const NOTIFICATION_POPUPS = {
   frost: ["#meldung-frost", "Frost", "mdi:snowflake-alert"],
   nina: ["#meldung-nina", "NINA-Warnungen", "mdi:alert-outline"],
 };
+
+class SmartphoneDashboardNotificationControls extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+    this._busy = false;
+  }
+
+  setConfig(config) {
+    this._config = config || {};
+    this._render();
+  }
+
+  set hass(value) {
+    this._hass = value;
+    this._render();
+  }
+
+  getCardSize() {
+    return 2;
+  }
+
+  connectedCallback() {
+    this._render();
+  }
+
+  _recipientToken() {
+    const token = new URLSearchParams(window.location.search).get("sd_recipient") || "";
+    return /^[a-f0-9]{12}$/.test(token) ? token : "";
+  }
+
+  async _apply(action) {
+    const token = this._recipientToken();
+    if (!this._hass || !token || this._busy) return;
+    this._busy = true;
+    this._render("Wird angewendet …");
+    let status;
+    try {
+      await this._hass.callWS({
+        type: "smartphone_dashboard/notifications/action",
+        action,
+        recipient_token: token,
+      });
+      status = action === "snooze"
+        ? "Live Activity ist für 30 Minuten stumm."
+        : "Live Activity bleibt bis zur nächsten Änderung stumm.";
+    } catch (error) {
+      status = `Aktion fehlgeschlagen: ${error?.message || error}`;
+    } finally {
+      this._busy = false;
+      this._render(status);
+    }
+  }
+
+  _render(status = "") {
+    if (!this.shadowRoot) return;
+    const token = this._recipientToken();
+    this.shadowRoot.innerHTML = `
+      <style>
+        ha-card { padding: 16px; border-radius: 24px; }
+        .title { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+        .description, .status { color: var(--secondary-text-color); line-height: 1.4; }
+        .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+        button {
+          min-height: 46px; border: 0; border-radius: 18px; padding: 10px 12px;
+          color: var(--primary-text-color); background: var(--secondary-background-color);
+          font: inherit; font-weight: 650; cursor: pointer;
+        }
+        button:disabled { opacity: .55; cursor: default; }
+        .status { margin-top: 10px; min-height: 20px; font-size: 13px; }
+      </style>
+      <ha-card>
+        <div class="title">Live Activity</div>
+        <div class="description">Diese Aktionen gelten nur für dieses Smartphone.</div>
+        ${token ? `<div class="actions">
+          <button data-action="snooze" ${this._busy ? "disabled" : ""}>30 Min. stumm</button>
+          <button data-action="mute" ${this._busy ? "disabled" : ""}>Bis Änderung stumm</button>
+        </div>` : ""}
+        <div class="status"></div>
+      </ha-card>`;
+    this.shadowRoot.querySelector(".status").textContent = status || (
+      token ? "" : "Öffne diesen Dialog über die Live Activity, um sie stummzuschalten."
+    );
+    for (const button of this.shadowRoot.querySelectorAll("button[data-action]")) {
+      button.addEventListener("click", () => void this._apply(button.dataset.action));
+    }
+  }
+}
+
+if (!customElements.get("smartphone-dashboard-notification-controls")) {
+  customElements.define(
+    "smartphone-dashboard-notification-controls",
+    SmartphoneDashboardNotificationControls,
+  );
+}
 const NINA_SUMMARY_STYLES = `\${(() => {
   const entityId = typeof entity === 'string' ? entity : entity?.entity_id;
   const warning = hass.states[entityId];
@@ -1042,11 +1137,29 @@ function applyNotificationOptions(dashboard, config, hass) {
     ...batteryExclusions.map((entity_id) => ({ options: {}, entity_id })),
     ...upsHistoryExcludeFilters(upsEntities),
   ];
-  const popupHashes = new Set(Object.values(NOTIFICATION_POPUPS).map(([hash]) => hash));
+  const popupHashes = new Set([
+    "#meldungen",
+    ...Object.values(NOTIFICATION_POPUPS).map(([hash]) => hash),
+  ]);
   for (let index = cards.length - 1; index >= 0; index -= 1) {
     if (popupHashes.has(cards[index]?.hash)) cards.splice(index, 1);
   }
   if (config.show_notifications !== false) {
+    cards.push({
+      type: "custom:bubble-card",
+      card_type: "pop-up",
+      popup_mode: "adaptive-dialog",
+      hash: "#meldungen",
+      button_type: "name",
+      name: "Meldungen",
+      icon: "mdi:bell-badge-outline",
+      show_header: true,
+      scrolling_effect: true,
+      cards: [
+        { type: "custom:smartphone-dashboard-notification-controls" },
+        structuredClone(autoEntities),
+      ],
+    });
     cards.push(...notificationDetailPopups(detailFilters, hass, notificationHiddenEntityIds));
   }
   return dashboard;

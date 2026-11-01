@@ -72,22 +72,25 @@ wertet Meldungen selbst aus und pflegt unter einer festen Kennung genau eine
 zusammengefasste Persistent Notification, solange Meldungen aktiv sind. Sie wird
 bei Änderungen aktualisiert und nach vollständiger Entwarnung entfernt.
 
-Optionale Notify-Dienste erhalten ebenfalls nur eine Sammelmeldung. Für
-`notify.mobile_app_*` pflegt die Integration zusätzlich eine Live Activity mit
+Optionale nicht mobile Notify-Dienste erhalten ebenfalls nur eine
+Sammelmeldung. Für `notify.mobile_app_*` pflegt die Integration ausschließlich
+eine Live Activity mit
 eigener Kennung. Sie zeigt auf iPhone-Sperrbildschirm und Dynamic Island die
-beiden wichtigsten Meldungen sowie die Gesamtzahl, öffnet beim Antippen das
-Handy-Dashboard und wird bei Entwarnung beendet. Wegen der iOS-Laufzeitgrenze
+beiden wichtigsten Meldungen sowie die Gesamtzahl, öffnet beim Antippen den
+gemeinsamen Meldungsdialog im Handy-Dashboard und wird bei Entwarnung beendet.
+Eine zuvor von älteren Versionen erzeugte normale Sammelmitteilung wird beim
+nächsten Lauf entfernt. Wegen der iOS-Laufzeitgrenze
 wird eine weiterhin benötigte Live Activity nach sieben Stunden kontrolliert
 erneuert. Voraussetzung sind iOS 17.2 oder neuer, Home Assistant 2026.7 oder
 neuer und aktivierte Live Activities in der Companion App.
 
-Die normale iPhone-Sammelmitteilung bietet die Aktionen **Details**,
-**30 Min. stumm** und **Bis Änderung stumm**. Die erste öffnet das Dashboard,
-die zweite unterdrückt diesen Push-Empfänger für 30 Minuten und stellt den dann
-aktuellen Stand anschließend erneut zu, die dritte unterdrückt ausschließlich
-den aktuellen Meldungssatz. Neue oder geänderte Meldungen durchbrechen diese
-letzte Stummschaltung. Dashboard, Persistent Notification, Live Activity und
-Push verwenden dieselbe vom Backend ausgewertete Meldungsliste.
+Der Meldungsdialog bietet die Aktionen **30 Min. stumm** und **Bis Änderung
+stumm**. Die erste blendet die Live Activity dieses Smartphones für 30 Minuten
+aus und stellt den dann aktuellen Stand anschließend erneut dar, die zweite
+unterdrückt ausschließlich den aktuellen Meldungssatz. Neue oder geänderte
+Meldungen durchbrechen diese letzte Stummschaltung. Dashboard, Persistent
+Notification und Live Activity verwenden dieselbe vom Backend ausgewertete
+Meldungsliste.
 
 Die alte Paketautomation muss deaktiviert werden, um
 Doppelversand zu vermeiden; die mitgelieferte YAML dient nur noch der
