@@ -10,7 +10,7 @@ def test_manifest_and_hacs():
     hacs = json.loads((ROOT / "hacs.json").read_text())
     assert manifest["domain"] == "smartphone_dashboard"
     assert manifest["config_flow"] is True
-    assert manifest["version"] == "22.0.35"
+    assert manifest["version"] == "22.0.36"
     assert hacs["name"] == "Smartphone Dashboard"
     assert hacs["zip_release"] is True
     assert hacs["filename"] == "smartphone_dashboard.zip"
@@ -121,6 +121,8 @@ def test_loader_repairs_registry_races_and_bounds_timeout_recovery():
     assert "ensureRegistrations();" in loader
     assert "RECOVERY_LIMIT = 2" in loader
     assert "target - performance.now()" in loader
+    assert 'new URLSearchParams(location.search || "").get("sd_popup")' in loader
+    assert 'window.dispatchEvent(new Event("hashchange"))' in loader
 
 def test_frontend_is_an_automatically_versioned_lovelace_resource():
     source = (COMPONENT / "__init__.py").read_text()

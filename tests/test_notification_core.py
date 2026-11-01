@@ -112,6 +112,8 @@ def test_iphone_actions_are_scoped_to_recipient_and_alert_set():
     digest = "a" * 32
     data = mobile_notification_data(2, recipient=recipient, digest=digest)
     assert data["url"] == mobile_dashboard_url(recipient)
+    assert "sd_popup=meldungen" in data["url"]
+    assert data["clickAction"] == data["url"]
     assert data["url"].endswith("#meldungen")
     assert [action["title"] for action in data["actions"]] == [
         "Details", "30 Min. stumm", "Bis Änderung stumm",
@@ -147,6 +149,7 @@ def test_live_activity_is_compact_quiet_on_updates_and_red_for_nina():
     assert data["notification_icon_color"] == "#FF453A"
     assert data["silent"] is True
     assert data["url"] == mobile_dashboard_url(recipient)
+    assert data["clickAction"] == data["url"]
     assert data["url"].endswith("#meldungen")
     assert mobile_live_clear_data(data["tag"]) == {"tag": "smartphone_dashboard_live_1"}
 

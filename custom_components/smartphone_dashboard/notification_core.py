@@ -8,7 +8,7 @@ import re
 MOBILE_NOTIFICATION_TAG = "smartphone_dashboard_alerts"
 MOBILE_NOTIFICATION_GROUP = "smartphone_dashboard"
 MOBILE_LIVE_ACTIVITY_TAG_PREFIX = "smartphone_dashboard_live"
-MOBILE_DASHBOARD_URL = "/handy/handy#meldungen"
+MOBILE_DASHBOARD_PATH = "/handy/handy"
 MOBILE_ACTION_PREFIX = "SMARTPHONE_DASHBOARD"
 
 UPS_NORMAL_STATES = frozenset((
@@ -85,10 +85,10 @@ def notification_recipient_token(recipient: str) -> str:
 
 def mobile_dashboard_url(recipient: str = "") -> str:
     """Open the aggregate alert popup and identify the originating device."""
-    if not recipient:
-        return MOBILE_DASHBOARD_URL
-    token = notification_recipient_token(recipient)
-    return f"/handy/handy?sd_recipient={token}#meldungen"
+    parameters = ["sd_popup=meldungen"]
+    if recipient:
+        parameters.append(f"sd_recipient={notification_recipient_token(recipient)}")
+    return f"{MOBILE_DASHBOARD_PATH}?{'&'.join(parameters)}#meldungen"
 
 def mobile_action_ids(recipient: str, digest: str) -> dict[str, str]:
     """Build recipient- and alert-set-specific actionable notification IDs."""
@@ -142,7 +142,7 @@ def mobile_notification_data(
             {
                 "action": "URI",
                 "title": "Details",
-                "uri": MOBILE_DASHBOARD_URL,
+                "uri": mobile_dashboard_url(recipient),
                 "icon": "sfsymbols:list.bullet",
             },
             {
@@ -192,6 +192,7 @@ def mobile_live_activity_data(
         "sticky": True,
         "alert_once": silent,
         "url": mobile_dashboard_url(recipient),
+        "clickAction": mobile_dashboard_url(recipient),
     }
     if silent:
         data["silent"] = True

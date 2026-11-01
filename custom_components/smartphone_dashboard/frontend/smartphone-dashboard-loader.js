@@ -6,15 +6,50 @@
 const TYPE = "smartphone-dashboard";
 const ELEMENT = `ll-strategy-dashboard-${TYPE}`;
 const LEGACY_ELEMENT = `ll-strategy-${TYPE}`;
-const VERSION = "22.0.35";
+const VERSION = "22.0.36";
 const CORE_URL = new URL(`./smartphone-dashboard-strategy.js?v=${VERSION}`, import.meta.url).href;
 const RECOVERY_KEY = `smartphone-dashboard:timeout-reload:${VERSION}:${location.pathname}`;
 const EDITOR_ELEMENT = "smartphone-dashboard-strategy-editor";
 const REGISTRY_MONITOR_DURATION = 15000;
 const RECOVERY_LIMIT = 2;
+const NOTIFICATION_POPUP_HASH = "#meldungen";
 
 let corePromise;
 let coreModule;
+let notificationPopupReplayScheduled = false;
+
+function requestedNotificationPopup() {
+  const requested = new URLSearchParams(location.search || "").get("sd_popup");
+  return location.hash === NOTIFICATION_POPUP_HASH || requested === "meldungen"
+    ? NOTIFICATION_POPUP_HASH
+    : "";
+}
+
+function replayNotificationPopupDeepLink() {
+  const target = requestedNotificationPopup();
+  if (!target || notificationPopupReplayScheduled) return;
+  notificationPopupReplayScheduled = true;
+
+  // Beim Kaltstart ist der Hash bereits gesetzt, bevor Bubble Card seine
+  // Pop-up-Listener registriert. Wiederholte, zustandslose hashchange-Events
+  // reichen den Deep Link nach, sobald das Dashboard gerendert ist. Der
+  // Query-Parameter dient als Fallback, falls die Companion App den Fragment-
+  // Teil beim Öffnen entfernt. Nach manuellem Schließen bleibt der Hash leer
+  // und spätere Versuche öffnen den Dialog nicht erneut.
+  [0, 150, 500, 1200, 2500].forEach((delay, index) => {
+    setTimeout(() => {
+      if (location.hash !== target) {
+        if (index === 0 && !location.hash && requestedNotificationPopup() === target) {
+          location.hash = target;
+        }
+        return;
+      }
+      if (typeof window.dispatchEvent === "function" && typeof Event === "function") {
+        window.dispatchEvent(new Event("hashchange"));
+      }
+    }, delay);
+  });
+}
 
 function loadCore() {
   if (!corePromise) {
@@ -61,7 +96,9 @@ class SmartphoneDashboardLoader extends HTMLElement {
   static async generate(config, hass) {
     clearRecoveryMarker();
     const core = await loadCore();
-    return core.SmartphoneDashboardStrategy.generate(config, hass);
+    const dashboard = await core.SmartphoneDashboardStrategy.generate(config, hass);
+    replayNotificationPopupDeepLink();
+    return dashboard;
   }
 
   static async getConfigElement() {
@@ -101,7 +138,10 @@ function monitorRegistry() {
 }
 setTimeout(monitorRegistry, 0);
 if (typeof window.addEventListener === "function") {
-  window.addEventListener("load", ensureRegistrations, { once: true });
+  window.addEventListener("load", () => {
+    ensureRegistrations();
+    replayNotificationPopupDeepLink();
+  }, { once: true });
 }
 
 window.customStrategies = window.customStrategies || [];
