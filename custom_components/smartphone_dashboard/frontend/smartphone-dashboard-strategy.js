@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.34";
+const STRATEGY_VERSION = "22.0.35";
 const CONFIG_VERSION = 23;
 
 const ACTIVE_ROOM_STYLES = `
@@ -2555,7 +2555,6 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
       room.area_id === areaId ? { ...room, ...changes } : room,
     );
     this._update("rooms", rooms);
-    this._render();
   }
 
   _updatePerson(entityId, changes) {
@@ -2563,7 +2562,6 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
       person.entity === entityId ? { ...person, ...changes } : person,
     );
     this._update("persons", persons);
-    this._render();
   }
 
   _selectorValue(event, multiple = false) {
@@ -2588,7 +2586,16 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
       picker.value = multiple
         ? (Array.isArray(value) ? value : this._selectorValue({ currentTarget: { value } }, true))
         : String(value || "");
-      picker.addEventListener("value-changed", (event) => onChange(this._selectorValue(event, multiple)));
+      picker.addEventListener("value-changed", (event) => {
+        // ha-selector bubbles its own value event through the Lovelace editor.
+        // Only our config-changed event may leave this editor; otherwise Home
+        // Assistant can recreate the complete strategy editor after every
+        // selected item and closes an open multi-select menu.
+        event.stopPropagation();
+        const selected = this._selectorValue(event, multiple);
+        picker.value = selected;
+        onChange(selected);
+      });
       field.appendChild(picker);
       return field;
     }
@@ -3493,7 +3500,7 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
       ));
       row.querySelector("[data-excluded-host]").replaceWith(this._entitySelector(
         "Automatisch erkannte Entitäten ausblenden", feature.excluded_entities, { multiple: true },
-        (value) => { updateFeature({ excluded_entities: value }); this._render(); },
+        (value) => updateFeature({ excluded_entities: value }),
       ));
       if (feature.key === "printer") {
         row.querySelector("[data-auto-printer-ids]").value = feature.automatic_printer_ids.join("\n");
@@ -3508,7 +3515,7 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
         row.querySelector("[data-excluded-printer-ids-host]").replaceWith(this._createSelector({
           label: "Automatisch erkannte Bambu-Lab-Geräte ausblenden", value: feature.excluded_printer_ids, multiple: true,
           selector: { device: { multiple: true } }, fallbackOptions: bambuOptions,
-          onChange: (value) => { updateFeature({ excluded_printer_ids: value }); this._render(); },
+          onChange: (value) => updateFeature({ excluded_printer_ids: value }),
         }));
       }
       toggle.addEventListener("change", (event) => updateFeature({ enabled: event.currentTarget.checked }));

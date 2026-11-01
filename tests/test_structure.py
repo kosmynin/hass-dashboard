@@ -10,7 +10,7 @@ def test_manifest_and_hacs():
     hacs = json.loads((ROOT / "hacs.json").read_text())
     assert manifest["domain"] == "smartphone_dashboard"
     assert manifest["config_flow"] is True
-    assert manifest["version"] == "22.0.34"
+    assert manifest["version"] == "22.0.35"
     assert hacs["name"] == "Smartphone Dashboard"
     assert hacs["zip_release"] is True
     assert hacs["filename"] == "smartphone_dashboard.zip"
@@ -91,6 +91,19 @@ def test_one_runtime_version():
     constants = (COMPONENT / "const.py").read_text()
     assert 'STATIC_URL = f"/smartphone-dashboard/v{VERSION}"' in constants
     assert 'MODULE_URL = f"{STATIC_URL}/smartphone-dashboard-loader.js"' in constants
+
+def test_editor_keeps_entity_multi_selectors_open_while_values_change():
+    strategy = (COMPONENT / "frontend/smartphone-dashboard-strategy.js").read_text()
+    selector_start = strategy.index('picker.addEventListener("value-changed"')
+    selector_end = strategy.index('field.appendChild(picker)', selector_start)
+    selector_handler = strategy[selector_start:selector_end]
+    assert "event.stopPropagation()" in selector_handler
+    excluded_start = strategy.index('"Automatisch erkannte Entitäten ausblenden"')
+    excluded_handler = strategy[excluded_start:strategy.index('if (feature.key === "printer")', excluded_start)]
+    assert "this._render()" not in excluded_handler
+    printer_start = strategy.index('"Automatisch erkannte Bambu-Lab-Geräte ausblenden"')
+    excluded_printer_handler = strategy[printer_start:strategy.index('toggle.addEventListener', printer_start)]
+    assert "this._render()" not in excluded_printer_handler
 
 def test_loader_repairs_registry_races_and_bounds_timeout_recovery():
     loader = (COMPONENT / "frontend/smartphone-dashboard-loader.js").read_text()
