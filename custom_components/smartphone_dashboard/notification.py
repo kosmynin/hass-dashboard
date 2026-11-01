@@ -38,6 +38,7 @@ DIGEST_PREFIX = "digest:"
 CLEAR_DIGEST = "clear"
 MOBILE_ACTION_EVENT = "mobile_app_notification_action"
 LIVE_ACTIVITY_RENEW_AFTER = 7 * 60 * 60
+LIVE_ACTIVITY_PAYLOAD_VERSION = "2"
 SNOOZE_SECONDS = 30 * 60
 _LOGGER = logging.getLogger(__name__)
 LEGACY_TO_CONFIG = {
@@ -394,10 +395,11 @@ class NotificationCoordinator:
                     muted = bool(digest) and muted_digest_map.get(recipient) == digest
                     if alerts:
                         if mobile_app and not snoozed and not muted:
+                            live_payload_digest = f"{LIVE_ACTIVITY_PAYLOAD_VERSION}:{digest}"
                             live_tag = live_tag_map.get(recipient) or self._next_live_tag()
                             live_started = live_started_map.get(recipient, 0)
                             renewal_due = (
-                                live_digest_map.get(recipient) == digest
+                                live_digest_map.get(recipient) == live_payload_digest
                                 and live_started > 0
                                 and now_epoch - live_started >= LIVE_ACTIVITY_RENEW_AFTER
                             )
@@ -422,8 +424,8 @@ class NotificationCoordinator:
                                         self._retry_count[clear_key] = count
                                         self._retry_after[clear_key] = time.monotonic() + min(3600, 30 * (2 ** (count - 1)))
                                         errors.append(f"{recipient}: Live Activity konnte nicht erneuert werden: {err}")
-                            live_due = live_digest_map.get(recipient) != digest and not (
-                                renewal_due and live_digest_map.get(recipient) == digest
+                            live_due = live_digest_map.get(recipient) != live_payload_digest and not (
+                                renewal_due and live_digest_map.get(recipient) == live_payload_digest
                             )
                             if live_due:
                                 live_key = (recipient, f"live:{live_tag}:{digest}")
@@ -443,7 +445,7 @@ class NotificationCoordinator:
                                         await self.hass.services.async_call(
                                             "notify", service, live_payload, blocking=True
                                         )
-                                        live_digest_map[recipient] = digest
+                                        live_digest_map[recipient] = live_payload_digest
                                         live_tag_map[recipient] = live_tag
                                         live_started_map.setdefault(recipient, now_epoch)
                                         self._retry_after.pop(live_key, None)
