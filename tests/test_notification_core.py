@@ -13,6 +13,11 @@ alert_set_digest = CORE["alert_set_digest"]
 aggregate_alert_message = CORE["aggregate_alert_message"]
 mobile_notification_data = CORE["mobile_notification_data"]
 mobile_clear_data = CORE["mobile_clear_data"]
+mobile_live_activity_data = CORE["mobile_live_activity_data"]
+mobile_live_clear_data = CORE["mobile_live_clear_data"]
+live_activity_message = CORE["live_activity_message"]
+mobile_action_ids = CORE["mobile_action_ids"]
+parse_mobile_action = CORE["parse_mobile_action"]
 is_battery_level_sensor = CORE["is_battery_level_sensor"]
 dashboard_entity_enabled = CORE["dashboard_entity_enabled"]
 
@@ -100,6 +105,41 @@ def test_aggregate_message_and_iphone_replacement_payloads():
     assert active["push"] == {"interruption-level": "active", "badge": 2}
     assert passive["push"] == {"interruption-level": "passive", "badge": 1}
     assert mobile_clear_data()["push"] == {"badge": 0}
+
+def test_iphone_actions_are_scoped_to_recipient_and_alert_set():
+    recipient = "notify.mobile_app_boris_iphone"
+    digest = "a" * 32
+    data = mobile_notification_data(2, recipient=recipient, digest=digest)
+    assert data["url"] == "/handy/handy"
+    assert [action["title"] for action in data["actions"]] == [
+        "Details", "30 Min. stumm", "Bis Änderung stumm",
+    ]
+    identifiers = mobile_action_ids(recipient, digest)
+    assert parse_mobile_action(identifiers["snooze"])["kind"] == "snooze"
+    parsed_mute = parse_mobile_action(identifiers["mute"])
+    assert parsed_mute["kind"] == "mute"
+    assert parsed_mute["digest"] == digest
+    assert parse_mobile_action("UNRELATED_ACTION") is None
+
+def test_live_activity_is_compact_quiet_on_updates_and_red_for_nina():
+    alerts = [
+        {"fingerprint": "co2:a", "message": "Wohnzimmer · CO₂: 1.420 ppm"},
+        {"fingerprint": "contact:b", "message": "Küche · Fenster seit 18 Minuten offen"},
+        {"fingerprint": "nina:c", "message": "Amtliche Warnung"},
+    ]
+    assert live_activity_message(alerts) == (
+        "Wohnzimmer · CO₂: 1.420 ppm\n"
+        "Küche · Fenster seit 18 Minuten offen\n"
+        "+1 weitere"
+    )
+    data = mobile_live_activity_data(alerts, tag="smartphone_dashboard_live_1", silent=True)
+    assert data["tag"] == "smartphone_dashboard_live_1"
+    assert data["live_update"] is True
+    assert data["critical_text"] == "3"
+    assert data["notification_icon_color"] == "#FF453A"
+    assert data["silent"] is True
+    assert data["url"] == "/handy/handy"
+    assert mobile_live_clear_data(data["tag"]) == {"tag": "smartphone_dashboard_live_1"}
 
 def test_waste_collection_details_support_default_and_dated_attributes():
     details = waste_collection_details(

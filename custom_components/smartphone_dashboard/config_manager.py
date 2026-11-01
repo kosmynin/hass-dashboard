@@ -99,10 +99,23 @@ class ConfigManager:
             await self.store.async_save(self.data)
             return {"saved": True, **deepcopy(dashboard)}
 
-    async def async_update_notification_status(self, delivered_by_recipient: dict[str, list[str]], health: dict[str, Any]) -> None:
+    async def async_update_notification_status(
+        self,
+        delivered_by_recipient: dict[str, list[str]],
+        health: dict[str, Any],
+        runtime: dict[str, Any] | None = None,
+    ) -> None:
         async with self._lock:
             preserved = {key: deepcopy(value) for key, value in self.data.get("notifications", {}).items() if key not in ("delivered_by_recipient", "health")}
-            next_value = {**preserved, "delivered_by_recipient": {key: list(dict.fromkeys(value))[-500:] for key, value in delivered_by_recipient.items()}, "health": deepcopy(health)}
+            next_value = {
+                **preserved,
+                **deepcopy(runtime or {}),
+                "delivered_by_recipient": {
+                    key: list(dict.fromkeys(value))[-500:]
+                    for key, value in delivered_by_recipient.items()
+                },
+                "health": deepcopy(health),
+            }
             if self.data.get("notifications") == next_value: return
             self.data["notifications"] = next_value
             await self.store.async_save(self.data)

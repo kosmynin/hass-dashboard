@@ -7,6 +7,9 @@ import re
 
 MOBILE_NOTIFICATION_TAG = "smartphone_dashboard_alerts"
 MOBILE_NOTIFICATION_GROUP = "smartphone_dashboard"
+MOBILE_LIVE_ACTIVITY_TAG_PREFIX = "smartphone_dashboard_live"
+MOBILE_DASHBOARD_URL = "/handy/handy"
+MOBILE_ACTION_PREFIX = "SMARTPHONE_DASHBOARD"
 
 UPS_NORMAL_STATES = frozenset((
     "online", "on", "ok", "normal", "ol", "connected", "available", "mains", "line",
@@ -76,19 +79,115 @@ def aggregate_alert_message(
     shortened = message[: max(1, max_characters - 2)].rsplit("\n", 1)[0].rstrip()
     return f"{shortened}\n…" if shortened else "…"
 
-def mobile_notification_data(alert_count: int, passive: bool = False) -> dict[str, object]:
+def notification_recipient_token(recipient: str) -> str:
+    """Return a short opaque identifier suitable for notification action IDs."""
+    return hashlib.sha256(recipient.encode()).hexdigest()[:12]
+
+def mobile_action_ids(recipient: str, digest: str) -> dict[str, str]:
+    """Build recipient- and alert-set-specific actionable notification IDs."""
+    token = notification_recipient_token(recipient)
+    safe_digest = re.sub(r"[^a-f0-9]", "", digest.casefold())[:32] or "none"
+    return {
+        "snooze": f"{MOBILE_ACTION_PREFIX}_SNOOZE_30_{token}_{safe_digest}",
+        "mute": f"{MOBILE_ACTION_PREFIX}_MUTE_SET_{token}_{safe_digest}",
+    }
+
+def parse_mobile_action(action: object) -> dict[str, str] | None:
+    """Parse one action created by :func:`mobile_action_ids`."""
+    value = str(action or "")
+    match = re.fullmatch(
+        rf"{MOBILE_ACTION_PREFIX}_(SNOOZE_30|MUTE_SET)_([a-f0-9]{{12}})_([a-f0-9]{{1,32}}|none)",
+        value,
+    )
+    if not match:
+        return None
+    kind, recipient_token, digest = match.groups()
+    return {
+        "kind": "snooze" if kind == "SNOOZE_30" else "mute",
+        "recipient_token": recipient_token,
+        "digest": "" if digest == "none" else digest,
+    }
+
+def mobile_notification_data(
+    alert_count: int,
+    passive: bool = False,
+    *,
+    recipient: str = "",
+    digest: str = "",
+) -> dict[str, object]:
     """Build replacement metadata understood by the iOS Companion app."""
     count = max(0, int(alert_count))
     subtitle = f"{count} aktive Meldung" if count == 1 else f"{count} aktive Meldungen"
-    return {
+    data: dict[str, object] = {
         "tag": MOBILE_NOTIFICATION_TAG,
         "group": MOBILE_NOTIFICATION_GROUP,
         "subtitle": subtitle,
+        "url": MOBILE_DASHBOARD_URL,
+        "clickAction": MOBILE_DASHBOARD_URL,
         "push": {
             "interruption-level": "passive" if passive else "active",
             "badge": count,
         },
     }
+    if recipient:
+        actions = mobile_action_ids(recipient, digest)
+        data["actions"] = [
+            {
+                "action": "URI",
+                "title": "Details",
+                "uri": MOBILE_DASHBOARD_URL,
+                "icon": "sfsymbols:list.bullet",
+            },
+            {
+                "action": actions["snooze"],
+                "title": "30 Min. stumm",
+                "icon": "sfsymbols:bell.slash",
+            },
+            {
+                "action": actions["mute"],
+                "title": "Bis Änderung stumm",
+                "icon": "sfsymbols:bell.slash.circle",
+            },
+        ]
+    return data
+
+def live_activity_message(alerts: list[Mapping[str, object]], limit: int = 2) -> str:
+    """Create the compact, glanceable body used on the Lock Screen."""
+    normalized = normalized_alerts(alerts)
+    visible = [alert["message"] for alert in normalized[: max(1, limit)]]
+    remaining = len(normalized) - len(visible)
+    if remaining:
+        visible.append(f"+{remaining} weitere")
+    return "\n".join(visible)
+
+def mobile_live_activity_data(
+    alerts: list[Mapping[str, object]],
+    *,
+    tag: str = MOBILE_LIVE_ACTIVITY_TAG_PREFIX,
+    silent: bool = False,
+) -> dict[str, object]:
+    """Build a Home Assistant Companion Live Activity / Live Update payload."""
+    normalized = normalized_alerts(alerts)
+    count = len(normalized)
+    urgent = any(alert["fingerprint"].startswith("nina:") for alert in normalized)
+    color = "#FF453A" if urgent else "#FF9F0A"
+    data: dict[str, object] = {
+        "tag": tag,
+        "live_update": True,
+        "critical_text": str(count),
+        "notification_icon": "mdi:bell-badge-outline",
+        "notification_icon_color": color,
+        "color": color,
+        "background_color": "#1C1C1E",
+        "text_color": "#FFFFFF",
+        "relevance_score": 1.0 if urgent else 0.8,
+        "sticky": True,
+        "alert_once": silent,
+        "url": MOBILE_DASHBOARD_URL,
+    }
+    if silent:
+        data["silent"] = True
+    return data
 
 def mobile_clear_data() -> dict[str, object]:
     """Build the iOS payload that clears the replaced aggregate notification."""
@@ -97,6 +196,10 @@ def mobile_clear_data() -> dict[str, object]:
         "group": MOBILE_NOTIFICATION_GROUP,
         "push": {"badge": 0},
     }
+
+def mobile_live_clear_data(tag: str = MOBILE_LIVE_ACTIVITY_TAG_PREFIX) -> dict[str, object]:
+    """Build the payload that ends the current Live Activity / Live Update."""
+    return {"tag": tag}
 
 def area_entity_label(
     area_name: object,
