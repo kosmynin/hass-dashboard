@@ -1,14 +1,19 @@
 """Smartphone Dashboard integration."""
 from __future__ import annotations
-from typing import Any
-import json
 import fnmatch
+import json
+import logging
 import math
 import re
+from typing import Any
+from urllib.parse import urlsplit
+
 import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.http import StaticPathConfig
+from homeassistant.components.lovelace import LOVELACE_DATA
+from homeassistant.components.lovelace.resources import ResourceStorageCollection
 from homeassistant.auth.permissions.const import POLICY_READ
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -18,11 +23,49 @@ from .notification import NotificationCoordinator
 from .const import DOMAIN, FRONTEND_DIR, MODULE_URL, STATIC_URL, VERSION
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+_LOGGER = logging.getLogger(__name__)
+
+def _is_own_frontend_resource(url: object) -> bool:
+    path = urlsplit(str(url or "")).path
+    return (
+        path.startswith("/smartphone-dashboard/")
+        and path.endswith("/smartphone-dashboard-loader.js")
+    )
+
+async def _async_register_frontend_resource(hass: HomeAssistant) -> None:
+    """Use the Lovelace collection after HA's registry polyfill is active."""
+    lovelace = hass.data.get(LOVELACE_DATA)
+    resources = getattr(lovelace, "resources", None)
+    if not isinstance(resources, ResourceStorageCollection):
+        add_extra_js_url(hass, MODULE_URL)
+        return
+    try:
+        # Ensures older HA releases have loaded .storage/lovelace_resources
+        # before this integration reads or updates the collection.
+        await resources.async_get_info()
+        matches = [
+            item
+            for item in resources.async_items()
+            if _is_own_frontend_resource(item.get("url"))
+        ]
+        if not matches:
+            await resources.async_create_item({"res_type": "module", "url": MODULE_URL})
+            return
+        for item in matches:
+            if item.get("url") != MODULE_URL or item.get("type") != "module":
+                await resources.async_update_item(
+                    item["id"], {"res_type": "module", "url": MODULE_URL}
+                )
+    except Exception:
+        # YAML mode and future resource implementations keep the supported
+        # extra-module fallback. The loader additionally repairs registry races.
+        _LOGGER.exception("Lovelace-Ressource konnte nicht registriert werden")
+        add_extra_js_url(hass, MODULE_URL)
 
 async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     """Register authenticated backend API and the embedded frontend."""
     await hass.http.async_register_static_paths([StaticPathConfig(STATIC_URL, str(FRONTEND_DIR), False)])
-    add_extra_js_url(hass, MODULE_URL)
+    await _async_register_frontend_resource(hass)
     websocket_api.async_register_command(hass, websocket_get_config)
     websocket_api.async_register_command(hass, websocket_get_display_config)
     websocket_api.async_register_command(hass, websocket_save_config)

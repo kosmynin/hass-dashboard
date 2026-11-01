@@ -10,7 +10,7 @@ def test_manifest_and_hacs():
     hacs = json.loads((ROOT / "hacs.json").read_text())
     assert manifest["domain"] == "smartphone_dashboard"
     assert manifest["config_flow"] is True
-    assert manifest["version"] == "22.0.33"
+    assert manifest["version"] == "22.0.34"
     assert hacs["name"] == "Smartphone Dashboard"
     assert hacs["zip_release"] is True
     assert hacs["filename"] == "smartphone_dashboard.zip"
@@ -92,7 +92,7 @@ def test_one_runtime_version():
     assert 'STATIC_URL = f"/smartphone-dashboard/v{VERSION}"' in constants
     assert 'MODULE_URL = f"{STATIC_URL}/smartphone-dashboard-loader.js"' in constants
 
-def test_loader_recovers_exact_strategy_timeout_once():
+def test_loader_repairs_registry_races_and_bounds_timeout_recovery():
     loader = (COMPONENT / "frontend/smartphone-dashboard-loader.js").read_text()
     assert 'text.includes("Timeout waiting for strategy element")' in loader
     assert "text.includes(ELEMENT)" in loader
@@ -103,6 +103,19 @@ def test_loader_recovers_exact_strategy_timeout_once():
     assert "installImplementation(ELEMENT, SmartphoneDashboardLoader)" in loader
     assert "updateConstructor(existing, implementation)" in loader
     assert "installImplementation(EDITOR_ELEMENT" in loader
+    assert "REGISTRY_MONITOR_DURATION" in loader
+    assert "observedRegistry !== window.customElements" in loader
+    assert "ensureRegistrations();" in loader
+    assert "RECOVERY_LIMIT = 2" in loader
+    assert "target - performance.now()" in loader
+
+def test_frontend_is_an_automatically_versioned_lovelace_resource():
+    source = (COMPONENT / "__init__.py").read_text()
+    assert "ResourceStorageCollection" in source
+    assert "await resources.async_get_info()" in source
+    assert 'await resources.async_create_item({"res_type": "module", "url": MODULE_URL})' in source
+    assert "await resources.async_update_item(" in source
+    assert "await _async_register_frontend_resource(hass)" in source
 
 def test_generic_base_matches_notification_and_quick_action_transformers():
     strategy = (COMPONENT / "frontend/smartphone-dashboard-strategy.js").read_text()

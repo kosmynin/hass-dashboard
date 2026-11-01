@@ -10,13 +10,14 @@ Ein gemeinsames HACS-Custom-Integration-Paket für das deutsche Smartphone-Dashb
 3. Unter **Einstellungen → Geräte & Dienste → Integration hinzufügen** „Smartphone Dashboard“ wählen.
 4. Unter **Einstellungen → Dashboards → Ressourcen** alle manuellen Einträge für
    `smartphone-dashboard-loader.js` entfernen. Die Integration registriert den
-   versionsabhängigen Modulpfad automatisch.
+   versionsabhängigen Modulpfad im Storage-Modus automatisch als Lovelace-
+   Ressource und aktualisiert ihn bei neuen Versionen.
 5. Home Assistant neu starten, Browserdaten aktualisieren und das primäre
    Dashboard mit `strategy: {type: custom:smartphone-dashboard, backend_key: default}`
    anlegen. Dieses Dashboard ist für die globalen Benachrichtigungen maßgeblich.
 
 Das Frontend wird über einen versionsabhängigen statischen HTTP-Pfad ausgeliefert
-und von der Integration automatisch injiziert. Der Versionsanteil liegt im Pfad
+und von der Integration automatisch registriert. Der Versionsanteil liegt im Pfad
 statt nur im Query-Parameter, damit Proxy-, Service-Worker- und Browser-Caches
 bei einem Update garantiert eine neue URL sehen. Alte manuelle Lovelace-
 Ressourcen müssen entfernt werden, damit sie nicht vor der Integration laden.
@@ -31,10 +32,11 @@ angezeigt. Änderungen dieser Einstellung werden ohne Dashboard-Neukonfiguration
 übernommen.
 
 Home Assistant lädt Custom-Ressourcen derzeit parallel und wartet nur fünf
-Sekunden auf eine Strategy. Trifft dieser bekannte Frontend-Fehler trotz des
-kleinen Sofort-Loaders ein, erkennt der Loader die zugehörige Fehlerkarte und lädt
-die Dashboard-Seite genau einmal neu. Eine Session-Sperre verhindert
-Reload-Schleifen.
+Sekunden auf eine Strategy. Der kleine Sofort-Loader registriert sich vor dem
+eigentlichen Dashboard-Code und erneut, falls Home Assistants Registry-Polyfill
+eine sehr frühe Registrierung ersetzt. Trifft der bekannte Frontend-Timeout
+trotzdem ein, sind höchstens zwei automatische Wiederholungen erlaubt; eine
+Reload-Schleife ist ausgeschlossen.
 
 Der berechtigungsgefilterte Backend-Lesezugriff für die erste Strategy-Erzeugung
 hat ein Zeitlimit von 1,5 Sekunden. Bei Timeout werden ausschließlich explizite

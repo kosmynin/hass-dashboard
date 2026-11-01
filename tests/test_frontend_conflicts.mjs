@@ -495,7 +495,7 @@ globalThis.document = { textContent: "", querySelectorAll: () => [] };
 globalThis.sessionStorage = { getItem: () => null, setItem() {}, removeItem() {} };
 const nativeSetTimeout = globalThis.setTimeout;
 globalThis.setTimeout = () => 0;
-await import("../custom_components/smartphone_dashboard/frontend/smartphone-dashboard-loader.js");
+const loaderModule = await import("../custom_components/smartphone_dashboard/frontend/smartphone-dashboard-loader.js");
 const upgradedStrategy = customElements.get("ll-strategy-dashboard-smartphone-dashboard");
 assert.equal(upgradedStrategy, OldStrategy);
 assert.notEqual(upgradedStrategy.generate, oldGenerate);
@@ -504,4 +504,21 @@ const upgradedDashboard = await upgradedStrategy.generate({}, {
 });
 assert.equal(upgradedDashboard.title, "Handy");
 assert.equal(typeof OldEditor.prototype.setConfig, "function");
+const replacementRegistry = {
+  registry: new Map(),
+  get(name) { return this.registry.get(name); },
+  define(name, value) { this.registry.set(name, value); },
+};
+globalThis.customElements = replacementRegistry;
+loaderModule.ensureRegistrations();
+const replacementStrategy = replacementRegistry.get("ll-strategy-dashboard-smartphone-dashboard");
+assert.equal(typeof replacementStrategy.generate, "function");
+const replacementDashboard = await replacementStrategy.generate({}, {
+  states: {}, areas: {}, devices: {}, entities: {}, services: {},
+});
+assert.equal(replacementDashboard.title, "Handy");
+assert.equal(
+  typeof replacementRegistry.get("smartphone-dashboard-strategy-editor").prototype.setConfig,
+  "function",
+);
 globalThis.setTimeout = nativeSetTimeout;

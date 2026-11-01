@@ -11,16 +11,21 @@ vollständig über GitHub verwaltet. Der Codeowner ist `@kosmynin`.
 
 HACS installiert ausschließlich `custom_components/smartphone_dashboard`, daher liegen alle Laufzeitdateien einschließlich Frontend innerhalb dieses Ordners. Nach Updates Home Assistant neu starten und den Browser hart neu laden.
 
-Der statische Pfad nutzt `hass.http.async_register_static_paths`. Die Integration
-injiziert automatisch einen versionsabhängigen Pfad nach dem Muster
-`/smartphone-dashboard/v22.0.33/smartphone-dashboard-loader.js`. Entferne alle
-manuellen `/smartphone-dashboard/...`- und `/local/...`-Ressourcen, damit keine
-alte Datei zuerst das Custom Element registriert.
+Der statische Pfad nutzt `hass.http.async_register_static_paths`. Im normalen
+Storage-Modus legt die Integration automatisch eine Lovelace-Modulressource mit
+dem versionsabhängigen Pfad
+`/smartphone-dashboard/v22.0.34/smartphone-dashboard-loader.js` an und
+aktualisiert vorhandene Einträge bei jedem Release. Im YAML-Ressourcenmodus
+wird der Loader weiterhin über Home Assistants Extra-Modul-Schnittstelle
+eingebunden. Entferne manuell angelegte `/local/...`-Ressourcen, damit keine
+unabhängige alte Kopie geladen wird.
 
-Bei einem kalten Browserstart kann Home Assistants festes Fünf-Sekunden-Limit
-für Custom-Strategies vor dem Ressourcen-Loader ablaufen. Der Loader erkennt
-genau diesen Fehler und lädt die betroffene Seite einmal automatisch neu; ein
-Session-Marker verhindert Endlosschleifen.
+Der Loader registriert das Strategy-Element vor dem eigentlichen Dashboard-Code
+und überwacht zusätzlich, ob Home Assistants Scoped-Registry-Polyfill eine sehr
+frühe Registrierung ersetzt. In diesem Fall registriert er sich selbstständig
+in der aktiven Registry neu. Falls Home Assistants festes Fünf-Sekunden-Limit
+bei einem stark verzögerten Download trotzdem zuerst abläuft, sind höchstens
+zwei automatische Wiederholungen erlaubt; eine Endlosschleife ist ausgeschlossen.
 
 Die primäre Strategy-Konfiguration lautet:
 
