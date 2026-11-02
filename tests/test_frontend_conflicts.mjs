@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 globalThis.HTMLElement = class { attachShadow() { this.shadowRoot = { activeElement: null, querySelector: () => null, querySelectorAll: () => [] }; return this.shadowRoot; } dispatchEvent() {} };
 globalThis.customElements = { registry: new Map(), get(name) { return this.registry.get(name); }, define(name, value) { this.registry.set(name, value); }, whenDefined() { return Promise.resolve(); } };
 globalThis.window = globalThis;
-const { SmartphoneDashboardStrategy, SmartphoneDashboardStrategyEditor, partitionConflictPatch, applyNotificationOptions, mergeBackendNotifications, detectedRooms, detectedWasteTypes, applyRoomOptions, configuredFeatures } = await import("../custom_components/smartphone_dashboard/frontend/smartphone-dashboard-strategy.js");
+const { SmartphoneDashboardStrategy, SmartphoneDashboardStrategyEditor, partitionConflictPatch, applyNotificationOptions, mergeBackendNotifications, detectedRooms, detectedWasteTypes, wasteTypesFromCalendarResponse, applyRoomOptions, configuredFeatures } = await import("../custom_components/smartphone_dashboard/frontend/smartphone-dashboard-strategy.js");
 
 const roomHass = {
   states: {
@@ -456,6 +456,35 @@ assert.deepEqual(detectedWasteTypes({ states: {} }, [], {
   "Gelbe Tonne/Container": "weekly",
   "Gelber Container": "four_weeks",
 }), ["Gelbe Tonne"]);
+assert.deepEqual(wasteTypesFromCalendarResponse({ response: {
+  "calendar.abfall": { events: [
+    { summary: "Papier - 4 wöchentlich" },
+    { summary: "Biomüll wird abgeholt." },
+    { summary: "Gelbe Tonne/Container - 2 wöchentlich" },
+    { summary: "Papier-Abholung" },
+  ] },
+} }), ["Biomüll", "Gelbe Tonne", "Papier"]);
+
+const calendarEditor = new SmartphoneDashboardStrategyEditor();
+calendarEditor._disposed = false;
+calendarEditor._lifecycleGeneration = 1;
+let calendarRenderCount = 0;
+calendarEditor._renderWasteFrequencyPanels = (loadCalendars) => {
+  assert.equal(loadCalendars, false);
+  calendarRenderCount += 1;
+};
+calendarEditor._hass = {
+  states: { "calendar.abfall": { state: "on", attributes: { friendly_name: "Abfallkalender" } } },
+  callApi: async (method, path) => {
+    assert.equal(method, "GET");
+    assert.match(path, /^calendars\/calendar\.abfall\?start=/);
+    assert.match(path, /&end=/);
+    return [{ summary: "Papier - 4 wöchentlich" }, { summary: "Biomüll - 2 wöchentlich" }];
+  },
+};
+await calendarEditor._loadWasteCalendarTypes();
+assert.deepEqual(calendarEditor._calendarWasteTypes, ["Biomüll", "Papier"]);
+assert.equal(calendarRenderCount, 1);
 
 const editor = new SmartphoneDashboardStrategyEditor();
 let timerFired = false;
