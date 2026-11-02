@@ -274,85 +274,52 @@ def _waste_date(value: object) -> date | None:
             return None
     return None
 
-WASTE_FREQUENCIES = frozenset(("all", "weekly", "two_weeks", "four_weeks"))
-
-def normalize_waste_frequency(value: object) -> str:
-    """Return a supported pickup cadence or the non-filtering default."""
-    frequency = str(value or "all").strip().lower()
-    return frequency if frequency in WASTE_FREQUENCIES else "all"
-
-def _waste_type_parts(value: object) -> list[str]:
+def _waste_types(value: object) -> str:
     values = value if isinstance(value, (list, tuple, set)) else [value]
-    return [
+    parts = [
         part.strip()
         for item in values
         for part in re.split(r"\s*[,;]\s*", str(item or ""))
         if part.strip()
     ]
-
-def _waste_type_frequency(value: str) -> str:
-    normalized = value.casefold().replace("ö", "oe")
-    if re.search(r"\b(?:alle\s*)?(?:4|vier)\s*[- ]?\s*woechentlich\b", normalized):
-        return "four_weeks"
-    if re.search(r"\b(?:alle\s*)?(?:2|zwei)\s*[- ]?\s*woechentlich\b", normalized):
-        return "two_weeks"
-    if re.search(r"\bwoechentlich\b", normalized):
-        return "weekly"
-    return ""
-
-def _clean_waste_type(value: str) -> str:
-    cleaned = re.sub(
-        r"\s*[-–—]?\s*(?:alle\s*)?(?:(?:2|4|zwei|vier)\s*[- ]?\s*)?w(?:ö|oe|o)chentlich\b.*$",
-        "",
-        value,
-        flags=re.IGNORECASE,
-    )
-    cleaned = re.sub(
-        r"^\s*(?:(?:heute|morgen|today|tomorrow)\s+)?(?:wird|werden)\s+",
-        "",
-        cleaned,
-        flags=re.IGNORECASE,
-    )
-    cleaned = re.sub(
-        r"\s+(?:(?:wird|werden)\s+)?(?:abgeholt|geleert|gesammelt|collected|emptied)\s*[.!?]*$",
-        "",
-        cleaned,
-        flags=re.IGNORECASE,
-    )
-    cleaned = re.sub(
-        r"^\s*(?:abholung|leerung)\s*(?:von\s+)?[:\-–—]?\s*",
-        "",
-        cleaned,
-        flags=re.IGNORECASE,
-    )
-    cleaned = re.sub(
-        r"\s*[-–—]?\s*(?:abholung|leerung)\s*[.!?]*$",
-        "",
-        cleaned,
-        flags=re.IGNORECASE,
-    ).strip(" .,!?:;-–—/")
-    # Waste Collection Schedule names occasionally contain two synonyms for
-    # one bin. Keep one concise label and normalize the common yellow-bin alias.
-    cleaned = re.split(r"\s*/\s*", cleaned, maxsplit=1)[0].strip()
-    if re.search(r"gelb", cleaned, flags=re.IGNORECASE) and re.search(
-        r"tonne|container|wertstoff|verpack", cleaned, flags=re.IGNORECASE
-    ):
-        return "Gelbe Tonne"
-    return cleaned
-
-def filter_waste_types(value: object, frequency: object = "all") -> str:
-    """Filter pickup variants, remove cadence suffixes, and deduplicate names."""
-    selected = normalize_waste_frequency(frequency)
-    parts = _waste_type_parts(value)
-    if selected != "all":
-        parts = [
-            part for part in parts
-            if not _waste_type_frequency(part) or _waste_type_frequency(part) == selected
-        ]
     names: list[str] = []
     seen: set[str] = set()
     for part in parts:
-        name = _clean_waste_type(part)
+        name = re.sub(
+            r"\s*[-–—]?\s*(?:alle\s*)?(?:(?:2|4|zwei|vier)\s*[- ]?\s*)?w(?:ö|oe|o)chentlich\b.*$",
+            "",
+            part,
+            flags=re.IGNORECASE,
+        )
+        name = re.sub(
+            r"^\s*(?:(?:heute|morgen|today|tomorrow)\s+)?(?:wird|werden)\s+",
+            "",
+            name,
+            flags=re.IGNORECASE,
+        )
+        name = re.sub(
+            r"\s+(?:(?:wird|werden)\s+)?(?:abgeholt|geleert|gesammelt|collected|emptied)\s*[.!?]*$",
+            "",
+            name,
+            flags=re.IGNORECASE,
+        )
+        name = re.sub(
+            r"^\s*(?:abholung|leerung)\s*(?:von\s+)?[:\-–—]?\s*",
+            "",
+            name,
+            flags=re.IGNORECASE,
+        )
+        name = re.sub(
+            r"\s*[-–—]?\s*(?:abholung|leerung)\s*[.!?]*$",
+            "",
+            name,
+            flags=re.IGNORECASE,
+        ).strip(" .,!?:;-–—/")
+        name = re.split(r"\s*/\s*", name, maxsplit=1)[0].strip()
+        if re.search(r"gelb", name, flags=re.IGNORECASE) and re.search(
+            r"tonne|container|wertstoff|verpack", name, flags=re.IGNORECASE
+        ):
+            name = "Gelbe Tonne"
         key = name.casefold()
         if name and key not in seen:
             seen.add(key)
@@ -364,8 +331,7 @@ def waste_collection_details(
     attributes: Mapping[str, object] | None = None,
     fallback_name: str = "Abfall",
     today: date | None = None,
-    frequency: object = "all",
-) -> dict[str, object] | None:
+) -> dict[str, object]:
     """Normalize common Waste Collection Schedule sensor formats."""
     attrs = attributes or {}
     reference_date = today or date.today()
@@ -378,70 +344,30 @@ def waste_collection_details(
         key_date = _waste_date(key)
         value_date = _waste_date(value)
         if key_date:
-            dated.append((key_date, ", ".join(_waste_type_parts(value))))
+            dated.append((key_date, _waste_types(value)))
         elif value_date:
             dated.append((value_date, str(key).strip()))
     dated.sort(key=lambda item: item[0])
 
     upcoming = attrs.get("upcoming")
-    upcoming_entries = [
-        item for item in upcoming
-        if isinstance(item, Mapping)
-    ] if isinstance(upcoming, (list, tuple)) else []
-    first_upcoming = next(
-        (
-            item for item in upcoming_entries
-            if filter_waste_types(
-                item.get("types") or item.get("type") or item.get("summary") or "Abfall",
-                frequency,
-            )
-        ),
-        {},
-    )
-    selected_dated = next(
-        (item for item in dated if filter_waste_types(item[1], frequency)),
-        None,
-    )
-    scheduled_parts = [
-        part
-        for value in [
-            *(item[1] for item in dated),
-            *(
-                item.get("types") or item.get("type") or item.get("summary") or ""
-                for item in upcoming_entries
-            ),
-        ]
-        for part in _waste_type_parts(value)
-    ]
-    selected_frequency = normalize_waste_frequency(frequency)
-    if (
-        selected_frequency != "all"
-        and scheduled_parts
-        and all(_waste_type_frequency(part) for part in scheduled_parts)
-        and not any(_waste_type_frequency(part) == selected_frequency for part in scheduled_parts)
-    ):
-        return None
-    generic_pickup_date = (
-        _waste_date(attrs.get("date"))
+    first_upcoming = upcoming[0] if isinstance(upcoming, (list, tuple)) and upcoming and isinstance(upcoming[0], Mapping) else {}
+    pickup_date = (
+        _waste_date(first_upcoming.get("date"))
+        or _waste_date(attrs.get("date"))
         or _waste_date(attrs.get("next_date"))
         or _waste_date(attrs.get("start"))
         or _waste_date(attrs.get("start_time"))
+        or (dated[0][0] if dated else None)
     )
-    pickup_date = (
-        _waste_date(first_upcoming.get("date"))
-        or (selected_dated[0] if selected_frequency != "all" and selected_dated else None)
-        or generic_pickup_date
-        or (selected_dated[0] if selected_dated else None)
-    )
-    waste_type = ", ".join(_waste_type_parts(
+    waste_type = _waste_types(
         first_upcoming.get("types")
-        or (selected_dated[1] if selected_dated else None)
+        or (dated[0][1] if dated else None)
         or attrs.get("type")
         or attrs.get("waste_type")
         or attrs.get("summary")
         or attrs.get("subject")
         or attrs.get("types")
-    ))
+    )
     if not waste_type and not re.fullmatch(r"-?\d+(?:\.\d+)?", state_text):
         waste_type = re.sub(
             r"\s+in\s+-?\d+\s+(?:days?|tag(?:e|en)?)(?:\s.*)?$",
@@ -452,9 +378,6 @@ def waste_collection_details(
         waste_type = re.sub(r"(?:^|\s)(?:heute|morgen|today|tomorrow)(?:\s|$)", " ", waste_type, flags=re.IGNORECASE).strip()
     if not waste_type:
         waste_type = re.sub(r"^Waste Collection Schedule\s*", "", fallback_name, flags=re.IGNORECASE).strip() or "Abfall"
-    waste_type = filter_waste_types(waste_type, frequency)
-    if not waste_type:
-        return None
 
     days: int | None = None
     raw_days = first_upcoming.get("daysTo", attrs.get("daysTo", attrs.get("days_to")))

@@ -420,7 +420,6 @@ applyNotificationOptions(wasteDashboard, {
   notification_waste: true,
   waste_entities: "sensor.abfall",
   waste_days: 3,
-  waste_frequency: "two_weeks",
 }, {
   states: {
     "sensor.abfall": { state: "Biomüll in 1 days", attributes: { friendly_name: "Waste Collection Schedule Abfall", "2026-09-01": "Biomüll", daysTo: 1 } },
@@ -435,9 +434,6 @@ assert.match(wastePopup.cards[0].filter.include[0].options.styles, /#FFD700/);
 assert.match(wastePopup.cards[0].filter.include[0].options.styles, /#4A4A4A/);
 assert.match(wastePopup.cards[0].filter.include[0].options.styles, /#4169E1/);
 assert.match(wastePopup.cards[0].filter.include[0].options.styles, /#8B4513/);
-assert.match(wastePopup.cards[0].filter.include[0].options.styles, /selectedFrequency = "two_weeks"/);
-assert.match(wastePopup.cards[0].filter.include[0].options.styles, /Gelbe Tonne/);
-assert.match(wastePopup.cards[0].filter.include[0].options.styles, /seenTypes/);
 assert.equal(wastePopup.cards[1].type, "custom:bubble-card");
 assert.equal(wastePopup.cards[1].card_type, "calendar");
 assert.deepEqual(wastePopup.cards[1].entities, [{ entity: "calendar.abfall", color: "var(--success-color)" }]);

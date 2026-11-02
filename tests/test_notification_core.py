@@ -8,7 +8,6 @@ area_entity_label = CORE["area_entity_label"]
 valid_nina_glob = CORE["valid_nina_glob"]
 ups_state_is_alert = CORE["ups_state_is_alert"]
 waste_collection_details = CORE["waste_collection_details"]
-filter_waste_types = CORE["filter_waste_types"]
 normalized_alerts = CORE["normalized_alerts"]
 alert_set_digest = CORE["alert_set_digest"]
 aggregate_alert_message = CORE["aggregate_alert_message"]
@@ -181,45 +180,3 @@ def test_waste_collection_details_support_generic_and_text_states():
     assert text["type"] == "Restmüll"
     assert text["date_label"] == "morgen"
     assert text["days"] == 1
-
-def test_waste_frequency_filters_and_removes_frequency_from_name():
-    attributes = {
-        "2026-09-01": ["Restmüll - 2 wöchentlich", "Restmüll - wöchentlich"],
-        "daysTo": 1,
-    }
-    weekly = waste_collection_details(
-        "Restmüll morgen", attributes, "Abfall", date(2026, 8, 31), "weekly",
-    )
-    two_weeks = waste_collection_details(
-        "Restmüll morgen", attributes, "Abfall", date(2026, 8, 31), "two_weeks",
-    )
-    combined = waste_collection_details(
-        "Restmüll morgen", attributes, "Abfall", date(2026, 8, 31), "all",
-    )
-    assert weekly["type"] == "Restmüll"
-    assert two_weeks["type"] == "Restmüll"
-    assert combined["type"] == "Restmüll"
-    assert "wöchentlich" not in combined["type"]
-
-def test_waste_frequency_chooses_next_matching_date_and_deduplicates_aliases():
-    details = waste_collection_details(
-        "1",
-        {
-            "2026-09-01": "Restmüll - wöchentlich",
-            "2026-09-15": ["Gelbe Tonne/Container - 2 wöchentlich", "Gelber Container - 2 wöchentlich"],
-        },
-        "Abfall",
-        date(2026, 8, 31),
-        "two_weeks",
-    )
-    assert details == {
-        "type": "Gelbe Tonne",
-        "date": "2026-09-15",
-        "date_label": "15.09.",
-        "days": 15,
-    }
-    assert filter_waste_types("Gelbe Tonne/Container - vierwöchentlich", "four_weeks") == "Gelbe Tonne"
-    assert filter_waste_types("Gelber Container - zwei-wöchentlich", "two_weeks") == "Gelbe Tonne"
-    assert waste_collection_details(
-        "1", {"2026-09-01": "Restmüll - wöchentlich"}, "Abfall", date(2026, 8, 31), "four_weeks",
-    ) is None
