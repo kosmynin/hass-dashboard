@@ -423,7 +423,11 @@ applyNotificationOptions(wasteDashboard, {
 }, {
   states: {
     "sensor.abfall": { state: "Biomüll in 1 days", attributes: { friendly_name: "Waste Collection Schedule Abfall", "2026-09-01": "Biomüll", daysTo: 1 } },
-    "calendar.abfall": { state: "on", attributes: { friendly_name: "Abfallkalender" } },
+    "calendar.hausplan": { state: "on", attributes: { friendly_name: "Haushaltstermine" } },
+  },
+  entities: {
+    "sensor.abfall": { entity_id: "sensor.abfall", platform: "waste_collection_schedule" },
+    "calendar.hausplan": { entity_id: "calendar.hausplan", platform: "waste_collection_schedule" },
   },
 });
 const wastePopup = wasteDashboard.views[0].sections[0].cards.find((card) => card.hash === "#meldung-abfall");
@@ -436,10 +440,11 @@ assert.match(wastePopup.cards[0].filter.include[0].options.styles, /#4169E1/);
 assert.match(wastePopup.cards[0].filter.include[0].options.styles, /#8B4513/);
 assert.equal(wastePopup.cards[1].type, "custom:bubble-card");
 assert.equal(wastePopup.cards[1].card_type, "calendar");
-assert.deepEqual(wastePopup.cards[1].entities, [{ entity: "calendar.abfall", color: "var(--success-color)" }]);
+assert.deepEqual(wastePopup.cards[1].entities, [{ entity: "calendar.hausplan", color: "var(--success-color)" }]);
 assert.equal(wastePopup.cards[1].limit, 6);
 assert.equal(wastePopup.cards[1].days, 45);
 assert.equal(wastePopup.cards[1].rows, 4);
+assert.match(wastePopup.cards[0].filter.include[0].options.styles, /abgeholt/);
 const editor = new SmartphoneDashboardStrategyEditor();
 let timerFired = false;
 editor._inflightBackendPatch = { A: "ungespeichert" };

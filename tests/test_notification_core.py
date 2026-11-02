@@ -180,3 +180,12 @@ def test_waste_collection_details_support_generic_and_text_states():
     assert text["type"] == "Restmüll"
     assert text["date_label"] == "morgen"
     assert text["days"] == 1
+    sentence = waste_collection_details("Restmüll wird abgeholt.", {"daysTo": 1}, "Abfall", date(2026, 8, 31))
+    assert sentence["type"] == "Restmüll"
+    duplicate = waste_collection_details(
+        "1",
+        {"upcoming": [{"date": "2026-09-01", "types": ["Restmüll", "Restmüll wird abgeholt.", "Restmüll-Abholung"]}]},
+        "Abfall",
+        date(2026, 8, 31),
+    )
+    assert duplicate["type"] == "Restmüll"

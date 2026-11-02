@@ -337,7 +337,11 @@ def waste_collection_details(
     reference_date = today or date.today()
     state_text = str(state or "").strip()
     dated: list[tuple[date, str]] = []
-    metadata = {"attribution", "last_update", "daysTo", "days_to", "icon", "upcoming"}
+    metadata = {
+        "attribution", "last_update", "daysTo", "days_to", "icon", "upcoming",
+        "date", "next_date", "start", "start_time", "type", "waste_type",
+        "summary", "subject", "types", "friendly_name",
+    }
     for key, value in attrs.items():
         if key in metadata:
             continue
@@ -378,6 +382,7 @@ def waste_collection_details(
         waste_type = re.sub(r"(?:^|\s)(?:heute|morgen|today|tomorrow)(?:\s|$)", " ", waste_type, flags=re.IGNORECASE).strip()
     if not waste_type:
         waste_type = re.sub(r"^Waste Collection Schedule\s*", "", fallback_name, flags=re.IGNORECASE).strip() or "Abfall"
+    waste_type = _waste_types(waste_type) or "Abfall"
 
     days: int | None = None
     raw_days = first_upcoming.get("daysTo", attrs.get("daysTo", attrs.get("days_to")))

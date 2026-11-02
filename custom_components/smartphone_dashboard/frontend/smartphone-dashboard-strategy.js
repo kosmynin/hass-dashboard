@@ -7,8 +7,8 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.40";
-const CONFIG_VERSION = 23;
+const STRATEGY_VERSION = "22.0.42";
+const CONFIG_VERSION = 25;
 
 const ACTIVE_ROOM_STYLES = `
   ha-card, .bubble-button-card-container, .bubble-name-container,
@@ -221,7 +221,7 @@ const WASTE_SUMMARY_STYLES = `\${(() => {
     return names.join(', ');
   };
   const dated = Object.entries(attributes).flatMap(([key, value]) => {
-    if (['attribution', 'last_update', 'daysTo', 'days_to', 'icon'].includes(key)) return [];
+    if (['attribution', 'last_update', 'daysTo', 'days_to', 'icon', 'upcoming', 'date', 'next_date', 'start', 'start_time', 'type', 'waste_type', 'summary', 'subject', 'types', 'friendly_name'].includes(key)) return [];
     const keyDate = parseDate(key);
     if (keyDate) return [{ date: keyDate, types: typeText(value) }];
     const valueDate = parseDate(value);
@@ -241,6 +241,7 @@ const WASTE_SUMMARY_STYLES = `\${(() => {
       .replace(/^Waste Collection Schedule\\s*/i, '')
       .trim() || 'Abfall';
   }
+  types = typeText(types) || 'Abfall';
   let days = Number(upcoming?.daysTo ?? attributes.daysTo ?? attributes.days_to);
   if (!Number.isFinite(days)) {
     const match = stateText.match(/\\bin\\s+(-?\\d+)\\s+(?:days?|tag(?:e|en)?)\\b/i);
@@ -834,18 +835,26 @@ function withNotificationPopup(entry, category) {
   };
 }
 
-function notificationCalendarEntities(hass) {
+function notificationCalendarEntities(hass, wasteEntityIds = []) {
   const registry = entityRegistryMap(hass);
-  return Object.entries(hass?.states || {})
+  const candidates = Object.entries(hass?.states || {})
     .filter(([entityId, state]) =>
       entityId.startsWith("calendar.") &&
-      isEntityVisible(hass, entityId, registry) &&
-      /abfall|müll|muell|waste|trash|recycl/i.test(
-        `${entityId} ${state?.attributes?.friendly_name || ""}`,
-      ),
+      isEntityVisible(hass, entityId, registry),
     )
-    .map(([entityId]) => entityId)
-    .sort((a, b) => a.localeCompare(b, "de"));
+    .map(([entityId, state]) => ({ entityId, state, entry: registry.get(entityId) }));
+  const wasteEntries = wasteEntityIds.map((entityId) => registry.get(entityId)).filter(Boolean);
+  const linked = candidates.filter(({ entry }) => entry && wasteEntries.some((wasteEntry) =>
+    (entry.device_id && entry.device_id === wasteEntry.device_id) ||
+    (entry.config_entry_id && entry.config_entry_id === wasteEntry.config_entry_id) ||
+    (entry.platform && entry.platform === wasteEntry.platform),
+  ));
+  const selected = linked.length
+    ? linked
+    : candidates.filter(({ entityId, state }) => /abfall|müll|muell|entsorg|waste|trash|recycl/i.test(
+      `${entityId} ${state?.attributes?.friendly_name || ""}`,
+    ));
+  return selected.map(({ entityId }) => entityId).sort((a, b) => a.localeCompare(b, "de"));
 }
 
 function notificationDetailCard(filters, category, hiddenEntityIds = []) {
@@ -922,8 +931,8 @@ function notificationDetailCard(filters, category, hiddenEntityIds = []) {
   };
 }
 
-function notificationDetailPopups(filtersByCategory, hass, hiddenEntityIds = []) {
-  const calendars = notificationCalendarEntities(hass);
+function notificationDetailPopups(filtersByCategory, hass, hiddenEntityIds = [], wasteEntityIds = []) {
+  const calendars = notificationCalendarEntities(hass, wasteEntityIds);
   return Object.entries(filtersByCategory).flatMap(([category, filters]) => {
     if (!filters.length || !NOTIFICATION_POPUPS[category]) return [];
     const [hash, name, icon] = NOTIFICATION_POPUPS[category];
@@ -1183,7 +1192,7 @@ function applyNotificationOptions(dashboard, config, hass) {
         structuredClone(autoEntities),
       ],
     });
-    cards.push(...notificationDetailPopups(detailFilters, hass, notificationHiddenEntityIds));
+    cards.push(...notificationDetailPopups(detailFilters, hass, notificationHiddenEntityIds, wasteEntities));
   }
   return dashboard;
 }
@@ -2166,6 +2175,8 @@ function applyHomeSectionOrder(dashboard, config) {
 function migrateConfig(config, hass) {
   const previousVersion = Number(config?.config_version) || 0;
   const result = { ...EDITOR_DEFAULTS, ...(config || {}), config_version: CONFIG_VERSION };
+  delete result.waste_frequency;
+  delete result.waste_frequencies;
   if (previousVersion < 22) {
     const oldNina = String(result.nina_entities || "").trim();
     if (/^binary_sensor\.[a-z0-9_]+$/i.test(oldNina)) result.nina_entities = `${oldNina}*`;

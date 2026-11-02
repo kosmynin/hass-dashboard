@@ -10,7 +10,7 @@ def test_manifest_and_hacs():
     hacs = json.loads((ROOT / "hacs.json").read_text())
     assert manifest["domain"] == "smartphone_dashboard"
     assert manifest["config_flow"] is True
-    assert manifest["version"] == "22.0.40"
+    assert manifest["version"] == "22.0.42"
     assert hacs["name"] == "Smartphone Dashboard"
     assert hacs["zip_release"] is True
     assert hacs["filename"] == "smartphone_dashboard.zip"
@@ -157,6 +157,9 @@ def test_generic_base_matches_notification_and_quick_action_transformers():
     assert 'state: problemSensor ? "on" : "off"' in strategy
     assert 'const NOTIFICATION_POPUPS' in strategy
     assert 'card_type: "calendar"' in strategy
+    assert "data-waste-frequency" not in strategy
+    assert "delete result.waste_frequency" in strategy
+    assert "delete result.waste_frequencies" in strategy
     assert 'entity?.attributes?.instruction' in strategy
     assert 'entry["state 1"]' not in strategy
     assert 'card?.heading === "Aktionen"' in strategy

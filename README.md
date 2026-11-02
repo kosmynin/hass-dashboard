@@ -49,6 +49,10 @@ eindeutigen Namen und den nächsten passenden Termin. Satzförmige Zustände wie
 erscheinen nur innerhalb des konfigurierbaren
 Vorlaufs und binden passende `calendar.*`-Entitäten darunter als kompakten
 Bubble-Card-Kalender mit bis zu sechs Terminen der kommenden 45 Tage ein.
+Abholrhythmen werden ausschließlich in Waste Collection Schedule konfiguriert;
+das Dashboard filtert sie nicht erneut. Der Kalender wird bevorzugt über die
+Integration des ausgewählten Abfallsensors zugeordnet, sodass auch neutral
+benannte Kalender zuverlässig im Pop-up erscheinen.
 Batteriemeldungen bleiben neutral; ausschließlich ihr Symbol wird unterhalb des
 Grenzwerts orange und bei höchstens dessen Hälfte rot dargestellt.
 Batteriespannungen in Volt oder Millivolt werden grundsätzlich nicht als
