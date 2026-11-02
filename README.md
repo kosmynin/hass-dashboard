@@ -43,9 +43,7 @@ hat ein Zeitlimit von 1,5 Sekunden. Bei Timeout werden ausschließlich explizite
 Lovelace-Werte oder der letzte erfolgreich bereinigte Browserwert verwendet.
 
 Aktive Meldungen öffnen kategoriebasierte Detail-Popups. NINA zeigt dort die
-vollständige Beschreibung und Handlungsempfehlung. Für jede automatisch
-erkannte Abfallart lässt sich getrennt eine wöchentliche, zweiwöchentliche oder
-vierwöchentliche Leerung auswählen. Abfallmeldungen zeigen einen bereinigten,
+vollständige Beschreibung und Handlungsempfehlung. Abfallmeldungen zeigen einen bereinigten,
 eindeutigen Namen und den nächsten passenden Termin. Satzförmige Zustände wie
 „Restmüll wird abgeholt.“ werden dabei mit „Restmüll“ zusammengeführt. Meldungen
 erscheinen nur innerhalb des konfigurierbaren

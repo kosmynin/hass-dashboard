@@ -246,12 +246,6 @@ class NotificationCoordinator:
             waste_days = DEFAULTS["waste_days"]
         waste_days = min(30, max(0, waste_days))
         waste_frequency = strategy.get("waste_frequency", "all")
-        waste_frequencies = strategy.get("waste_frequencies", {})
-        if not isinstance(waste_frequencies, dict):
-            waste_frequencies = {}
-        frequency_digest = hashlib.sha256(
-            repr(sorted(waste_frequencies.items())).encode()
-        ).hexdigest()[:8]
         for entity_id in filter(None, map(str.strip, self._state("input_text.smartphone_abfall_sensoren").split(","))):
             state = self.hass.states.get(entity_id)
             if self._enabled("abfall") and state and self._dashboard_entity_enabled(entity_id):
@@ -261,12 +255,11 @@ class NotificationCoordinator:
                     state.attributes.get("friendly_name", entity_id),
                     now.date(),
                     waste_frequency,
-                    waste_frequencies,
                 )
                 if details and isinstance(details["days"], int) and 0 <= details["days"] <= waste_days:
                     fingerprint_date = details["date"] or str(state.state)
                     type_digest = hashlib.sha256(str(details["type"]).encode()).hexdigest()[:8]
-                    alerts.append({"fingerprint": f"waste:{entity_id}:{fingerprint_date}:{waste_frequency}:{frequency_digest}:{type_digest}", "message": f"🗑️ {details['type']}: {details['date_label']}"})
+                    alerts.append({"fingerprint": f"waste:{entity_id}:{fingerprint_date}:{waste_frequency}:{type_digest}", "message": f"🗑️ {details['type']}: {details['date_label']}"})
         for entity_id in filter(None, map(str.strip, self._state("input_text.smartphone_usv_sensoren").split(","))):
             state = self.hass.states.get(entity_id)
             if self._enabled("usv") and state and self._dashboard_entity_enabled(entity_id) and ups_state_is_alert(entity_id, state.state, state.attributes.get("device_class"), state.attributes.get("friendly_name")):
