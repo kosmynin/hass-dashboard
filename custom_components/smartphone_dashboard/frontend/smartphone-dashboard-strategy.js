@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.39";
+const STRATEGY_VERSION = "22.0.40";
 const CONFIG_VERSION = 24;
 
 const ACTIVE_ROOM_STYLES = `
@@ -194,7 +194,11 @@ function cleanWasteType(value) {
     .replace(/\s*[-–—]?\s*(?:alle\s*)?(?:(?:2|4|zwei|vier)\s*[- ]?\s*)?w(?:ö|oe|o)chentlich\b.*$/i, "")
     .replace(/\s+in\s+-?\d+\s+(?:days?|tag(?:e|en)?)(?:\s.*)?$/i, "")
     .replace(/(?:^|\s)(?:heute|morgen|today|tomorrow)(?:\s|$)/ig, " ")
-    .replace(/^\s+|[\s\-–—/]+$/g, "")
+    .replace(/^\s*(?:(?:heute|morgen|today|tomorrow)\s+)?(?:wird|werden)\s+/i, "")
+    .replace(/\s+(?:(?:wird|werden)\s+)?(?:abgeholt|geleert|gesammelt|collected|emptied)\s*[.!?]*$/i, "")
+    .replace(/^\s*(?:abholung|leerung)\s*(?:von\s+)?[:\-–—]?\s*/i, "")
+    .replace(/\s*[-–—]?\s*(?:abholung|leerung)\s*[.!?]*$/i, "")
+    .replace(/^\s+|[\s\-–—/.,!?:;]+$/g, "")
     .split(/\s*\/\s*/, 1)[0]
     .trim();
   if (/gelb/i.test(cleaned) && /tonne|container|wertstoff|verpack/i.test(cleaned)) cleaned = "Gelbe Tonne";
@@ -281,7 +285,11 @@ function wasteSummaryStyles(frequency = "all", frequencies = {}) {
   const cleanType = (value) => {
     let cleaned = String(value)
       .replace(/\s*[-–—]?\s*(?:alle\s*)?(?:(?:2|4|zwei|vier)\s*[- ]?\s*)?w(?:ö|oe|o)chentlich\b.*$/i, '')
-      .replace(/^\s+|[\s\-–—/]+$/g, '')
+      .replace(/^\s*(?:(?:heute|morgen|today|tomorrow)\s+)?(?:wird|werden)\s+/i, '')
+      .replace(/\s+(?:(?:wird|werden)\s+)?(?:abgeholt|geleert|gesammelt|collected|emptied)\s*[.!?]*$/i, '')
+      .replace(/^\s*(?:abholung|leerung)\s*(?:von\s+)?[:\-–—]?\s*/i, '')
+      .replace(/\s*[-–—]?\s*(?:abholung|leerung)\s*[.!?]*$/i, '')
+      .replace(/^\s+|[\s\-–—/.,!?:;]+$/g, '')
       .split(/\s*\/\s*/, 1)[0]
       .trim();
     if (/gelb/i.test(cleaned) && /tonne|container|wertstoff|verpack/i.test(cleaned)) cleaned = 'Gelbe Tonne';

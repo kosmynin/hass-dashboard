@@ -447,7 +447,7 @@ assert.equal(wastePopup.cards[1].limit, 6);
 assert.equal(wastePopup.cards[1].days, 45);
 assert.equal(wastePopup.cards[1].rows, 4);
 assert.deepEqual(detectedWasteTypes({ states: {
-  "sensor.abfall": { state: "1", attributes: {
+  "sensor.abfall": { state: "Restmüll wird abgeholt.", attributes: {
     "2026-09-01": ["Gelbe Tonne/Container - wöchentlich", "Gelber Container - 4 wöchentlich"],
     upcoming: [{ date: "2026-09-08", types: ["Restmüll - 2 wöchentlich", "Biomüll - vierwöchentlich"] }],
   } },

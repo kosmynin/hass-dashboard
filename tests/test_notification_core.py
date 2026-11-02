@@ -252,3 +252,6 @@ def test_waste_frequency_can_be_selected_per_waste_type():
         "all",
         {"Gelbe Tonne/Container": "four_weeks"},
     ) == "Gelbe Tonne"
+    assert filter_waste_types(
+        ["Restmüll", "Restmüll wird abgeholt.", "Abholung: Restmüll", "Restmüll-Abholung"],
+    ) == "Restmüll"

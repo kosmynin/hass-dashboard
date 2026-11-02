@@ -46,7 +46,9 @@ Aktive Meldungen öffnen kategoriebasierte Detail-Popups. NINA zeigt dort die
 vollständige Beschreibung und Handlungsempfehlung. Für jede automatisch
 erkannte Abfallart lässt sich getrennt eine wöchentliche, zweiwöchentliche oder
 vierwöchentliche Leerung auswählen. Abfallmeldungen zeigen einen bereinigten,
-eindeutigen Namen und den nächsten passenden Termin, erscheinen nur innerhalb des konfigurierbaren
+eindeutigen Namen und den nächsten passenden Termin. Satzförmige Zustände wie
+„Restmüll wird abgeholt.“ werden dabei mit „Restmüll“ zusammengeführt. Meldungen
+erscheinen nur innerhalb des konfigurierbaren
 Vorlaufs und binden passende `calendar.*`-Entitäten darunter als kompakten
 Bubble-Card-Kalender mit bis zu sechs Terminen der kommenden 45 Tage ein.
 Batteriemeldungen bleiben neutral; ausschließlich ihr Symbol wird unterhalb des

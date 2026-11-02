@@ -316,7 +316,31 @@ def _clean_waste_type(value: str) -> str:
         "",
         value,
         flags=re.IGNORECASE,
-    ).strip(" -–—/")
+    )
+    cleaned = re.sub(
+        r"^\s*(?:(?:heute|morgen|today|tomorrow)\s+)?(?:wird|werden)\s+",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"\s+(?:(?:wird|werden)\s+)?(?:abgeholt|geleert|gesammelt|collected|emptied)\s*[.!?]*$",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"^\s*(?:abholung|leerung)\s*(?:von\s+)?[:\-–—]?\s*",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"\s*[-–—]?\s*(?:abholung|leerung)\s*[.!?]*$",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    ).strip(" .,!?:;-–—/")
     # Waste Collection Schedule names occasionally contain two synonyms for
     # one bin. Keep one concise label and normalize the common yellow-bin alias.
     cleaned = re.split(r"\s*/\s*", cleaned, maxsplit=1)[0].strip()
