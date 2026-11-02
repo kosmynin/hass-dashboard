@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 globalThis.HTMLElement = class { attachShadow() { this.shadowRoot = { activeElement: null, querySelector: () => null, querySelectorAll: () => [] }; return this.shadowRoot; } dispatchEvent() {} };
 globalThis.customElements = { registry: new Map(), get(name) { return this.registry.get(name); }, define(name, value) { this.registry.set(name, value); }, whenDefined() { return Promise.resolve(); } };
 globalThis.window = globalThis;
-const { SmartphoneDashboardStrategy, SmartphoneDashboardStrategyEditor, partitionConflictPatch, applyNotificationOptions, mergeBackendNotifications, detectedRooms, applyRoomOptions, configuredFeatures } = await import("../custom_components/smartphone_dashboard/frontend/smartphone-dashboard-strategy.js");
+const { SmartphoneDashboardStrategy, SmartphoneDashboardStrategyEditor, partitionConflictPatch, applyNotificationOptions, mergeBackendNotifications, detectedRooms, detectedWasteTypes, applyRoomOptions, configuredFeatures } = await import("../custom_components/smartphone_dashboard/frontend/smartphone-dashboard-strategy.js");
 
 const roomHass = {
   states: {
@@ -421,6 +421,7 @@ applyNotificationOptions(wasteDashboard, {
   waste_entities: "sensor.abfall",
   waste_days: 3,
   waste_frequency: "two_weeks",
+  waste_frequencies: { "Biomüll": "four_weeks", "Gelbe Tonne": "weekly" },
 }, {
   states: {
     "sensor.abfall": { state: "Biomüll in 1 days", attributes: { friendly_name: "Waste Collection Schedule Abfall", "2026-09-01": "Biomüll", daysTo: 1 } },
@@ -436,6 +437,7 @@ assert.match(wastePopup.cards[0].filter.include[0].options.styles, /#4A4A4A/);
 assert.match(wastePopup.cards[0].filter.include[0].options.styles, /#4169E1/);
 assert.match(wastePopup.cards[0].filter.include[0].options.styles, /#8B4513/);
 assert.match(wastePopup.cards[0].filter.include[0].options.styles, /selectedFrequency = "two_weeks"/);
+assert.match(wastePopup.cards[0].filter.include[0].options.styles, /"Biomüll":"four_weeks"/);
 assert.match(wastePopup.cards[0].filter.include[0].options.styles, /Gelbe Tonne/);
 assert.match(wastePopup.cards[0].filter.include[0].options.styles, /seenTypes/);
 assert.equal(wastePopup.cards[1].type, "custom:bubble-card");
@@ -444,6 +446,16 @@ assert.deepEqual(wastePopup.cards[1].entities, [{ entity: "calendar.abfall", col
 assert.equal(wastePopup.cards[1].limit, 6);
 assert.equal(wastePopup.cards[1].days, 45);
 assert.equal(wastePopup.cards[1].rows, 4);
+assert.deepEqual(detectedWasteTypes({ states: {
+  "sensor.abfall": { state: "1", attributes: {
+    "2026-09-01": ["Gelbe Tonne/Container - wöchentlich", "Gelber Container - 4 wöchentlich"],
+    upcoming: [{ date: "2026-09-08", types: ["Restmüll - 2 wöchentlich", "Biomüll - vierwöchentlich"] }],
+  } },
+} }, ["sensor.abfall"], {}), ["Biomüll", "Gelbe Tonne", "Restmüll"]);
+assert.deepEqual(detectedWasteTypes({ states: {} }, [], {
+  "Gelbe Tonne/Container": "weekly",
+  "Gelber Container": "four_weeks",
+}), ["Gelbe Tonne"]);
 
 const editor = new SmartphoneDashboardStrategyEditor();
 let timerFired = false;

@@ -123,6 +123,10 @@ def _valid_config(value: dict[str, Any]) -> dict[str, Any]:
     if "nina_entities" in value and (not isinstance(value["nina_entities"], str) or not re.fullmatch(r"binary_sensor\.[a-zA-Z0-9_]+\*[a-zA-Z0-9_]*", value["nina_entities"])): raise vol.Invalid("nina_entities ist ungültig")
     if "notification_recipients" in value and any(not re.fullmatch(r"notify\.[a-z0-9_]+", item.strip()) for item in str(value["notification_recipients"]).split(",") if item.strip()): raise vol.Invalid("Notify-Dienst ist ungültig")
     if "waste_frequency" in value and value["waste_frequency"] not in ("all", "weekly", "two_weeks", "four_weeks"): raise vol.Invalid("waste_frequency ist ungültig")
+    if "waste_frequencies" in value:
+        frequencies = value["waste_frequencies"]
+        if not isinstance(frequencies, dict) or len(frequencies) > 64: raise vol.Invalid("waste_frequencies ist ungültig")
+        if any(not isinstance(name, str) or not name.strip() or len(name) > 128 or frequency not in ("all", "weekly", "two_weeks", "four_weeks") for name, frequency in frequencies.items()): raise vol.Invalid("waste_frequencies enthält einen ungültigen Eintrag")
     for key in ("persons", "rooms", "quick_actions", "home_sections"):
         if key in value and not isinstance(value[key], list): raise vol.Invalid(f"{key} muss eine Liste sein")
     entity_id = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
@@ -193,7 +197,7 @@ PUBLIC_NOTIFICATION_TYPES = {
     "notification_batteries": bool, "notification_contacts": bool, "notification_co2": bool,
     "notification_waste": bool, "notification_ups": bool, "notification_frost": bool,
     "notification_nina": bool, "battery_threshold": (int, float),
-    "contact_minutes": (int, float), "co2_threshold": (int, float), "frost_threshold": (int, float), "waste_days": (int, float), "waste_frequency": str,
+    "contact_minutes": (int, float), "co2_threshold": (int, float), "frost_threshold": (int, float), "waste_days": (int, float), "waste_frequency": str, "waste_frequencies": dict,
 }
 DISPLAY_ENTITY_LISTS = ("battery_exclusions", "waste_entities", "ups_entities")
 NINA_GLOB_RE = re.compile(r"^binary_sensor\.[a-zA-Z0-9_]+\*[a-zA-Z0-9_]*$")
@@ -207,6 +211,12 @@ def _public_notification_config(config: Any, existing_entities: set[str], can_re
             result[key] = value
     if result.get("waste_frequency") not in (None, "all", "weekly", "two_weeks", "four_weeks"):
         result["waste_frequency"] = "all"
+    frequencies = result.get("waste_frequencies")
+    if isinstance(frequencies, dict):
+        result["waste_frequencies"] = {
+            name: frequency for name, frequency in frequencies.items()
+            if isinstance(name, str) and name.strip() and len(name) <= 128 and frequency in ("all", "weekly", "two_weeks", "four_weeks")
+        }
     for key in DISPLAY_ENTITY_LISTS:
         raw = config.get(key, "")
         values = raw if isinstance(raw, list) else str(raw).split(",")

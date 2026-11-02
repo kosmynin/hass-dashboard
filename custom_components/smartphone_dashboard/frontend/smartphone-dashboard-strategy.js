@@ -7,8 +7,8 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.38";
-const CONFIG_VERSION = 23;
+const STRATEGY_VERSION = "22.0.39";
+const CONFIG_VERSION = 24;
 
 const ACTIVE_ROOM_STYLES = `
   ha-card, .bubble-button-card-container, .bubble-name-container,
@@ -177,12 +177,80 @@ const ENTITY_NOTIFICATION_STYLES = `
     opacity: 1 !important;
   }
 `;
-function wasteSummaryStyles(frequency = "all") {
+const WASTE_FREQUENCY_VALUES = new Set(["all", "weekly", "two_weeks", "four_weeks"]);
+function wasteTypeParts(value) {
+  const values = Array.isArray(value) ? value : value == null ? [] : [value];
+  return values.flatMap((item) => String(item).split(/\s*[,;]\s*/)).map((item) => item.trim()).filter(Boolean);
+}
+function wasteTypeFrequency(value) {
+  const normalized = String(value).toLowerCase().replaceAll("ö", "oe");
+  if (/\b(?:alle\s*)?(?:4|vier)\s*[- ]?\s*woechentlich\b/.test(normalized)) return "four_weeks";
+  if (/\b(?:alle\s*)?(?:2|zwei)\s*[- ]?\s*woechentlich\b/.test(normalized)) return "two_weeks";
+  if (/\bwoechentlich\b/.test(normalized)) return "weekly";
+  return "";
+}
+function cleanWasteType(value) {
+  let cleaned = String(value || "")
+    .replace(/\s*[-–—]?\s*(?:alle\s*)?(?:(?:2|4|zwei|vier)\s*[- ]?\s*)?w(?:ö|oe|o)chentlich\b.*$/i, "")
+    .replace(/\s+in\s+-?\d+\s+(?:days?|tag(?:e|en)?)(?:\s.*)?$/i, "")
+    .replace(/(?:^|\s)(?:heute|morgen|today|tomorrow)(?:\s|$)/ig, " ")
+    .replace(/^\s+|[\s\-–—/]+$/g, "")
+    .split(/\s*\/\s*/, 1)[0]
+    .trim();
+  if (/gelb/i.test(cleaned) && /tonne|container|wertstoff|verpack/i.test(cleaned)) cleaned = "Gelbe Tonne";
+  return cleaned;
+}
+function normalizeWasteFrequencies(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const result = {};
+  for (const [rawName, frequency] of Object.entries(value)) {
+    const name = cleanWasteType(rawName);
+    if (name && WASTE_FREQUENCY_VALUES.has(frequency)) result[name] = frequency;
+  }
+  return result;
+}
+function wasteFrequencyForType(type, frequencies, fallback = "all") {
+  const key = cleanWasteType(type).toLocaleLowerCase("de-DE");
+  const match = Object.entries(normalizeWasteFrequencies(frequencies)).find(
+    ([name]) => cleanWasteType(name).toLocaleLowerCase("de-DE") === key,
+  );
+  return match?.[1] || (WASTE_FREQUENCY_VALUES.has(fallback) ? fallback : "all");
+}
+function detectedWasteTypes(hass, entityIds, configured = {}) {
+  const names = new Map();
+  const add = (value) => {
+    for (const part of wasteTypeParts(value)) {
+      const name = cleanWasteType(part);
+      if (name && name !== "Abfall" && !/^Waste Collection Schedule/i.test(name)) {
+        names.set(name.toLocaleLowerCase("de-DE"), name);
+      }
+    }
+  };
+  for (const entityId of entityIds || []) {
+    const state = hass?.states?.[entityId];
+    const attributes = state?.attributes || {};
+    add(attributes.type || attributes.waste_type || attributes.summary || attributes.subject || attributes.types);
+    if (Array.isArray(attributes.upcoming)) {
+      for (const item of attributes.upcoming) add(item?.types || item?.type || item?.summary);
+    }
+    for (const [key, value] of Object.entries(attributes)) {
+      if (["attribution", "last_update", "daysTo", "days_to", "icon", "upcoming", "date", "next_date", "start", "start_time", "type", "waste_type", "summary", "subject", "types", "friendly_name"].includes(key)) continue;
+      if (/^\d{4}-\d{2}-\d{2}/.test(key) || /^\d{1,2}\.\d{1,2}\.\d{4}/.test(key)) add(value);
+      else if (/^\d{4}-\d{2}-\d{2}/.test(String(value)) || /^\d{1,2}\.\d{1,2}\.\d{4}/.test(String(value))) add(key);
+    }
+    if (!/^-?\d+(?:\.\d+)?$/.test(String(state?.state || ""))) add(state?.state);
+  }
+  for (const name of Object.keys(normalizeWasteFrequencies(configured))) add(name);
+  return [...names.values()].sort((left, right) => left.localeCompare(right, "de-DE"));
+}
+function wasteSummaryStyles(frequency = "all", frequencies = {}) {
   const selectedFrequency = ["weekly", "two_weeks", "four_weeks"].includes(frequency)
     ? frequency
     : "all";
+  const selectedFrequencies = normalizeWasteFrequencies(frequencies);
   return `\${(() => {
   const selectedFrequency = ${JSON.stringify(selectedFrequency)};
+  const selectedFrequencies = ${JSON.stringify(selectedFrequencies)};
   const entityId = typeof entity === 'string' ? entity : entity?.entity_id;
   const waste = hass.states[entityId];
   const attributes = waste?.attributes || {};
@@ -219,12 +287,18 @@ function wasteSummaryStyles(frequency = "all") {
     if (/gelb/i.test(cleaned) && /tonne|container|wertstoff|verpack/i.test(cleaned)) cleaned = 'Gelbe Tonne';
     return cleaned;
   };
-  const matchesFrequency = (value) => selectedFrequency === 'all' || typeParts(value).some((item) => {
+  const frequencyForType = (value) => {
+    const key = cleanType(value).toLocaleLowerCase('de-DE');
+    const match = Object.entries(selectedFrequencies).find(([name]) => cleanType(name).toLocaleLowerCase('de-DE') === key);
+    return match?.[1] || selectedFrequency;
+  };
+  const matchesFrequency = (value) => typeParts(value).some((item) => {
     const frequency = typeFrequency(item);
-    return !frequency || frequency === selectedFrequency;
+    const expected = frequencyForType(item);
+    return expected === 'all' || !frequency || frequency === expected;
   });
   const dated = Object.entries(attributes).flatMap(([key, value]) => {
-    if (['attribution', 'last_update', 'daysTo', 'days_to', 'icon'].includes(key)) return [];
+    if (['attribution', 'last_update', 'daysTo', 'days_to', 'icon', 'upcoming', 'date', 'next_date', 'start', 'start_time', 'type', 'waste_type', 'summary', 'subject', 'types', 'friendly_name'].includes(key)) return [];
     const keyDate = parseDate(key);
     if (keyDate) return [{ date: keyDate, types: typeText(value) }];
     const valueDate = parseDate(value);
@@ -235,7 +309,7 @@ function wasteSummaryStyles(frequency = "all") {
   const upcoming = upcomingEntries.find((item) => item && matchesFrequency(item.types || item.type || item.summary || 'Abfall')) || null;
   const genericPickupDate = parseDate(attributes.date || attributes.next_date || attributes.start || attributes.start_time);
   const pickupDate = parseDate(upcoming?.date)
-    || (selectedFrequency !== 'all' ? selectedDated?.date : null)
+    || (selectedFrequency !== 'all' || Object.keys(selectedFrequencies).length ? selectedDated?.date : null)
     || genericPickupDate
     || selectedDated?.date
     || null;
@@ -252,9 +326,11 @@ function wasteSummaryStyles(frequency = "all") {
       .trim() || 'Abfall';
   }
   let filteredTypes = typeParts(types);
-  if (selectedFrequency !== 'all') {
-    filteredTypes = filteredTypes.filter((item) => !typeFrequency(item) || typeFrequency(item) === selectedFrequency);
-  }
+  filteredTypes = filteredTypes.filter((item) => {
+    const expected = frequencyForType(item);
+    const actual = typeFrequency(item);
+    return expected === 'all' || !actual || actual === expected;
+  });
   const uniqueTypes = [];
   const seenTypes = new Set();
   for (const item of filteredTypes) {
@@ -357,7 +433,7 @@ const NOTIFICATION_HELPERS = {
   ups_entities: "input_text.smartphone_usv_sensoren",
   nina_entities: "input_text.smartphone_nina_muster",
 };
-const BACKEND_NOTIFICATION_KEYS = [...Object.keys(NOTIFICATION_HELPERS), "waste_days", "waste_frequency"];
+const BACKEND_NOTIFICATION_KEYS = [...Object.keys(NOTIFICATION_HELPERS), "waste_days", "waste_frequency", "waste_frequencies"];
 
 // Sofort registrieren: Home Assistant wartet maximal fünf Sekunden auf das
 // Strategy-Element. Die Funktionsdeklarationen darunter werden beim Aufruf
@@ -1020,6 +1096,9 @@ function applyNotificationOptions(dashboard, config, hass) {
   )
     ? String(notificationSetting(config, hass, "waste_frequency"))
     : "all";
+  const wasteFrequencies = normalizeWasteFrequencies(
+    notificationSetting(config, hass, "waste_frequencies"),
+  );
   const frostSetting = notificationSetting(config, hass, "frost_threshold");
   const frostThreshold = Number.isFinite(Number(frostSetting))
     ? Number(frostSetting)
@@ -1136,7 +1215,7 @@ function applyNotificationOptions(dashboard, config, hass) {
           button_type: "state",
           show_state: true,
           icon: "mdi:trash-can-outline",
-          styles: wasteSummaryStyles(wasteFrequency),
+          styles: wasteSummaryStyles(wasteFrequency, wasteFrequencies),
         },
       }));
       return settings.waste ? emit("waste", entries) : [];
@@ -1677,6 +1756,17 @@ function normalizedNavigationHash(value, fallback) {
 
 function configurationValidationErrors(config) {
   const errors = [];
+  if (config?.waste_frequencies !== undefined) {
+    if (!config.waste_frequencies || typeof config.waste_frequencies !== "object" || Array.isArray(config.waste_frequencies)) {
+      errors.push("Abholrhythmen je Abfallart sind ungültig");
+    } else {
+      for (const [name, frequency] of Object.entries(config.waste_frequencies)) {
+        if (!cleanWasteType(name) || !WASTE_FREQUENCY_VALUES.has(frequency)) {
+          errors.push(`Abfallart „${name || "Unbenannt"}": ungültiger Abholrhythmus`);
+        }
+      }
+    }
+  }
   const hashes = [];
   for (const [key, meta] of Object.entries(FEATURE_META)) {
     const raw = String(config?.features?.[key]?.hash || "").trim();
@@ -2202,6 +2292,12 @@ function applyHomeSectionOrder(dashboard, config) {
 function migrateConfig(config, hass) {
   const previousVersion = Number(config?.config_version) || 0;
   const result = { ...EDITOR_DEFAULTS, ...(config || {}), config_version: CONFIG_VERSION };
+  result.waste_frequencies = normalizeWasteFrequencies(result.waste_frequencies);
+  if (previousVersion < 24 && !Object.keys(result.waste_frequencies).length && result.waste_frequency !== "all") {
+    result.waste_frequencies = Object.fromEntries(
+      detectedWasteTypes(hass, csv(result.waste_entities), {}).map((name) => [name, result.waste_frequency]),
+    );
+  }
   if (previousVersion < 22) {
     const oldNina = String(result.nina_entities || "").trim();
     if (/^binary_sensor\.[a-z0-9_]+$/i.test(oldNina)) result.nina_entities = `${oldNina}*`;
@@ -2296,6 +2392,7 @@ const EDITOR_DEFAULTS = {
   frost_threshold: 4,
   waste_days: 1,
   waste_frequency: "all",
+  waste_frequencies: {},
   notification_recipients: "",
   battery_exclusions: "",
   frost_entity: "",
@@ -2419,7 +2516,7 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
       this._backendKeyLoaded = requestKey;
       this._backendBase = result.config || {};
       let importedNotifications = false;
-      for (const key of Object.keys(NOTIFICATION_HELPERS)) {
+      for (const key of BACKEND_NOTIFICATION_KEYS) {
         if (Object.prototype.hasOwnProperty.call(this._backendBase, key) && !Object.prototype.hasOwnProperty.call(this._sourceConfig || {}, key) && !this._localEditsBeforeBackend?.has(key)) {
           this._config[key] = this._backendBase[key]; importedNotifications = true;
         }
@@ -2540,6 +2637,15 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
         field.value = String(this._effectiveSetting(field.dataset.notificationChoice) || "all");
       }
     }
+    const wasteFrequencies = normalizeWasteFrequencies(this._effectiveSetting("waste_frequencies"));
+    const wasteFallback = WASTE_FREQUENCY_VALUES.has(this._effectiveSetting("waste_frequency"))
+      ? this._effectiveSetting("waste_frequency")
+      : "all";
+    for (const field of this.shadowRoot.querySelectorAll("[data-waste-frequency-type]")) {
+      if (field !== activeElement) {
+        field.value = wasteFrequencyForType(field.dataset.wasteFrequencyType, wasteFrequencies, wasteFallback);
+      }
+    }
     for (const toggle of this.shadowRoot.querySelectorAll("[data-switch^='notification_']")) {
       toggle.checked = this._effectiveSetting(toggle.dataset.switch) !== false;
     }
@@ -2627,6 +2733,67 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
       person.entity === entityId ? { ...person, ...changes } : person,
     );
     this._update("persons", persons);
+  }
+
+  _renderWasteFrequencyPanels() {
+    if (!this.shadowRoot) return;
+    const frequencies = normalizeWasteFrequencies(this._effectiveSetting("waste_frequencies"));
+    const fallback = WASTE_FREQUENCY_VALUES.has(this._effectiveSetting("waste_frequency"))
+      ? this._effectiveSetting("waste_frequency")
+      : "all";
+    const types = detectedWasteTypes(
+      this._hass,
+      csv(this._effectiveSetting("waste_entities")),
+      frequencies,
+    );
+    for (const panel of this.shadowRoot.querySelectorAll("[data-waste-frequency-panel]")) {
+      panel.replaceChildren();
+      const title = document.createElement("div");
+      title.className = "waste-frequency-title";
+      title.textContent = "Abholrhythmus je Abfallart";
+      panel.appendChild(title);
+      if (!types.length) {
+        const hint = document.createElement("div");
+        hint.className = "hint";
+        hint.textContent = "Aus den gewählten Abfallsensoren wurden noch keine Abfallarten erkannt.";
+        panel.appendChild(hint);
+        continue;
+      }
+      for (const type of types) {
+        const row = document.createElement("label");
+        row.className = "waste-frequency-row";
+        const name = document.createElement("span");
+        name.className = "waste-frequency-name";
+        name.textContent = type;
+        const select = document.createElement("select");
+        select.dataset.wasteFrequencyType = type;
+        for (const [value, label] of [
+          ["all", "Alle Rhythmen"],
+          ["weekly", "Wöchentlich"],
+          ["two_weeks", "Alle 2 Wochen"],
+          ["four_weeks", "Alle 4 Wochen"],
+        ]) {
+          const option = document.createElement("option");
+          option.value = value;
+          option.textContent = label;
+          select.appendChild(option);
+        }
+        select.value = wasteFrequencyForType(type, frequencies, fallback);
+        select.addEventListener("change", (event) => {
+          const current = normalizeWasteFrequencies(this._effectiveSetting("waste_frequencies"));
+          const existingName = Object.keys(current).find(
+            (item) => cleanWasteType(item).toLocaleLowerCase("de-DE") === cleanWasteType(type).toLocaleLowerCase("de-DE"),
+          );
+          const next = { ...current };
+          if (existingName && existingName !== type) delete next[existingName];
+          next[type] = event.currentTarget.value;
+          this._update("waste_frequencies", next);
+          this._updateLiveControls();
+        });
+        row.append(name, select);
+        panel.appendChild(row);
+      }
+    }
   }
 
   _selectorValue(event, multiple = false) {
@@ -3267,6 +3434,11 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
         .native-field { display: grid; gap: 6px; color: var(--secondary-text-color); font-size: 12px; }
         .native-field input:focus { outline: 2px solid var(--primary-color); outline-offset: 1px; }
         .native-field input.invalid, textarea.invalid { border-color: var(--error-color); outline-color: var(--error-color); }
+        .waste-frequency-panel { display: grid; gap: 9px; }
+        .waste-frequency-title { font-weight: 600; }
+        .waste-frequency-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(150px, .8fr); align-items: center; gap: 10px; }
+        .waste-frequency-name { min-width: 0; overflow-wrap: anywhere; color: var(--primary-text-color); }
+        @media (max-width: 520px) { .waste-frequency-row { grid-template-columns: 1fr; gap: 5px; } }
         .selector-field ha-selector { width: 100%; }
         .selector-fallback { width: 100%; box-sizing: border-box; padding: 11px; border: 1px solid var(--divider-color); border-radius: 8px; color: var(--primary-text-color); background: var(--card-background-color); font: inherit; }
         .token-picker, .tokens { display: grid; gap: 7px; }
@@ -3337,7 +3509,7 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
             <label class="native-field">CO₂-Grenzwert in ppm<input data-notification-number="co2_threshold" type="number" min="400" max="5000" step="50"></label>
             <div class="switch-row"><div class="switch-copy"><div class="switch-title">Abfall</div><div class="switch-description">Nur an Abholungen innerhalb des gewählten Vorlaufs erinnern.</div></div><ha-switch data-switch="notification_waste"></ha-switch></div>
             <label class="native-field">Abfall-Vorlauf in Tagen<input data-notification-number="waste_days" type="number" min="0" max="30"></label>
-            <label class="native-field">Abholrhythmus<select data-notification-choice="waste_frequency"><option value="all">Alle Rhythmen</option><option value="weekly">Wöchentlich</option><option value="two_weeks">Alle 2 Wochen</option><option value="four_weeks">Alle 4 Wochen</option></select></label>
+            <div class="waste-frequency-panel" data-waste-frequency-panel></div>
             <div class="switch-row"><div class="switch-copy"><div class="switch-title">USV</div><div class="switch-description">Abweichenden USV-Status melden.</div></div><ha-switch data-switch="notification_ups"></ha-switch></div>
             <div class="switch-row"><div class="switch-copy"><div class="switch-title">Frostwarnung</div><div class="switch-description">Bei niedriger Außentemperatur warnen.</div></div><ha-switch data-switch="notification_frost"></ha-switch></div>
             <label class="native-field">Frost-Grenzwert in °C<input data-notification-number="frost_threshold" type="number" min="-30" max="20"></label>
@@ -3362,7 +3534,7 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
             <label class="native-field">Kontakt offen seit Minuten<input data-notification-number="contact_minutes" type="number" min="1" max="1440"></label>
             <label class="native-field">CO₂-Grenzwert in ppm<input data-notification-number="co2_threshold" type="number" min="400" max="5000" step="50"></label>
             <label class="native-field">Abfall-Vorlauf in Tagen<input data-notification-number="waste_days" type="number" min="0" max="30"></label>
-            <label class="native-field">Abholrhythmus<select data-notification-choice="waste_frequency"><option value="all">Alle Rhythmen</option><option value="weekly">Wöchentlich</option><option value="two_weeks">Alle 2 Wochen</option><option value="four_weeks">Alle 4 Wochen</option></select></label>
+            <div class="waste-frequency-panel" data-waste-frequency-panel></div>
             <label class="native-field">Frost-Grenzwert in °C<input data-notification-number="frost_threshold" type="number" min="-30" max="20"></label>
             <div class="entity-title">Benachrichtigungen</div>
             <div data-notify-selector-host></div>
@@ -3489,8 +3661,11 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
       { domain: "sensor", device_class: "temperature" }, (value) => void this._updateNotificationSetting("frost_entity", value),
     ));
     this.shadowRoot.querySelector("[data-waste-selector-host]").replaceWith(this._entitySelector(
-      "Abfallsensoren", notificationList("waste_entities"), { domain: "sensor", multiple: true }, saveNotificationList("waste_entities"),
+      "Abfallsensoren", notificationList("waste_entities"), { domain: "sensor", multiple: true }, (value) => {
+        void this._updateNotificationSetting("waste_entities", value.join(",")).finally(() => this._renderWasteFrequencyPanels());
+      },
     ));
+    this._renderWasteFrequencyPanels();
     this.shadowRoot.querySelector("[data-ups-selector-host]").replaceWith(this._entitySelector(
       "USV-Sensoren", notificationList("ups_entities"), { multiple: true }, saveNotificationList("ups_entities"),
     ));
@@ -3723,5 +3898,6 @@ export {
   normalizeNinaGlob,
   synchronizationStatus,
   detectedRooms,
+  detectedWasteTypes,
   applyRoomOptions,
 };

@@ -177,6 +177,11 @@ def test_waste_collection_details_support_generic_and_text_states():
     )
     assert generic["type"] == "Gelbe Tonne"
     assert generic["date_label"] == "morgen · 01.09."
+    direct = waste_collection_details(
+        "1", {"date": "2026-09-01", "type": "Biomüll"}, "Abfall", date(2026, 8, 31),
+    )
+    assert direct["type"] == "Biomüll"
+    assert direct["date_label"] == "morgen · 01.09."
     text = waste_collection_details("Restmüll morgen", {}, "Abfall", date(2026, 8, 31))
     assert text["type"] == "Restmüll"
     assert text["date_label"] == "morgen"
@@ -223,3 +228,27 @@ def test_waste_frequency_chooses_next_matching_date_and_deduplicates_aliases():
     assert waste_collection_details(
         "1", {"2026-09-01": "Restmüll - wöchentlich"}, "Abfall", date(2026, 8, 31), "four_weeks",
     ) is None
+
+def test_waste_frequency_can_be_selected_per_waste_type():
+    details = waste_collection_details(
+        "1",
+        {
+            "2026-09-01": ["Restmüll - wöchentlich", "Biomüll - 2 wöchentlich"],
+            "2026-09-08": ["Restmüll - 2 wöchentlich", "Biomüll - 4 wöchentlich"],
+        },
+        "Abfall",
+        date(2026, 8, 31),
+        "all",
+        {"Restmüll": "two_weeks", "Biomüll": "four_weeks"},
+    )
+    assert details == {
+        "type": "Restmüll, Biomüll",
+        "date": "2026-09-08",
+        "date_label": "08.09.",
+        "days": 8,
+    }
+    assert filter_waste_types(
+        ["Gelbe Tonne/Container - wöchentlich", "Gelber Container - 4 wöchentlich"],
+        "all",
+        {"Gelbe Tonne/Container": "four_weeks"},
+    ) == "Gelbe Tonne"

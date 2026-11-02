@@ -281,6 +281,16 @@ def normalize_waste_frequency(value: object) -> str:
     frequency = str(value or "all").strip().lower()
     return frequency if frequency in WASTE_FREQUENCIES else "all"
 
+def normalize_waste_frequencies(value: object) -> dict[str, str]:
+    """Return a case-insensitive cadence lookup keyed by cleaned waste type."""
+    if not isinstance(value, Mapping):
+        return {}
+    return {
+        _clean_waste_type(str(name)).casefold(): normalize_waste_frequency(frequency)
+        for name, frequency in value.items()
+        if _clean_waste_type(str(name))
+    }
+
 def _waste_type_parts(value: object) -> list[str]:
     values = value if isinstance(value, (list, tuple, set)) else [value]
     return [
@@ -316,20 +326,24 @@ def _clean_waste_type(value: str) -> str:
         return "Gelbe Tonne"
     return cleaned
 
-def filter_waste_types(value: object, frequency: object = "all") -> str:
+def filter_waste_types(
+    value: object,
+    frequency: object = "all",
+    frequencies: object = None,
+) -> str:
     """Filter pickup variants, remove cadence suffixes, and deduplicate names."""
     selected = normalize_waste_frequency(frequency)
+    selected_by_type = normalize_waste_frequencies(frequencies)
     parts = _waste_type_parts(value)
-    if selected != "all":
-        parts = [
-            part for part in parts
-            if not _waste_type_frequency(part) or _waste_type_frequency(part) == selected
-        ]
     names: list[str] = []
     seen: set[str] = set()
     for part in parts:
         name = _clean_waste_type(part)
         key = name.casefold()
+        expected = selected_by_type.get(key, selected)
+        actual = _waste_type_frequency(part)
+        if expected != "all" and actual and actual != expected:
+            continue
         if name and key not in seen:
             seen.add(key)
             names.append(name)
@@ -341,13 +355,18 @@ def waste_collection_details(
     fallback_name: str = "Abfall",
     today: date | None = None,
     frequency: object = "all",
+    frequencies: object = None,
 ) -> dict[str, object] | None:
     """Normalize common Waste Collection Schedule sensor formats."""
     attrs = attributes or {}
     reference_date = today or date.today()
     state_text = str(state or "").strip()
     dated: list[tuple[date, str]] = []
-    metadata = {"attribution", "last_update", "daysTo", "days_to", "icon", "upcoming"}
+    metadata = {
+        "attribution", "last_update", "daysTo", "days_to", "icon", "upcoming",
+        "date", "next_date", "start", "start_time", "type", "waste_type",
+        "summary", "subject", "types", "friendly_name",
+    }
     for key, value in attrs.items():
         if key in metadata:
             continue
@@ -370,12 +389,13 @@ def waste_collection_details(
             if filter_waste_types(
                 item.get("types") or item.get("type") or item.get("summary") or "Abfall",
                 frequency,
+                frequencies,
             )
         ),
         {},
     )
     selected_dated = next(
-        (item for item in dated if filter_waste_types(item[1], frequency)),
+        (item for item in dated if filter_waste_types(item[1], frequency, frequencies)),
         None,
     )
     scheduled_parts = [
@@ -390,11 +410,11 @@ def waste_collection_details(
         for part in _waste_type_parts(value)
     ]
     selected_frequency = normalize_waste_frequency(frequency)
+    has_type_filters = bool(normalize_waste_frequencies(frequencies))
     if (
-        selected_frequency != "all"
-        and scheduled_parts
+        scheduled_parts
         and all(_waste_type_frequency(part) for part in scheduled_parts)
-        and not any(_waste_type_frequency(part) == selected_frequency for part in scheduled_parts)
+        and not any(filter_waste_types(part, frequency, frequencies) for part in scheduled_parts)
     ):
         return None
     generic_pickup_date = (
@@ -405,7 +425,7 @@ def waste_collection_details(
     )
     pickup_date = (
         _waste_date(first_upcoming.get("date"))
-        or (selected_dated[0] if selected_frequency != "all" and selected_dated else None)
+        or (selected_dated[0] if (selected_frequency != "all" or has_type_filters) and selected_dated else None)
         or generic_pickup_date
         or (selected_dated[0] if selected_dated else None)
     )
@@ -428,7 +448,7 @@ def waste_collection_details(
         waste_type = re.sub(r"(?:^|\s)(?:heute|morgen|today|tomorrow)(?:\s|$)", " ", waste_type, flags=re.IGNORECASE).strip()
     if not waste_type:
         waste_type = re.sub(r"^Waste Collection Schedule\s*", "", fallback_name, flags=re.IGNORECASE).strip() or "Abfall"
-    waste_type = filter_waste_types(waste_type, frequency)
+    waste_type = filter_waste_types(waste_type, frequency, frequencies)
     if not waste_type:
         return None
 

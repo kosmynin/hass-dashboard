@@ -43,9 +43,10 @@ hat ein Zeitlimit von 1,5 Sekunden. Bei Timeout werden ausschließlich explizite
 Lovelace-Werte oder der letzte erfolgreich bereinigte Browserwert verwendet.
 
 Aktive Meldungen öffnen kategoriebasierte Detail-Popups. NINA zeigt dort die
-vollständige Beschreibung und Handlungsempfehlung. Abfallmeldungen können nach
-wöchentlicher, zweiwöchentlicher oder vierwöchentlicher Leerung gefiltert werden, zeigen
-Müllart und nächsten Termin, erscheinen nur innerhalb des konfigurierbaren
+vollständige Beschreibung und Handlungsempfehlung. Für jede automatisch
+erkannte Abfallart lässt sich getrennt eine wöchentliche, zweiwöchentliche oder
+vierwöchentliche Leerung auswählen. Abfallmeldungen zeigen einen bereinigten,
+eindeutigen Namen und den nächsten passenden Termin, erscheinen nur innerhalb des konfigurierbaren
 Vorlaufs und binden passende `calendar.*`-Entitäten darunter als kompakten
 Bubble-Card-Kalender mit bis zu sechs Terminen der kommenden 45 Tage ein.
 Batteriemeldungen bleiben neutral; ausschließlich ihr Symbol wird unterhalb des
