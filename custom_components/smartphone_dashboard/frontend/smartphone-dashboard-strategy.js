@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.41";
+const STRATEGY_VERSION = "22.0.40";
 const CONFIG_VERSION = 24;
 
 const ACTIVE_ROOM_STYLES = `
@@ -220,7 +220,7 @@ function wasteFrequencyForType(type, frequencies, fallback = "all") {
   );
   return match?.[1] || (WASTE_FREQUENCY_VALUES.has(fallback) ? fallback : "all");
 }
-function detectedWasteTypes(hass, entityIds, configured = {}, additional = []) {
+function detectedWasteTypes(hass, entityIds, configured = {}) {
   const names = new Map();
   const add = (value) => {
     for (const part of wasteTypeParts(value)) {
@@ -245,30 +245,6 @@ function detectedWasteTypes(hass, entityIds, configured = {}, additional = []) {
     if (!/^-?\d+(?:\.\d+)?$/.test(String(state?.state || ""))) add(state?.state);
   }
   for (const name of Object.keys(normalizeWasteFrequencies(configured))) add(name);
-  for (const name of additional || []) add(name);
-  return [...names.values()].sort((left, right) => left.localeCompare(right, "de-DE"));
-}
-function wasteTypesFromCalendarResponse(value) {
-  const names = new Map();
-  const visit = (item) => {
-    if (Array.isArray(item)) {
-      for (const child of item) visit(child);
-      return;
-    }
-    if (!item || typeof item !== "object") return;
-    const eventName = item.summary || item.title || item.message;
-    if (eventName) {
-      for (const part of wasteTypeParts(eventName)) {
-        const name = cleanWasteType(part);
-        if (name && name !== "Abfall" && !/^Waste Collection Schedule/i.test(name)) {
-          names.set(name.toLocaleLowerCase("de-DE"), name);
-        }
-      }
-      return;
-    }
-    for (const child of Object.values(item)) visit(child);
-  };
-  visit(value);
   return [...names.values()].sort((left, right) => left.localeCompare(right, "de-DE"));
 }
 function wasteSummaryStyles(frequency = "all", frequencies = {}) {
@@ -2767,51 +2743,7 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
     this._update("persons", persons);
   }
 
-  async _loadWasteCalendarTypes() {
-    const calendars = notificationCalendarEntities(this._hass);
-    const signature = calendars.join("|");
-    if (this._wasteCalendarLoadedSignature === signature || this._wasteCalendarLoadSignature === signature) return;
-    this._wasteCalendarLoadSignature = signature;
-    if (!calendars.length || typeof this._hass?.callApi !== "function") {
-      this._calendarWasteTypes = [];
-      this._wasteCalendarLoadedSignature = signature;
-      this._wasteCalendarLoadSignature = undefined;
-      return;
-    }
-    const generation = this._lifecycleGeneration;
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
-    const end = new Date(start);
-    end.setFullYear(end.getFullYear() + 1);
-    const withTimeout = (promise, milliseconds = 6000) => new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("Kalenderabfrage hat das Zeitlimit überschritten")), milliseconds);
-      Promise.resolve(promise).then(
-        (value) => { clearTimeout(timer); resolve(value); },
-        (error) => { clearTimeout(timer); reject(error); },
-      );
-    });
-    try {
-      const results = await Promise.allSettled(calendars.map((entityId) => {
-        const path = `calendars/${encodeURIComponent(entityId)}?start=${encodeURIComponent(start.toISOString())}&end=${encodeURIComponent(end.toISOString())}`;
-        return withTimeout(Promise.resolve().then(() => this._hass.callApi("GET", path)));
-      }));
-      if (this._disposed || generation !== this._lifecycleGeneration) return;
-      const fulfilled = results.filter((result) => result.status === "fulfilled");
-      if (!fulfilled.length) return;
-      const discovered = wasteTypesFromCalendarResponse(
-        fulfilled.map((result) => result.value),
-      );
-      this._calendarWasteTypes = discovered;
-      this._wasteCalendarLoadedSignature = signature;
-      this._renderWasteFrequencyPanels(false);
-    } catch (_error) {
-      // A temporarily unavailable calendar must not block or close the settings dialog.
-    } finally {
-      if (this._wasteCalendarLoadSignature === signature) this._wasteCalendarLoadSignature = undefined;
-    }
-  }
-
-  _renderWasteFrequencyPanels(loadCalendars = true) {
+  _renderWasteFrequencyPanels() {
     if (!this.shadowRoot) return;
     const frequencies = normalizeWasteFrequencies(this._effectiveSetting("waste_frequencies"));
     const fallback = WASTE_FREQUENCY_VALUES.has(this._effectiveSetting("waste_frequency"))
@@ -2821,7 +2753,6 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
       this._hass,
       csv(this._effectiveSetting("waste_entities")),
       frequencies,
-      this._calendarWasteTypes || [],
     );
     for (const panel of this.shadowRoot.querySelectorAll("[data-waste-frequency-panel]")) {
       panel.replaceChildren();
@@ -2871,7 +2802,6 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
         panel.appendChild(row);
       }
     }
-    if (loadCalendars) void this._loadWasteCalendarTypes();
   }
 
   _selectorValue(event, multiple = false) {
@@ -3977,6 +3907,5 @@ export {
   synchronizationStatus,
   detectedRooms,
   detectedWasteTypes,
-  wasteTypesFromCalendarResponse,
   applyRoomOptions,
 };
