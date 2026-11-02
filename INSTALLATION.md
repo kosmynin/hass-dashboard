@@ -14,7 +14,7 @@ HACS installiert ausschließlich `custom_components/smartphone_dashboard`, daher
 Der statische Pfad nutzt `hass.http.async_register_static_paths`. Im normalen
 Storage-Modus legt die Integration automatisch eine Lovelace-Modulressource mit
 dem versionsabhängigen Pfad
-`/smartphone-dashboard/v22.0.37/smartphone-dashboard-loader.js` an und
+`/smartphone-dashboard/v22.0.38/smartphone-dashboard-loader.js` an und
 aktualisiert vorhandene Einträge bei jedem Release. Im YAML-Ressourcenmodus
 wird der Loader weiterhin über Home Assistants Extra-Modul-Schnittstelle
 eingebunden. Entferne manuell angelegte `/local/...`-Ressourcen, damit keine

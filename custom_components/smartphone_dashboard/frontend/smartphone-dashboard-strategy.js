@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.37";
+const STRATEGY_VERSION = "22.0.38";
 const CONFIG_VERSION = 23;
 
 const ACTIVE_ROOM_STYLES = `
@@ -177,7 +177,12 @@ const ENTITY_NOTIFICATION_STYLES = `
     opacity: 1 !important;
   }
 `;
-const WASTE_SUMMARY_STYLES = `\${(() => {
+function wasteSummaryStyles(frequency = "all") {
+  const selectedFrequency = ["weekly", "two_weeks", "four_weeks"].includes(frequency)
+    ? frequency
+    : "all";
+  return `\${(() => {
+  const selectedFrequency = ${JSON.stringify(selectedFrequency)};
   const entityId = typeof entity === 'string' ? entity : entity?.entity_id;
   const waste = hass.states[entityId];
   const attributes = waste?.attributes || {};
@@ -193,10 +198,31 @@ const WASTE_SUMMARY_STYLES = `\${(() => {
     const parsed = new Date(text);
     return Number.isNaN(parsed.getTime()) ? null : parsed;
   };
-  const typeText = (value) => {
+  const typeParts = (value) => {
     const values = Array.isArray(value) ? value : value == null ? [] : [value];
-    return values.map((item) => String(item).trim()).filter(Boolean).join(', ');
+    return values.flatMap((item) => String(item).split(/\s*[,;]\s*/)).map((item) => item.trim()).filter(Boolean);
   };
+  const typeText = (value) => typeParts(value).join(', ');
+  const typeFrequency = (value) => {
+    const normalized = String(value).toLowerCase().replaceAll('ö', 'oe');
+    if (/\b(?:alle\s*)?(?:4|vier)\s*[- ]?\s*woechentlich\b/.test(normalized)) return 'four_weeks';
+    if (/\b(?:alle\s*)?(?:2|zwei)\s*[- ]?\s*woechentlich\b/.test(normalized)) return 'two_weeks';
+    if (/\bwoechentlich\b/.test(normalized)) return 'weekly';
+    return '';
+  };
+  const cleanType = (value) => {
+    let cleaned = String(value)
+      .replace(/\s*[-–—]?\s*(?:alle\s*)?(?:(?:2|4|zwei|vier)\s*[- ]?\s*)?w(?:ö|oe|o)chentlich\b.*$/i, '')
+      .replace(/^\s+|[\s\-–—/]+$/g, '')
+      .split(/\s*\/\s*/, 1)[0]
+      .trim();
+    if (/gelb/i.test(cleaned) && /tonne|container|wertstoff|verpack/i.test(cleaned)) cleaned = 'Gelbe Tonne';
+    return cleaned;
+  };
+  const matchesFrequency = (value) => selectedFrequency === 'all' || typeParts(value).some((item) => {
+    const frequency = typeFrequency(item);
+    return !frequency || frequency === selectedFrequency;
+  });
   const dated = Object.entries(attributes).flatMap(([key, value]) => {
     if (['attribution', 'last_update', 'daysTo', 'days_to', 'icon'].includes(key)) return [];
     const keyDate = parseDate(key);
@@ -204,9 +230,16 @@ const WASTE_SUMMARY_STYLES = `\${(() => {
     const valueDate = parseDate(value);
     return valueDate ? [{ date: valueDate, types: key }] : [];
   }).sort((left, right) => left.date - right.date);
-  const upcoming = Array.isArray(attributes.upcoming) ? attributes.upcoming[0] : null;
-  const pickupDate = parseDate(upcoming?.date || attributes.date || attributes.next_date || attributes.start || attributes.start_time) || dated[0]?.date || null;
-  let types = typeText(upcoming?.types || dated[0]?.types || attributes.type || attributes.waste_type || attributes.summary || attributes.subject || attributes.types);
+  const selectedDated = dated.find((item) => matchesFrequency(item.types));
+  const upcomingEntries = Array.isArray(attributes.upcoming) ? attributes.upcoming : [];
+  const upcoming = upcomingEntries.find((item) => item && matchesFrequency(item.types || item.type || item.summary || 'Abfall')) || null;
+  const genericPickupDate = parseDate(attributes.date || attributes.next_date || attributes.start || attributes.start_time);
+  const pickupDate = parseDate(upcoming?.date)
+    || (selectedFrequency !== 'all' ? selectedDated?.date : null)
+    || genericPickupDate
+    || selectedDated?.date
+    || null;
+  let types = typeText(upcoming?.types || selectedDated?.types || attributes.type || attributes.waste_type || attributes.summary || attributes.subject || attributes.types);
   if (!types && !/^-?\\d+(?:\\.\\d+)?$/.test(stateText)) {
     types = stateText
       .replace(/\\s+in\\s+-?\\d+\\s+(?:days?|tag(?:e|en)?)(?:\\s.*)?$/i, '')
@@ -218,6 +251,26 @@ const WASTE_SUMMARY_STYLES = `\${(() => {
       .replace(/^Waste Collection Schedule\\s*/i, '')
       .trim() || 'Abfall';
   }
+  let filteredTypes = typeParts(types);
+  if (selectedFrequency !== 'all') {
+    filteredTypes = filteredTypes.filter((item) => !typeFrequency(item) || typeFrequency(item) === selectedFrequency);
+  }
+  const uniqueTypes = [];
+  const seenTypes = new Set();
+  for (const item of filteredTypes) {
+    const cleaned = cleanType(item);
+    const key = cleaned.toLocaleLowerCase('de-DE');
+    if (cleaned && !seenTypes.has(key)) {
+      seenTypes.add(key);
+      uniqueTypes.push(cleaned);
+    }
+  }
+  if (!uniqueTypes.length) {
+    card.style.display = 'none';
+    return;
+  }
+  card.style.removeProperty('display');
+  types = uniqueTypes.join(', ');
   let days = Number(upcoming?.daysTo ?? attributes.daysTo ?? attributes.days_to);
   if (!Number.isFinite(days)) {
     const match = stateText.match(/\\bin\\s+(-?\\d+)\\s+(?:days?|tag(?:e|en)?)\\b/i);
@@ -256,6 +309,7 @@ const WASTE_SUMMARY_STYLES = `\${(() => {
   if (state) state.innerText = dateLabel ? 'Nächster Termin: ' + dateLabel : 'Kein Termin verfügbar';
   if (icon) icon.style.setProperty('color', iconColor, 'important');
 })()}`;
+}
 function batterySummaryStyles(threshold) {
   const limit = Number.isFinite(Number(threshold)) ? Number(threshold) : 6;
   return `\${(() => {
@@ -303,7 +357,7 @@ const NOTIFICATION_HELPERS = {
   ups_entities: "input_text.smartphone_usv_sensoren",
   nina_entities: "input_text.smartphone_nina_muster",
 };
-const BACKEND_NOTIFICATION_KEYS = [...Object.keys(NOTIFICATION_HELPERS), "waste_days"];
+const BACKEND_NOTIFICATION_KEYS = [...Object.keys(NOTIFICATION_HELPERS), "waste_days", "waste_frequency"];
 
 // Sofort registrieren: Home Assistant wartet maximal fünf Sekunden auf das
 // Strategy-Element. Die Funktionsdeklarationen darunter werden beim Aufruf
@@ -961,6 +1015,11 @@ function applyNotificationOptions(dashboard, config, hass) {
   const wasteDays = Number.isFinite(configuredWasteDays)
     ? Math.min(30, Math.max(0, Math.trunc(configuredWasteDays)))
     : 1;
+  const wasteFrequency = ["weekly", "two_weeks", "four_weeks"].includes(
+    String(notificationSetting(config, hass, "waste_frequency") || ""),
+  )
+    ? String(notificationSetting(config, hass, "waste_frequency"))
+    : "all";
   const frostSetting = notificationSetting(config, hass, "frost_threshold");
   const frostThreshold = Number.isFinite(Number(frostSetting))
     ? Number(frostSetting)
@@ -1077,7 +1136,7 @@ function applyNotificationOptions(dashboard, config, hass) {
           button_type: "state",
           show_state: true,
           icon: "mdi:trash-can-outline",
-          styles: WASTE_SUMMARY_STYLES,
+          styles: wasteSummaryStyles(wasteFrequency),
         },
       }));
       return settings.waste ? emit("waste", entries) : [];
@@ -2236,6 +2295,7 @@ const EDITOR_DEFAULTS = {
   co2_threshold: 1000,
   frost_threshold: 4,
   waste_days: 1,
+  waste_frequency: "all",
   notification_recipients: "",
   battery_exclusions: "",
   frost_entity: "",
@@ -2473,6 +2533,11 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
     for (const field of this.shadowRoot.querySelectorAll("[data-notification-text]")) {
       if (field !== activeElement) {
         field.value = String(this._effectiveSetting(field.dataset.notificationText) || "");
+      }
+    }
+    for (const field of this.shadowRoot.querySelectorAll("[data-notification-choice]")) {
+      if (field !== activeElement) {
+        field.value = String(this._effectiveSetting(field.dataset.notificationChoice) || "all");
       }
     }
     for (const toggle of this.shadowRoot.querySelectorAll("[data-switch^='notification_']")) {
@@ -3272,6 +3337,7 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
             <label class="native-field">CO₂-Grenzwert in ppm<input data-notification-number="co2_threshold" type="number" min="400" max="5000" step="50"></label>
             <div class="switch-row"><div class="switch-copy"><div class="switch-title">Abfall</div><div class="switch-description">Nur an Abholungen innerhalb des gewählten Vorlaufs erinnern.</div></div><ha-switch data-switch="notification_waste"></ha-switch></div>
             <label class="native-field">Abfall-Vorlauf in Tagen<input data-notification-number="waste_days" type="number" min="0" max="30"></label>
+            <label class="native-field">Abholrhythmus<select data-notification-choice="waste_frequency"><option value="all">Alle Rhythmen</option><option value="weekly">Wöchentlich</option><option value="two_weeks">Alle 2 Wochen</option><option value="four_weeks">Alle 4 Wochen</option></select></label>
             <div class="switch-row"><div class="switch-copy"><div class="switch-title">USV</div><div class="switch-description">Abweichenden USV-Status melden.</div></div><ha-switch data-switch="notification_ups"></ha-switch></div>
             <div class="switch-row"><div class="switch-copy"><div class="switch-title">Frostwarnung</div><div class="switch-description">Bei niedriger Außentemperatur warnen.</div></div><ha-switch data-switch="notification_frost"></ha-switch></div>
             <label class="native-field">Frost-Grenzwert in °C<input data-notification-number="frost_threshold" type="number" min="-30" max="20"></label>
@@ -3296,6 +3362,7 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
             <label class="native-field">Kontakt offen seit Minuten<input data-notification-number="contact_minutes" type="number" min="1" max="1440"></label>
             <label class="native-field">CO₂-Grenzwert in ppm<input data-notification-number="co2_threshold" type="number" min="400" max="5000" step="50"></label>
             <label class="native-field">Abfall-Vorlauf in Tagen<input data-notification-number="waste_days" type="number" min="0" max="30"></label>
+            <label class="native-field">Abholrhythmus<select data-notification-choice="waste_frequency"><option value="all">Alle Rhythmen</option><option value="weekly">Wöchentlich</option><option value="two_weeks">Alle 2 Wochen</option><option value="four_weeks">Alle 4 Wochen</option></select></label>
             <label class="native-field">Frost-Grenzwert in °C<input data-notification-number="frost_threshold" type="number" min="-30" max="20"></label>
             <div class="entity-title">Benachrichtigungen</div>
             <div data-notify-selector-host></div>
@@ -3592,6 +3659,14 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
       field.value = String(this._effectiveSetting(key) || "");
       field.addEventListener("change", (event) =>
         void this._updateNotificationSetting(key, event.currentTarget.value.trim()),
+      );
+    }
+
+    for (const field of this.shadowRoot.querySelectorAll("[data-notification-choice]")) {
+      const key = field.dataset.notificationChoice;
+      field.value = String(this._effectiveSetting(key) || "all");
+      field.addEventListener("change", (event) =>
+        void this._updateNotificationSetting(key, event.currentTarget.value),
       );
     }
 

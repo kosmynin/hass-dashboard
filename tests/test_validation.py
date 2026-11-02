@@ -26,6 +26,8 @@ def test_nonfinite_numbers_are_rejected_recursively():
     assert rejected({"waste_days": -1})
     assert rejected({"waste_days": 31})
     assert validate({"waste_days": 0}) == {"waste_days": 0}
+    assert rejected({"waste_frequency": "monthly"})
+    assert validate({"waste_frequency": "two_weeks"}) == {"waste_frequency": "two_weeks"}
 
 def test_malformed_known_feature_shapes_are_rejected():
     assert rejected({"features": {"printer": {"enabled": "nein"}}})

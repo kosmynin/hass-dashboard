@@ -122,6 +122,7 @@ def _valid_config(value: dict[str, Any]) -> dict[str, Any]:
         if key in value and not isinstance(value[key], bool): raise vol.Invalid(f"{key} muss ein Wahrheitswert sein")
     if "nina_entities" in value and (not isinstance(value["nina_entities"], str) or not re.fullmatch(r"binary_sensor\.[a-zA-Z0-9_]+\*[a-zA-Z0-9_]*", value["nina_entities"])): raise vol.Invalid("nina_entities ist ungültig")
     if "notification_recipients" in value and any(not re.fullmatch(r"notify\.[a-z0-9_]+", item.strip()) for item in str(value["notification_recipients"]).split(",") if item.strip()): raise vol.Invalid("Notify-Dienst ist ungültig")
+    if "waste_frequency" in value and value["waste_frequency"] not in ("all", "weekly", "two_weeks", "four_weeks"): raise vol.Invalid("waste_frequency ist ungültig")
     for key in ("persons", "rooms", "quick_actions", "home_sections"):
         if key in value and not isinstance(value[key], list): raise vol.Invalid(f"{key} muss eine Liste sein")
     entity_id = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
@@ -192,7 +193,7 @@ PUBLIC_NOTIFICATION_TYPES = {
     "notification_batteries": bool, "notification_contacts": bool, "notification_co2": bool,
     "notification_waste": bool, "notification_ups": bool, "notification_frost": bool,
     "notification_nina": bool, "battery_threshold": (int, float),
-    "contact_minutes": (int, float), "co2_threshold": (int, float), "frost_threshold": (int, float), "waste_days": (int, float),
+    "contact_minutes": (int, float), "co2_threshold": (int, float), "frost_threshold": (int, float), "waste_days": (int, float), "waste_frequency": str,
 }
 DISPLAY_ENTITY_LISTS = ("battery_exclusions", "waste_entities", "ups_entities")
 NINA_GLOB_RE = re.compile(r"^binary_sensor\.[a-zA-Z0-9_]+\*[a-zA-Z0-9_]*$")
@@ -204,6 +205,8 @@ def _public_notification_config(config: Any, existing_entities: set[str], can_re
         value = config.get(key)
         if isinstance(value, expected) and not (isinstance(value, bool) and expected != bool) and (not isinstance(value, float) or math.isfinite(value)):
             result[key] = value
+    if result.get("waste_frequency") not in (None, "all", "weekly", "two_weeks", "four_weeks"):
+        result["waste_frequency"] = "all"
     for key in DISPLAY_ENTITY_LISTS:
         raw = config.get(key, "")
         values = raw if isinstance(raw, list) else str(raw).split(",")
