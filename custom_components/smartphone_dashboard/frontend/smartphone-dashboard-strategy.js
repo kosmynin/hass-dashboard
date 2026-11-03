@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.46";
+const STRATEGY_VERSION = "22.0.47";
 const CONFIG_VERSION = 25;
 
 const ACTIVE_ROOM_STYLES = `
@@ -1311,6 +1311,19 @@ function graphSensorCard(entity, hass, appearance = {}) {
   };
 }
 
+function lightSupportsBrightness(hass, entityId) {
+  if (!String(entityId || "").startsWith("light.")) return false;
+  const attributes = hass?.states?.[entityId]?.attributes || {};
+  const colorModes = Array.isArray(attributes.supported_color_modes)
+    ? attributes.supported_color_modes.map((mode) => String(mode).toLowerCase())
+    : [];
+  if (colorModes.length) {
+    return colorModes.some((mode) => !["onoff", "unknown"].includes(mode));
+  }
+  return (Number(attributes.supported_features) & 1) === 1 ||
+    Object.prototype.hasOwnProperty.call(attributes, "brightness");
+}
+
 function genericRoomPopup(room, hass) {
   const hidden = new Set(room.hidden_entities || []);
   const entities = entitiesForArea(hass, room.area_id).filter(
@@ -1389,14 +1402,16 @@ function genericRoomPopup(room, hass) {
   addGroup(
     "Licht",
     "mdi:lightbulb-outline",
-    lights.map((entity) => ({
-      type: "custom:bubble-card",
-      card_type: "button",
-      button_type: "slider",
-      entity,
-      show_attribute: true,
-      attribute: "brightness",
-    })),
+    lights.map((entity) => {
+      const dimmable = lightSupportsBrightness(hass, entity);
+      return {
+        type: "custom:bubble-card",
+        card_type: "button",
+        button_type: dimmable ? "slider" : "switch",
+        entity,
+        ...(dimmable ? { show_attribute: true, attribute: "brightness" } : {}),
+      };
+    }),
   );
   addGroup(
     "Schalter",
@@ -1520,24 +1535,29 @@ function applyRoomOptions(dashboard, config, hass) {
       type: "grid",
       columns: 2,
       square: false,
-      cards: rooms.map((room) => ({
-        type: "custom:bubble-card",
-        card_type: "button",
-        button_type: room.main_light ? "slider" : "name",
-        name: room.name,
-        icon: room.icon,
-        ...(room.main_light ? {
-          entity: room.main_light,
-          light_slider_type: "brightness",
-          slider_fill_orientation: "left",
-          slider_value_position: "right",
-        } : {}),
-        tap_action: { action: room.main_light ? "toggle" : "none" },
-        button_action: {
-          tap_action: { action: "navigate", navigation_path: room.popup_hash },
-        },
-        ...(room.entity_count ? { styles: ACTIVE_ROOM_STYLES } : {}),
-      })),
+      cards: rooms.map((room) => {
+        const dimmable = lightSupportsBrightness(hass, room.main_light);
+        return {
+          type: "custom:bubble-card",
+          card_type: "button",
+          button_type: room.main_light ? (dimmable ? "slider" : "switch") : "name",
+          name: room.name,
+          icon: room.icon,
+          ...(room.main_light ? {
+            entity: room.main_light,
+            ...(dimmable ? {
+              light_slider_type: "brightness",
+              slider_fill_orientation: "left",
+              slider_value_position: "right",
+            } : {}),
+          } : {}),
+          tap_action: { action: room.main_light ? "toggle" : "none" },
+          button_action: {
+            tap_action: { action: "navigate", navigation_path: room.popup_hash },
+          },
+          ...(room.entity_count ? { styles: ACTIVE_ROOM_STYLES } : {}),
+        };
+      }),
     };
   }
 

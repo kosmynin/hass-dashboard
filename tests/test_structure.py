@@ -10,7 +10,7 @@ def test_manifest_and_hacs():
     hacs = json.loads((ROOT / "hacs.json").read_text())
     assert manifest["domain"] == "smartphone_dashboard"
     assert manifest["config_flow"] is True
-    assert manifest["version"] == "22.0.46"
+    assert manifest["version"] == "22.0.47"
     assert hacs["name"] == "Smartphone Dashboard"
     assert hacs["zip_release"] is True
     assert hacs["filename"] == "smartphone_dashboard.zip"
@@ -165,7 +165,8 @@ def test_generic_base_matches_notification_and_quick_action_transformers():
     assert 'card?.heading === "Aktionen"' in strategy
     assert 'hass?.states?.[entityId]' in strategy
     assert 'template: "bubble_room_tile"' not in strategy
-    assert 'button_type: room.main_light ? "slider" : "name"' in strategy
+    assert "function lightSupportsBrightness" in strategy
+    assert 'dimmable ? "slider" : "switch"' in strategy
     assert 'tap_action: { action: room.main_light ? "toggle" : "none" }' in strategy
     assert "function graphSensorCard" in strategy
     assert 'template: "bubble_card_graph"' not in strategy

@@ -6,7 +6,9 @@ const { SmartphoneDashboardStrategy, SmartphoneDashboardStrategyEditor, partitio
 
 const roomHass = {
   states: {
-    "light.kitchen": { state: "off", attributes: { friendly_name: "Küche" } },
+    "light.kitchen": { state: "off", attributes: { friendly_name: "Küche", supported_color_modes: ["brightness"] } },
+    "light.kitchen_onoff": { state: "off", attributes: { friendly_name: "Arbeitslicht", supported_color_modes: ["onoff"] } },
+    "switch.kitchen_socket": { state: "off", attributes: { friendly_name: "Steckdose" } },
     "sensor.air_pm25": { state: "8", attributes: { friendly_name: "Air Quality PM2.5", device_class: "pm25", unit_of_measurement: "µg/m³" } },
     "sensor.air_co2": { state: "620", attributes: { friendly_name: "Air Quality Kohlendioxid", device_class: "carbon_dioxide", unit_of_measurement: "ppm" } },
     "sensor.air_humidity": { state: "48", attributes: { friendly_name: "Air Quality Luftfeuchtigkeit", device_class: "humidity", unit_of_measurement: "%" } },
@@ -21,6 +23,8 @@ const roomHass = {
   devices: { air_quality: { id: "air_quality", area_id: "kitchen", name: "Air Quality" } },
   entities: {
     kitchen_light: { entity_id: "light.kitchen", area_id: "kitchen" },
+    kitchen_onoff: { entity_id: "light.kitchen_onoff", area_id: "kitchen" },
+    kitchen_socket: { entity_id: "switch.kitchen_socket", area_id: "kitchen" },
     kitchen_temperature: { entity_id: "sensor.kitchen_temperature", device_id: "air_quality", original_name: "Temperatur" },
     air_humidity: { entity_id: "sensor.air_humidity", device_id: "air_quality", original_name: "Luftfeuchtigkeit" },
     air_co2: { entity_id: "sensor.air_co2", device_id: "air_quality", original_name: "Kohlendioxid" },
@@ -50,6 +54,11 @@ assert.deepEqual(roomCard.tap_action, { action: "toggle" });
 assert.deepEqual(roomCard.button_action.tap_action, { action: "navigate", navigation_path: "#raum-kitchen" });
 assert.match(roomCard.styles, /primary-text-color/);
 const roomPopup = roomDashboard.views[0].sections[0].cards.find((card) => card.hash === "#raum-kitchen");
+assert.equal(roomPopup.cards.find((card) => card.entity === "light.kitchen").button_type, "slider");
+const onOffLightCard = roomPopup.cards.find((card) => card.entity === "light.kitchen_onoff");
+assert.equal(onOffLightCard.button_type, "switch");
+assert.equal("attribute" in onOffLightCard, false);
+assert.equal(roomPopup.cards.find((card) => card.entity === "switch.kitchen_socket").button_type, "switch");
 const sensorGrid = roomPopup.cards.find((card) => card.type === "grid");
 const sensorCard = sensorGrid.cards.find((card) => card.entity === "sensor.kitchen_temperature");
 assert.deepEqual(sensorGrid.cards.map((card) => card.entity), [
@@ -72,6 +81,23 @@ assert.equal(sensorCard.custom_fields.graph.card.line_color, "#A2AADB");
 assert.equal(JSON.stringify(roomPopup).includes("sensor.kitchen_hidden"), false);
 assert.equal(roomDashboard.views[0].sections[0].cards[1].cards.length, 1);
 assert.equal(roomDashboard.views[0].sections[0].cards.some((card) => card.hash === "#raum-hidden_room"), false);
+
+const onOffRoomHass = {
+  states: {
+    "light.hallway": { state: "off", attributes: { friendly_name: "Flurlicht", supported_color_modes: ["onoff"] } },
+  },
+  areas: { hallway: { area_id: "hallway", name: "Flur", icon: "mdi:door" } },
+  devices: {},
+  entities: { hallway_light: { entity_id: "light.hallway", area_id: "hallway" } },
+};
+const onOffRoomDashboard = { views: [{ sections: [{ cards: [
+  { type: "custom:bubble-card", card_type: "separator", name: "Räume" },
+  { type: "grid", columns: 2, cards: [] },
+] }] }] };
+applyRoomOptions(onOffRoomDashboard, { rooms: detectedRooms(onOffRoomHass, []) }, onOffRoomHass);
+const onOffRoomCard = onOffRoomDashboard.views[0].sections[0].cards[1].cards[0];
+assert.equal(onOffRoomCard.button_type, "switch");
+assert.equal("light_slider_type" in onOffRoomCard, false);
 
 const visibilityHass = {
   states: {
