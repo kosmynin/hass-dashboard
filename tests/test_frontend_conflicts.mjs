@@ -433,6 +433,23 @@ applyNotificationOptions(wasteDashboard, {
 const wastePopup = wasteDashboard.views[0].sections[0].cards.find((card) => card.hash === "#meldung-abfall");
 assert.equal(wastePopup.cards[0].type, "custom:auto-entities");
 assert.equal(wastePopup.cards[0].filter.include[0].options.show_state, true);
+const wasteStyles = wastePopup.cards[0].filter.include[0].options.styles;
+const wasteElements = {
+  ".bubble-name": { innerText: "Abfall" },
+  ".bubble-state": { innerText: "" },
+  ".bubble-icon": { style: { setProperty() {} } },
+};
+const evaluateWasteStyles = new Function("hass", "entity", "card", `return \`${wasteStyles}\`;`);
+assert.doesNotThrow(() => evaluateWasteStyles({
+  states: {
+    "sensor.abfall": {
+      state: "Restmüll und Biomüll werden\nmorgen abgeholt.",
+      attributes: { daysTo: 1 },
+    },
+  },
+}, "sensor.abfall", { querySelector: (selector) => wasteElements[selector] }));
+assert.equal(wasteElements[".bubble-name"].innerText, "Restmüll und Biomüll");
+assert.equal(wasteElements[".bubble-state"].innerText, "Nächster Termin: morgen");
 assert.match(wastePopup.cards[0].filter.include[0].options.styles, /attributes\.upcoming/);
 assert.match(wastePopup.cards[0].filter.include[0].options.styles, /#FFD700/);
 assert.match(wastePopup.cards[0].filter.include[0].options.styles, /#4A4A4A/);

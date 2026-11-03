@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.44";
+const STRATEGY_VERSION = "22.0.45";
 const CONFIG_VERSION = 25;
 
 const ACTIVE_ROOM_STYLES = `
@@ -198,13 +198,13 @@ const WASTE_SUMMARY_STYLES = `\${(() => {
   };
   const cleanType = (value) => {
     let cleaned = String(value)
-      .replace(/\s*[-–—]?\s*(?:alle\s*)?(?:(?:2|4|zwei|vier)\s*[- ]?\s*)?w(?:ö|oe|o)chentlich\b.*$/i, '')
-      .replace(/^\s*(?:(?:heute|morgen|today|tomorrow)\s+)?(?:wird|werden)\s+/i, '')
-      .replace(/\s+(?:(?:wird|werden)\s+)?(?:(?:heute|morgen|today|tomorrow|in\s+\d+\s+(?:days?|tag(?:e|en)?))\s+)?(?:abgeholt|geleert|gesammelt|collected|emptied)\s*[.!?]*$/i, '')
-      .replace(/^\s*(?:abholung|leerung)\s*(?:von\s+)?[:\-–—]?\s*/i, '')
-      .replace(/\s*[-–—]?\s*(?:abholung|leerung)\s*[.!?]*$/i, '')
-      .replace(/^\s+|[\s\-–—/.,!?:;]+$/g, '')
-      .split(/\s*\/\s*/, 1)[0]
+      .replace(/\\s*[-–—]?\\s*(?:alle\\s*)?(?:(?:2|4|zwei|vier)\\s*[- ]?\\s*)?w(?:ö|oe|o)chentlich\\b.*$/i, '')
+      .replace(/^\\s*(?:(?:heute|morgen|today|tomorrow)\\s+)?(?:wird|werden)\\s+/i, '')
+      .replace(/\\s+(?:(?:wird|werden)\\s+)?(?:(?:heute|morgen|today|tomorrow|in\\s+\\d+\\s+(?:days?|tag(?:e|en)?))\\s+)?(?:abgeholt|geleert|gesammelt|collected|emptied)\\s*[.!?]*$/i, '')
+      .replace(/^\\s*(?:abholung|leerung)\\s*(?:von\\s+)?[:\\-–—]?\\s*/i, '')
+      .replace(/\\s*[-–—]?\\s*(?:abholung|leerung)\\s*[.!?]*$/i, '')
+      .replace(/^\\s+|[\\s\\-–—\\/.,!?:;]+$/g, '')
+      .split(/\\s*\\/\\s*/, 1)[0]
       .trim();
     if (/gelb/i.test(cleaned) && /tonne|container|wertstoff|verpack/i.test(cleaned)) cleaned = 'Gelbe Tonne';
     return cleaned;
@@ -213,7 +213,7 @@ const WASTE_SUMMARY_STYLES = `\${(() => {
     const values = Array.isArray(value) ? value : value == null ? [] : [value];
     const names = [];
     const seen = new Set();
-    for (const item of values.flatMap((entry) => String(entry).split(/\s*[,;]\s*/))) {
+    for (const item of values.flatMap((entry) => String(entry).split(/\\s*[,;]\\s*/))) {
       const name = cleanType(item);
       const key = name.toLocaleLowerCase('de-DE');
       if (name && !seen.has(key)) {
