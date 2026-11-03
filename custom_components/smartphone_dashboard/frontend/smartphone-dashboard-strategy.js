@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.45";
+const STRATEGY_VERSION = "22.0.46";
 const CONFIG_VERSION = 25;
 
 const ACTIVE_ROOM_STYLES = `
@@ -852,11 +852,17 @@ function notificationCalendarEntities(hass, wasteEntityIds = []) {
     (entry.config_entry_id && entry.config_entry_id === wasteEntry.config_entry_id) ||
     (entry.platform && entry.platform === wasteEntry.platform),
   ));
+  const integrationCalendars = candidates.filter(({ entry }) =>
+    [entry?.platform, entry?.integration]
+      .some((value) => String(value || "").toLowerCase() === "waste_collection_schedule"),
+  );
   const selected = linked.length
     ? linked
-    : candidates.filter(({ entityId, state }) => /abfall|müll|muell|entsorg|waste|trash|recycl/i.test(
-      `${entityId} ${state?.attributes?.friendly_name || ""}`,
-    ));
+    : integrationCalendars.length
+      ? integrationCalendars
+      : candidates.filter(({ entityId, state }) => /abfall|müll|muell|entsorg|waste|trash|recycl/i.test(
+        `${entityId} ${state?.attributes?.friendly_name || ""}`,
+      ));
   return selected.map(({ entityId }) => entityId).sort((a, b) => a.localeCompare(b, "de"));
 }
 

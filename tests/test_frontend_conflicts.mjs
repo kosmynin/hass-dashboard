@@ -463,6 +463,31 @@ assert.equal(wastePopup.cards[1].days, 45);
 assert.equal(wastePopup.cards[1].rows, 4);
 assert.match(wastePopup.cards[0].filter.include[0].options.styles, /abgeholt/);
 assert.match(wastePopup.cards[0].filter.include[0].options.styles, /this\?\.config\?\.entity/);
+
+const wasteCalendarWithoutSensorRegistry = { views: [{ sections: [{ cards: [
+  { type: "heading", heading: "Meldungen" },
+  { type: "custom:auto-entities", filter: { include: [
+    { entity_id: "sensor.*abfall", options: { type: "custom:bubble-card", card_type: "button" } },
+  ], exclude: [] } },
+] }] }] };
+applyNotificationOptions(wasteCalendarWithoutSensorRegistry, {
+  notification_waste: true,
+  waste_entities: "sensor.abfall",
+  waste_days: 3,
+}, {
+  states: {
+    "sensor.abfall": { state: "Biomüll morgen", attributes: { daysTo: 1 } },
+    "calendar.hausplan": { state: "off", attributes: { friendly_name: "Haushaltstermine" } },
+  },
+  entities: {
+    "calendar.hausplan": { entity_id: "calendar.hausplan", platform: "waste_collection_schedule" },
+  },
+});
+const wasteCalendarFallbackPopup = wasteCalendarWithoutSensorRegistry.views[0].sections[0].cards
+  .find((card) => card.hash === "#meldung-abfall");
+assert.deepEqual(wasteCalendarFallbackPopup.cards[1].entities, [
+  { entity: "calendar.hausplan", color: "var(--success-color)" },
+]);
 const editor = new SmartphoneDashboardStrategyEditor();
 let timerFired = false;
 editor._inflightBackendPatch = { A: "ungespeichert" };
