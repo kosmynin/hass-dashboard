@@ -19,7 +19,7 @@ from .notification_core import (
     area_entity_label,
     dashboard_entity_enabled,
     is_battery_level_sensor,
-    live_activity_message,
+    live_activity_entries,
     mobile_clear_data,
     mobile_live_activity_data,
     mobile_live_clear_data,
@@ -38,7 +38,7 @@ DIGEST_PREFIX = "digest:"
 CLEAR_DIGEST = "clear"
 MOBILE_ACTION_EVENT = "mobile_app_notification_action"
 LIVE_ACTIVITY_RENEW_AFTER = 7 * 60 * 60
-LIVE_ACTIVITY_PAYLOAD_VERSION = "2"
+LIVE_ACTIVITY_PAYLOAD_VERSION = "3"
 SNOOZE_SECONDS = 30 * 60
 _LOGGER = logging.getLogger(__name__)
 LEGACY_TO_CONFIG = {
@@ -162,8 +162,12 @@ class NotificationCoordinator:
         return True
 
     @staticmethod
-    def _next_live_tag(previous: str = "") -> str:
-        return "smartphone_dashboard_live_1" if previous.endswith("_0") else "smartphone_dashboard_live_0"
+    def _next_live_tags(previous: list[str], count: int) -> list[str]:
+        """Create one generation-scoped tag for every visible activity."""
+        previous_tag = previous[0] if previous else ""
+        generation = "1" if "_live_0_" in previous_tag else "0"
+        base = f"smartphone_dashboard_live_{generation}"
+        return [f"{base}_{index}" for index in range(1, count + 1)]
 
     def _state(self, entity_id: str, default: str = "") -> str:
         dashboards = self.manager.data.get("dashboards", {})
@@ -324,13 +328,19 @@ class NotificationCoordinator:
                     ).items()
                     if isinstance(key, str) and isinstance(value, str)
                 }
-                live_tag_map = {
-                    key: str(value)
-                    for key, value in notification_state.get(
-                        "live_tag_by_recipient", {}
-                    ).items()
-                    if isinstance(key, str) and isinstance(value, str)
-                }
+                live_tag_map: dict[str, list[str]] = {}
+                for key, value in notification_state.get(
+                    "live_tag_by_recipient", {}
+                ).items():
+                    if not isinstance(key, str):
+                        continue
+                    if isinstance(value, str):
+                        # Migrate the single activity used before payload v3.
+                        live_tag_map[key] = [value]
+                    elif isinstance(value, list):
+                        tags = [tag for tag in value if isinstance(tag, str) and tag]
+                        if tags:
+                            live_tag_map[key] = tags
                 live_started_map = {
                     key: float(value)
                     for key, value in notification_state.get(
@@ -396,88 +406,118 @@ class NotificationCoordinator:
                     if alerts:
                         if mobile_app and not snoozed and not muted:
                             live_payload_digest = f"{LIVE_ACTIVITY_PAYLOAD_VERSION}:{digest}"
-                            live_tag = live_tag_map.get(recipient) or self._next_live_tag()
+                            previous_live_tags = live_tag_map.get(recipient, [])
                             live_started = live_started_map.get(recipient, 0)
                             renewal_due = (
                                 live_digest_map.get(recipient) == live_payload_digest
                                 and live_started > 0
                                 and now_epoch - live_started >= LIVE_ACTIVITY_RENEW_AFTER
                             )
-                            if renewal_due:
-                                clear_key = (recipient, f"renew-clear:{live_tag}")
-                                active_retry_keys.add(clear_key)
-                                if self._retry_after.get(clear_key, 0) <= time.monotonic():
+                            live_due = (
+                                live_digest_map.get(recipient) != live_payload_digest
+                                or renewal_due
+                            )
+                            if live_due:
+                                clear_succeeded = True
+                                for old_tag in previous_live_tags:
+                                    clear_key = (recipient, f"replace-live:{old_tag}")
+                                    active_retry_keys.add(clear_key)
+                                    if self._retry_after.get(clear_key, 0) > time.monotonic():
+                                        clear_succeeded = False
+                                        continue
                                     try:
                                         await self.hass.services.async_call(
                                             "notify", service,
-                                            {"message": "clear_notification", "data": mobile_live_clear_data(live_tag)},
+                                            {"message": "clear_notification", "data": mobile_live_clear_data(old_tag)},
                                             blocking=True,
                                         )
                                         self._retry_after.pop(clear_key, None)
                                         self._retry_count.pop(clear_key, None)
-                                        live_digest_map.pop(recipient, None)
-                                        live_started_map.pop(recipient, None)
-                                        live_tag = self._next_live_tag(live_tag)
-                                        live_tag_map[recipient] = live_tag
                                     except Exception as err:
+                                        clear_succeeded = False
                                         count = min(6, self._retry_count.get(clear_key, 0) + 1)
                                         self._retry_count[clear_key] = count
                                         self._retry_after[clear_key] = time.monotonic() + min(3600, 30 * (2 ** (count - 1)))
-                                        errors.append(f"{recipient}: Live Activity konnte nicht erneuert werden: {err}")
-                            live_due = live_digest_map.get(recipient) != live_payload_digest and not (
-                                renewal_due and live_digest_map.get(recipient) == live_payload_digest
-                            )
-                            if live_due:
-                                live_key = (recipient, f"live:{live_tag}:{digest}")
-                                active_retry_keys.add(live_key)
-                                if self._retry_after.get(live_key, 0) <= time.monotonic():
-                                    live_payload = {
-                                        "title": NOTIFICATION_TITLE,
-                                        "message": live_activity_message(alerts),
-                                        "data": mobile_live_activity_data(
-                                            alerts,
-                                            tag=live_tag,
-                                            silent=bool(live_started),
-                                            recipient=recipient,
-                                        ),
-                                    }
-                                    try:
-                                        await self.hass.services.async_call(
-                                            "notify", service, live_payload, blocking=True
-                                        )
+                                        errors.append(f"{recipient}: Alte Live Activity entfernen: {err}")
+
+                                if clear_succeeded:
+                                    live_digest_map.pop(recipient, None)
+                                    live_tag_map.pop(recipient, None)
+                                    live_started_map.pop(recipient, None)
+                                    entries = live_activity_entries(alerts)
+                                    new_live_tags = self._next_live_tags(
+                                        previous_live_tags, len(entries)
+                                    )
+                                    sent_tags: list[str] = []
+                                    for index, (entry, live_tag) in enumerate(
+                                        zip(entries, new_live_tags, strict=True), start=1
+                                    ):
+                                        live_key = (recipient, f"live:{live_tag}:{digest}")
+                                        active_retry_keys.add(live_key)
+                                        urgent = entry["fingerprint"].startswith("nina:")
+                                        live_payload = {
+                                            "title": NOTIFICATION_TITLE,
+                                            "message": entry["message"],
+                                            "data": mobile_live_activity_data(
+                                                [entry],
+                                                tag=live_tag,
+                                                silent=bool(live_started or previous_live_tags),
+                                                recipient=recipient,
+                                                critical_text=f"{index}/{len(alerts)}",
+                                                relevance_score=(
+                                                    1.0 if urgent
+                                                    else max(0.55, 0.9 - ((index - 1) * 0.05))
+                                                ),
+                                            ),
+                                        }
+                                        if self._retry_after.get(live_key, 0) > time.monotonic():
+                                            continue
+                                        try:
+                                            await self.hass.services.async_call(
+                                                "notify", service, live_payload, blocking=True
+                                            )
+                                            sent_tags.append(live_tag)
+                                            self._retry_after.pop(live_key, None)
+                                            self._retry_count.pop(live_key, None)
+                                        except Exception as err:
+                                            count = min(6, self._retry_count.get(live_key, 0) + 1)
+                                            self._retry_count[live_key] = count
+                                            self._retry_after[live_key] = time.monotonic() + min(3600, 30 * (2 ** (count - 1)))
+                                            errors.append(f"{recipient}: Live Activity {index}: {err}")
+                                    if sent_tags:
+                                        live_tag_map[recipient] = sent_tags
+                                    if len(sent_tags) == len(entries):
                                         live_digest_map[recipient] = live_payload_digest
-                                        live_tag_map[recipient] = live_tag
-                                        live_started_map.setdefault(recipient, now_epoch)
-                                        self._retry_after.pop(live_key, None)
-                                        self._retry_count.pop(live_key, None)
-                                    except Exception as err:
-                                        count = min(6, self._retry_count.get(live_key, 0) + 1)
-                                        self._retry_count[live_key] = count
-                                        self._retry_after[live_key] = time.monotonic() + min(3600, 30 * (2 ** (count - 1)))
-                                        errors.append(f"{recipient}: Live Activity: {err}")
+                                        live_started_map[recipient] = now_epoch
 
                         if mobile_app and (snoozed or muted):
-                            live_tag = live_tag_map.get(recipient)
-                            if live_tag:
-                                clear_key = (recipient, f"muted-live:{live_tag}")
-                                active_retry_keys.add(clear_key)
-                                if self._retry_after.get(clear_key, 0) <= time.monotonic():
+                            live_tags = live_tag_map.get(recipient, [])
+                            if live_tags:
+                                all_cleared = True
+                                for live_tag in live_tags:
+                                    clear_key = (recipient, f"muted-live:{live_tag}")
+                                    active_retry_keys.add(clear_key)
+                                    if self._retry_after.get(clear_key, 0) > time.monotonic():
+                                        all_cleared = False
+                                        continue
                                     try:
                                         await self.hass.services.async_call(
                                             "notify", service,
                                             {"message": "clear_notification", "data": mobile_live_clear_data(live_tag)},
                                             blocking=True,
                                         )
-                                        live_digest_map.pop(recipient, None)
-                                        live_tag_map.pop(recipient, None)
-                                        live_started_map.pop(recipient, None)
                                         self._retry_after.pop(clear_key, None)
                                         self._retry_count.pop(clear_key, None)
                                     except Exception as err:
+                                        all_cleared = False
                                         count = min(6, self._retry_count.get(clear_key, 0) + 1)
                                         self._retry_count[clear_key] = count
                                         self._retry_after[clear_key] = time.monotonic() + min(3600, 30 * (2 ** (count - 1)))
                                         errors.append(f"{recipient}: Live Activity stummschalten: {err}")
+                                if all_cleared:
+                                    live_digest_map.pop(recipient, None)
+                                    live_tag_map.pop(recipient, None)
+                                    live_started_map.pop(recipient, None)
 
                         if mobile_app:
                             if delivered:
@@ -551,27 +591,33 @@ class NotificationCoordinator:
                                     self._retry_count[clear_key] = count
                                     self._retry_after[clear_key] = time.monotonic() + min(3600, 30 * (2 ** (count - 1)))
                                     errors.append(f"{recipient}: Entfernen: {err}")
-                        live_tag = live_tag_map.get(recipient)
-                        if live_tag:
-                            live_clear_key = (recipient, f"live-clear:{live_tag}")
-                            active_retry_keys.add(live_clear_key)
-                            if self._retry_after.get(live_clear_key, 0) <= time.monotonic():
+                        live_tags = live_tag_map.get(recipient, [])
+                        if live_tags:
+                            all_cleared = True
+                            for live_tag in live_tags:
+                                live_clear_key = (recipient, f"live-clear:{live_tag}")
+                                active_retry_keys.add(live_clear_key)
+                                if self._retry_after.get(live_clear_key, 0) > time.monotonic():
+                                    all_cleared = False
+                                    continue
                                 try:
                                     await self.hass.services.async_call(
                                         "notify", service,
                                         {"message": "clear_notification", "data": mobile_live_clear_data(live_tag)},
                                         blocking=True,
                                     )
-                                    live_digest_map.pop(recipient, None)
-                                    live_tag_map.pop(recipient, None)
-                                    live_started_map.pop(recipient, None)
                                     self._retry_after.pop(live_clear_key, None)
                                     self._retry_count.pop(live_clear_key, None)
                                 except Exception as err:
+                                    all_cleared = False
                                     count = min(6, self._retry_count.get(live_clear_key, 0) + 1)
                                     self._retry_count[live_clear_key] = count
                                     self._retry_after[live_clear_key] = time.monotonic() + min(3600, 30 * (2 ** (count - 1)))
                                     errors.append(f"{recipient}: Live Activity entfernen: {err}")
+                            if all_cleared:
+                                live_digest_map.pop(recipient, None)
+                                live_tag_map.pop(recipient, None)
+                                live_started_map.pop(recipient, None)
 
                 removed_recipients = (
                     set(stored_deliveries) | set(live_tag_map)
@@ -602,27 +648,33 @@ class NotificationCoordinator:
                                 self._retry_count[clear_key] = count
                                 self._retry_after[clear_key] = time.monotonic() + min(3600, 30 * (2 ** (count - 1)))
                                 errors.append(f"{recipient}: Entfernen: {err}")
-                    live_tag = live_tag_map.get(recipient)
-                    if live_tag:
-                        clear_key = (recipient, f"removed-live:{live_tag}")
-                        active_retry_keys.add(clear_key)
-                        if self._retry_after.get(clear_key, 0) <= time.monotonic():
+                    live_tags = live_tag_map.get(recipient, [])
+                    if live_tags:
+                        all_cleared = True
+                        for live_tag in live_tags:
+                            clear_key = (recipient, f"removed-live:{live_tag}")
+                            active_retry_keys.add(clear_key)
+                            if self._retry_after.get(clear_key, 0) > time.monotonic():
+                                all_cleared = False
+                                continue
                             try:
                                 await self.hass.services.async_call(
                                     "notify", service,
                                     {"message": "clear_notification", "data": mobile_live_clear_data(live_tag)},
                                     blocking=True,
                                 )
-                                live_digest_map.pop(recipient, None)
-                                live_tag_map.pop(recipient, None)
-                                live_started_map.pop(recipient, None)
                                 self._retry_after.pop(clear_key, None)
                                 self._retry_count.pop(clear_key, None)
                             except Exception as err:
+                                all_cleared = False
                                 count = min(6, self._retry_count.get(clear_key, 0) + 1)
                                 self._retry_count[clear_key] = count
                                 self._retry_after[clear_key] = time.monotonic() + min(3600, 30 * (2 ** (count - 1)))
                                 errors.append(f"{recipient}: Live Activity entfernen: {err}")
+                        if all_cleared:
+                            live_digest_map.pop(recipient, None)
+                            live_tag_map.pop(recipient, None)
+                            live_started_map.pop(recipient, None)
                 self._retry_after = {
                     key: value for key, value in self._retry_after.items()
                     if key in active_retry_keys
@@ -638,7 +690,7 @@ class NotificationCoordinator:
                         "alerts": len(alerts),
                         "recipients": recipients,
                         "persistent_notification_id": PERSISTENT_NOTIFICATION_ID,
-                        "live_activities": len(live_digest_map),
+                        "live_activities": sum(len(tags) for tags in live_tag_map.values()),
                         "errors": errors[-10:],
                     },
                     {

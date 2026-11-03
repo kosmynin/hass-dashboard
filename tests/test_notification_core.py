@@ -17,6 +17,7 @@ mobile_dashboard_url = CORE["mobile_dashboard_url"]
 mobile_live_activity_data = CORE["mobile_live_activity_data"]
 mobile_live_clear_data = CORE["mobile_live_clear_data"]
 live_activity_message = CORE["live_activity_message"]
+live_activity_entries = CORE["live_activity_entries"]
 mobile_action_ids = CORE["mobile_action_ids"]
 parse_mobile_action = CORE["parse_mobile_action"]
 is_battery_level_sensor = CORE["is_battery_level_sensor"]
@@ -140,16 +141,26 @@ def test_live_activity_is_compact_quiet_on_updates_and_red_for_nina():
         "🗑️ Restmüll und Biomüll: morgen\n"
         "+1 weitere"
     )
+    entries = live_activity_entries(alerts)
+    assert [entry["message"] for entry in entries] == [
+        "Wohnzimmer · CO₂: 1.420 ppm",
+        "Küche · Fenster seit 18 Minuten offen",
+        "Amtliche Warnung",
+        "+2 weitere Meldungen – für Details öffnen",
+    ]
     recipient = "notify.mobile_app_boris_iphone"
     data = mobile_live_activity_data(
         alerts,
         tag="smartphone_dashboard_live_1",
         silent=True,
         recipient=recipient,
+        critical_text="3/5",
+        relevance_score=0.9,
     )
     assert data["tag"] == "smartphone_dashboard_live_1"
     assert data["live_update"] is True
-    assert data["critical_text"] == "5"
+    assert data["critical_text"] == "3/5"
+    assert data["relevance_score"] == 0.9
     assert data["notification_icon_color"] == "#FF453A"
     assert data["silent"] is True
     assert data["url"] == mobile_dashboard_url(recipient)

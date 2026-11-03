@@ -167,12 +167,32 @@ def live_activity_message(alerts: list[Mapping[str, object]], limit: int = 4) ->
         visible.append(f"+{remaining} weitere")
     return "\n".join(visible)
 
+def live_activity_entries(
+    alerts: list[Mapping[str, object]], limit: int = 4
+) -> list[dict[str, str]]:
+    """Split independent alerts into independently readable Live Activities."""
+    normalized = normalized_alerts(alerts)
+    maximum = max(1, limit)
+    if len(normalized) <= maximum:
+        return normalized
+    visible = normalized[: maximum - 1]
+    remaining = len(normalized) - len(visible)
+    return [
+        *visible,
+        {
+            "fingerprint": f"summary:{remaining}",
+            "message": f"+{remaining} weitere Meldungen – für Details öffnen",
+        },
+    ]
+
 def mobile_live_activity_data(
     alerts: list[Mapping[str, object]],
     *,
     tag: str = MOBILE_LIVE_ACTIVITY_TAG_PREFIX,
     silent: bool = False,
     recipient: str = "",
+    critical_text: str | None = None,
+    relevance_score: float | None = None,
 ) -> dict[str, object]:
     """Build a Home Assistant Companion Live Activity / Live Update payload."""
     normalized = normalized_alerts(alerts)
@@ -182,13 +202,13 @@ def mobile_live_activity_data(
     data: dict[str, object] = {
         "tag": tag,
         "live_update": True,
-        "critical_text": str(count),
+        "critical_text": critical_text or str(count),
         "notification_icon": "mdi:bell-badge-outline",
         "notification_icon_color": color,
         "color": color,
         "background_color": "#1C1C1E",
         "text_color": "#FFFFFF",
-        "relevance_score": 1.0 if urgent else 0.8,
+        "relevance_score": relevance_score if relevance_score is not None else (1.0 if urgent else 0.8),
         "sticky": True,
         "alert_once": silent,
         "url": mobile_dashboard_url(recipient),
