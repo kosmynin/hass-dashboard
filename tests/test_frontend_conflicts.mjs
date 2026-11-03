@@ -445,6 +445,7 @@ assert.equal(wastePopup.cards[1].limit, 6);
 assert.equal(wastePopup.cards[1].days, 45);
 assert.equal(wastePopup.cards[1].rows, 4);
 assert.match(wastePopup.cards[0].filter.include[0].options.styles, /abgeholt/);
+assert.match(wastePopup.cards[0].filter.include[0].options.styles, /this\?\.config\?\.entity/);
 const editor = new SmartphoneDashboardStrategyEditor();
 let timerFired = false;
 editor._inflightBackendPatch = { A: "ungespeichert" };

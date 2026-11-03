@@ -53,6 +53,9 @@ Abholrhythmen werden ausschließlich in Waste Collection Schedule konfiguriert;
 das Dashboard filtert sie nicht erneut. Der Kalender wird bevorzugt über die
 Integration des ausgewählten Abfallsensors zugeordnet, sodass auch neutral
 benannte Kalender zuverlässig im Pop-up erscheinen.
+Mehrzeilige Sensorzustände wie „Restmüll und Biomüll werden morgen abgeholt“
+werden sowohl auf der Dashboard-Karte als auch in Persistent Notification und
+Live Activity als gemeinsame Abholung dargestellt.
 Batteriemeldungen bleiben neutral; ausschließlich ihr Symbol wird unterhalb des
 Grenzwerts orange und bei höchstens dessen Hälfte rot dargestellt.
 Batteriespannungen in Volt oder Millivolt werden grundsätzlich nicht als

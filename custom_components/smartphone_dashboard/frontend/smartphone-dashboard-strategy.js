@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.42";
+const STRATEGY_VERSION = "22.0.43";
 const CONFIG_VERSION = 25;
 
 const ACTIVE_ROOM_STYLES = `
@@ -178,7 +178,10 @@ const ENTITY_NOTIFICATION_STYLES = `
   }
 `;
 const WASTE_SUMMARY_STYLES = `\${(() => {
-  const entityId = typeof entity === 'string' ? entity : entity?.entity_id;
+  const runtimeEntity = typeof entity === 'undefined' ? null : entity;
+  const entityId = (typeof runtimeEntity === 'string' ? runtimeEntity : runtimeEntity?.entity_id)
+    || this?.config?.entity
+    || this?._config?.entity;
   const waste = hass.states[entityId];
   const attributes = waste?.attributes || {};
   const stateText = String(waste?.state || '').trim();
@@ -197,7 +200,7 @@ const WASTE_SUMMARY_STYLES = `\${(() => {
     let cleaned = String(value)
       .replace(/\s*[-–—]?\s*(?:alle\s*)?(?:(?:2|4|zwei|vier)\s*[- ]?\s*)?w(?:ö|oe|o)chentlich\b.*$/i, '')
       .replace(/^\s*(?:(?:heute|morgen|today|tomorrow)\s+)?(?:wird|werden)\s+/i, '')
-      .replace(/\s+(?:(?:wird|werden)\s+)?(?:abgeholt|geleert|gesammelt|collected|emptied)\s*[.!?]*$/i, '')
+      .replace(/\s+(?:(?:wird|werden)\s+)?(?:(?:heute|morgen|today|tomorrow|in\s+\d+\s+(?:days?|tag(?:e|en)?))\s+)?(?:abgeholt|geleert|gesammelt|collected|emptied)\s*[.!?]*$/i, '')
       .replace(/^\s*(?:abholung|leerung)\s*(?:von\s+)?[:\-–—]?\s*/i, '')
       .replace(/\s*[-–—]?\s*(?:abholung|leerung)\s*[.!?]*$/i, '')
       .replace(/^\s+|[\s\-–—/.,!?:;]+$/g, '')

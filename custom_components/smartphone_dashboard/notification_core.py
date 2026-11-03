@@ -298,7 +298,7 @@ def _waste_types(value: object) -> str:
             flags=re.IGNORECASE,
         )
         name = re.sub(
-            r"\s+(?:(?:wird|werden)\s+)?(?:abgeholt|geleert|gesammelt|collected|emptied)\s*[.!?]*$",
+            r"\s+(?:(?:wird|werden)\s+)?(?:(?:heute|morgen|today|tomorrow|in\s+\d+\s+(?:days?|tag(?:e|en)?))\s+)?(?:abgeholt|geleert|gesammelt|collected|emptied)\s*[.!?]*$",
             "",
             name,
             flags=re.IGNORECASE,
