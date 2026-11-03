@@ -56,6 +56,8 @@ benannte Kalender zuverlässig im Pop-up erscheinen.
 Mehrzeilige Sensorzustände wie „Restmüll und Biomüll werden morgen abgeholt“
 werden sowohl auf der Dashboard-Karte als auch in Persistent Notification und
 Live Activity als gemeinsame Abholung dargestellt.
+Die Live Activity zeigt bis zu vier unabhängige Meldungen in getrennten Zeilen;
+weitere Meldungen werden kompakt gezählt und bleiben im gemeinsamen Meldungsdialog vollständig sichtbar.
 Batteriemeldungen bleiben neutral; ausschließlich ihr Symbol wird unterhalb des
 Grenzwerts orange und bei höchstens dessen Hälfte rot dargestellt.
 Batteriespannungen in Volt oder Millivolt werden grundsätzlich nicht als

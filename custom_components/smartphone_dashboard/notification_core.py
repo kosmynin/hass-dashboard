@@ -158,7 +158,7 @@ def mobile_notification_data(
         ]
     return data
 
-def live_activity_message(alerts: list[Mapping[str, object]], limit: int = 2) -> str:
+def live_activity_message(alerts: list[Mapping[str, object]], limit: int = 4) -> str:
     """Create the compact, glanceable body used on the Lock Screen."""
     normalized = normalized_alerts(alerts)
     visible = [alert["message"] for alert in normalized[: max(1, limit)]]

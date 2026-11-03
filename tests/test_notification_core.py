@@ -130,10 +130,14 @@ def test_live_activity_is_compact_quiet_on_updates_and_red_for_nina():
         {"fingerprint": "co2:a", "message": "Wohnzimmer · CO₂: 1.420 ppm"},
         {"fingerprint": "contact:b", "message": "Küche · Fenster seit 18 Minuten offen"},
         {"fingerprint": "nina:c", "message": "Amtliche Warnung"},
+        {"fingerprint": "waste:d", "message": "🗑️ Restmüll und Biomüll: morgen"},
+        {"fingerprint": "battery:e", "message": "🔋 Flur · Bewegungsmelder: 5%"},
     ]
     assert live_activity_message(alerts) == (
         "Wohnzimmer · CO₂: 1.420 ppm\n"
         "Küche · Fenster seit 18 Minuten offen\n"
+        "Amtliche Warnung\n"
+        "🗑️ Restmüll und Biomüll: morgen\n"
         "+1 weitere"
     )
     recipient = "notify.mobile_app_boris_iphone"
@@ -145,7 +149,7 @@ def test_live_activity_is_compact_quiet_on_updates_and_red_for_nina():
     )
     assert data["tag"] == "smartphone_dashboard_live_1"
     assert data["live_update"] is True
-    assert data["critical_text"] == "3"
+    assert data["critical_text"] == "5"
     assert data["notification_icon_color"] == "#FF453A"
     assert data["silent"] is True
     assert data["url"] == mobile_dashboard_url(recipient)
