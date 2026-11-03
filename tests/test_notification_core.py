@@ -18,6 +18,7 @@ mobile_live_activity_data = CORE["mobile_live_activity_data"]
 mobile_live_clear_data = CORE["mobile_live_clear_data"]
 live_activity_message = CORE["live_activity_message"]
 live_activity_entries = CORE["live_activity_entries"]
+live_activity_presentation = CORE["live_activity_presentation"]
 mobile_action_ids = CORE["mobile_action_ids"]
 parse_mobile_action = CORE["parse_mobile_action"]
 is_battery_level_sensor = CORE["is_battery_level_sensor"]
@@ -162,11 +163,37 @@ def test_live_activity_is_compact_quiet_on_updates_and_red_for_nina():
     assert data["critical_text"] == "3/5"
     assert data["relevance_score"] == 0.9
     assert data["notification_icon_color"] == "#FF453A"
+    assert data["notification_icon"] == "mdi:alert-outline"
     assert data["silent"] is True
     assert data["url"] == mobile_dashboard_url(recipient)
     assert data["clickAction"] == data["url"]
     assert data["url"].endswith("#meldungen")
     assert mobile_live_clear_data(data["tag"]) == {"tag": "smartphone_dashboard_live_1"}
+
+def test_live_activity_uses_category_icons_colors_and_plain_text():
+    co2 = live_activity_presentation({
+        "fingerprint": "co2:sensor.air_quality",
+        "message": "💨 Wohnung · Kohlendioxid: 1118 ppm",
+    })
+    assert co2 == {
+        "message": "Wohnung · Kohlendioxid: 1118 ppm",
+        "icon": "mdi:molecule-co2",
+        "color": "#A2AA52",
+    }
+    waste = live_activity_presentation({
+        "fingerprint": "waste:sensor.abfall:2026-11-04",
+        "message": "🗑️ Gelbe Tonne: morgen · 04.11.",
+    })
+    assert waste == {
+        "message": "Gelbe Tonne: morgen · 04.11.",
+        "icon": "mdi:trash-can-outline",
+        "color": "#FFD700",
+    }
+    waste_data = mobile_live_activity_data([
+        {"fingerprint": "waste:x", "message": "🗑️ Papier: morgen"}
+    ])
+    assert waste_data["notification_icon"] == "mdi:trash-can-outline"
+    assert waste_data["notification_icon_color"] == "#4169E1"
 
 def test_waste_collection_details_support_default_and_dated_attributes():
     details = waste_collection_details(

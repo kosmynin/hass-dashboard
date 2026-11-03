@@ -185,6 +185,39 @@ def live_activity_entries(
         },
     ]
 
+def live_activity_presentation(alert: Mapping[str, object]) -> dict[str, str]:
+    """Return Bubble-Card-like icon, color and text for one Live Activity."""
+    fingerprint = str(alert.get("fingerprint") or "").strip().casefold()
+    message = str(alert.get("message") or "").strip()
+    message = re.sub(r"^(?:🔋|🚪|💨|🗑️?|🔌|❄️?|⚠️)\s*", "", message)
+    category = fingerprint.partition(":")[0]
+    presentations = {
+        "battery": ("mdi:battery-alert", "#FF9F0A"),
+        "contact": ("mdi:door-open", "#FF9F0A"),
+        "co2": ("mdi:molecule-co2", "#A2AA52"),
+        "ups": ("mdi:power-plug-battery", "#FF9F0A"),
+        "frost": ("mdi:snowflake-alert", "#64D2FF"),
+        "nina": ("mdi:alert-outline", "#FF453A"),
+        "summary": ("mdi:bell-badge-outline", "#FF9F0A"),
+    }
+    if category == "waste":
+        descriptor = message.casefold()
+        if re.search(r"gelb|wertstoff|verpack", descriptor):
+            icon, color = "mdi:trash-can-outline", "#FFD700"
+        elif re.search(r"papier|pappe|blau", descriptor):
+            icon, color = "mdi:trash-can-outline", "#4169E1"
+        elif re.search(r"bio|braun|organisch", descriptor):
+            icon, color = "mdi:trash-can-outline", "#8B4513"
+        elif re.search(r"rest|grau", descriptor):
+            icon, color = "mdi:trash-can-outline", "#8E8E93"
+        else:
+            icon, color = "mdi:trash-can-outline", "#FF9F0A"
+    else:
+        icon, color = presentations.get(
+            category, ("mdi:bell-badge-outline", "#FF9F0A")
+        )
+    return {"message": message, "icon": icon, "color": color}
+
 def mobile_live_activity_data(
     alerts: list[Mapping[str, object]],
     *,
@@ -198,12 +231,17 @@ def mobile_live_activity_data(
     normalized = normalized_alerts(alerts)
     count = len(normalized)
     urgent = any(alert["fingerprint"].startswith("nina:") for alert in normalized)
-    color = "#FF453A" if urgent else "#FF9F0A"
+    presentation_alert = next(
+        (alert for alert in normalized if alert["fingerprint"].startswith("nina:")),
+        normalized[0] if normalized else {},
+    )
+    presentation = live_activity_presentation(presentation_alert)
+    color = presentation["color"]
     data: dict[str, object] = {
         "tag": tag,
         "live_update": True,
         "critical_text": critical_text or str(count),
-        "notification_icon": "mdi:bell-badge-outline",
+        "notification_icon": presentation["icon"],
         "notification_icon_color": color,
         "color": color,
         "background_color": "#1C1C1E",

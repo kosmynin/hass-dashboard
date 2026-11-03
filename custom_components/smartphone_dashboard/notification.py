@@ -20,6 +20,7 @@ from .notification_core import (
     dashboard_entity_enabled,
     is_battery_level_sensor,
     live_activity_entries,
+    live_activity_presentation,
     mobile_clear_data,
     mobile_live_activity_data,
     mobile_live_clear_data,
@@ -38,7 +39,7 @@ DIGEST_PREFIX = "digest:"
 CLEAR_DIGEST = "clear"
 MOBILE_ACTION_EVENT = "mobile_app_notification_action"
 LIVE_ACTIVITY_RENEW_AFTER = 7 * 60 * 60
-LIVE_ACTIVITY_PAYLOAD_VERSION = "3"
+LIVE_ACTIVITY_PAYLOAD_VERSION = "4"
 SNOOZE_SECONDS = 30 * 60
 _LOGGER = logging.getLogger(__name__)
 LEGACY_TO_CONFIG = {
@@ -455,9 +456,10 @@ class NotificationCoordinator:
                                         live_key = (recipient, f"live:{live_tag}:{digest}")
                                         active_retry_keys.add(live_key)
                                         urgent = entry["fingerprint"].startswith("nina:")
+                                        presentation = live_activity_presentation(entry)
                                         live_payload = {
                                             "title": NOTIFICATION_TITLE,
-                                            "message": entry["message"],
+                                            "message": presentation["message"],
                                             "data": mobile_live_activity_data(
                                                 [entry],
                                                 tag=live_tag,

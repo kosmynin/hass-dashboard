@@ -10,7 +10,7 @@ def test_manifest_and_hacs():
     hacs = json.loads((ROOT / "hacs.json").read_text())
     assert manifest["domain"] == "smartphone_dashboard"
     assert manifest["config_flow"] is True
-    assert manifest["version"] == "22.0.48"
+    assert manifest["version"] == "22.0.49"
     assert hacs["name"] == "Smartphone Dashboard"
     assert hacs["zip_release"] is True
     assert hacs["filename"] == "smartphone_dashboard.zip"
@@ -64,14 +64,15 @@ def test_backend_notifications_are_active_and_legacy_yaml_is_not():
     assert '"persistent_notification",' in runtime
     assert '"message": "clear_notification"' in runtime
     assert "aggregate_alert_message" in runtime and "mobile_live_activity_data" in runtime
-    assert "live_activity_entries" in runtime and "for live_tag in live_tags" in runtime
+    assert "live_activity_entries" in runtime and "live_activity_presentation" in runtime
+    assert "for live_tag in live_tags" in runtime
     assert 'if mobile_app:' in runtime and '"retire-standard"' in runtime
     assert 'type: "smartphone_dashboard/notifications/action"' in (
         COMPONENT / "frontend/smartphone-dashboard-strategy.js"
     ).read_text()
     assert "asyncio.Queue" in runtime and "blocking=True" in runtime
     assert "alert_set_digest" in runtime and "valid_nina_glob" in runtime
-    assert 'LIVE_ACTIVITY_PAYLOAD_VERSION = "3"' in runtime
+    assert 'LIVE_ACTIVITY_PAYLOAD_VERSION = "4"' in runtime
     assert 'live_payload_digest = f"{LIVE_ACTIVITY_PAYLOAD_VERSION}:{digest}"' in runtime
     assert "entry.async_create_background_task" in runtime
     assert "hass.async_create_task" not in runtime
