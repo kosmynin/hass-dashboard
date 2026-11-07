@@ -98,7 +98,8 @@ erneuert. Voraussetzung sind iOS 17.2 oder neuer, Home Assistant 2026.7 oder
 neuer und aktivierte Live Activities in der Companion App.
 
 Zusätzlich können aktive Media Player eigene stille Live Activities erhalten.
-Sie zeigen Playername, Titel und Interpret mit einem passenden Medien-Icon,
+Sie zeigen **Homeassistant – Playername** als Titel sowie Medientitel, Interpret
+und Album als Inhalt mit einem passenden Medien-Icon,
 aktualisieren Titelwechsel ohne zusätzliche Push-Mitteilung und verschwinden
 beim Pausieren oder Stoppen. Verwendet werden die sichtbaren bzw. im Bereich
 „Medien“ ausgewählten Entitäten; gruppierte Player werden zusammengefasst und

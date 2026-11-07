@@ -460,8 +460,8 @@ class NotificationCoordinator:
                 if self._retry_after.get(live_key, 0) > time.monotonic():
                     continue
                 payload = {
-                    "title": NOTIFICATION_TITLE,
-                    "message": f"{entry['title']} · {entry['message']}",
+                    "title": f"{NOTIFICATION_TITLE} – {entry['title']}",
+                    "message": entry["message"],
                     "data": mobile_media_activity_data(entry, tag=tag, silent=True),
                 }
                 try:
