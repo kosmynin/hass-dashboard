@@ -6,29 +6,30 @@
 const TYPE = "smartphone-dashboard";
 const ELEMENT = `ll-strategy-dashboard-${TYPE}`;
 const LEGACY_ELEMENT = `ll-strategy-${TYPE}`;
-const VERSION = "22.0.51";
+const VERSION = "22.0.52";
 const CORE_URL = new URL(`./smartphone-dashboard-strategy.js?v=${VERSION}`, import.meta.url).href;
 const RECOVERY_KEY = `smartphone-dashboard:timeout-reload:${VERSION}:${location.pathname}`;
 const EDITOR_ELEMENT = "smartphone-dashboard-strategy-editor";
 const REGISTRY_MONITOR_DURATION = 15000;
 const RECOVERY_LIMIT = 2;
-const NOTIFICATION_POPUP_HASH = "#meldungen";
 
 let corePromise;
 let coreModule;
-let notificationPopupReplayScheduled = false;
+let popupReplaySignature = "";
 
-function requestedNotificationPopup() {
+function requestedDashboardPopup() {
   const requested = new URLSearchParams(location.search || "").get("sd_popup");
-  return location.hash === NOTIFICATION_POPUP_HASH || requested === "meldungen"
-    ? NOTIFICATION_POPUP_HASH
+  if (/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(requested || "")) return `#${requested}`;
+  return /^#[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(location.hash || "")
+    ? location.hash
     : "";
 }
 
-function replayNotificationPopupDeepLink() {
-  const target = requestedNotificationPopup();
-  if (!target || notificationPopupReplayScheduled) return;
-  notificationPopupReplayScheduled = true;
+function replayDashboardPopupDeepLink() {
+  const target = requestedDashboardPopup();
+  const signature = `${location.search || ""}|${target}`;
+  if (!target || popupReplaySignature === signature) return;
+  popupReplaySignature = signature;
 
   // Beim Kaltstart ist der Hash bereits gesetzt, bevor Bubble Card seine
   // Pop-up-Listener registriert. Wiederholte, zustandslose hashchange-Events
@@ -39,7 +40,7 @@ function replayNotificationPopupDeepLink() {
   [0, 150, 500, 1200, 2500].forEach((delay, index) => {
     setTimeout(() => {
       if (location.hash !== target) {
-        if (index === 0 && !location.hash && requestedNotificationPopup() === target) {
+        if (index === 0 && requestedDashboardPopup() === target) {
           location.hash = target;
         }
         return;
@@ -97,7 +98,7 @@ class SmartphoneDashboardLoader extends HTMLElement {
     clearRecoveryMarker();
     const core = await loadCore();
     const dashboard = await core.SmartphoneDashboardStrategy.generate(config, hass);
-    replayNotificationPopupDeepLink();
+    replayDashboardPopupDeepLink();
     return dashboard;
   }
 
@@ -140,7 +141,7 @@ setTimeout(monitorRegistry, 0);
 if (typeof window.addEventListener === "function") {
   window.addEventListener("load", () => {
     ensureRegistrations();
-    replayNotificationPopupDeepLink();
+    replayDashboardPopupDeepLink();
   }, { once: true });
 }
 

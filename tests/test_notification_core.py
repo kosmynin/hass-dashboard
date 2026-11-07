@@ -14,6 +14,7 @@ aggregate_alert_message = CORE["aggregate_alert_message"]
 mobile_notification_data = CORE["mobile_notification_data"]
 mobile_clear_data = CORE["mobile_clear_data"]
 mobile_dashboard_url = CORE["mobile_dashboard_url"]
+alert_dashboard_url = CORE["alert_dashboard_url"]
 mobile_live_activity_data = CORE["mobile_live_activity_data"]
 mobile_live_clear_data = CORE["mobile_live_clear_data"]
 live_activity_message = CORE["live_activity_message"]
@@ -169,9 +170,10 @@ def test_live_activity_is_compact_quiet_on_updates_and_red_for_nina():
     assert data["notification_icon_color"] == "#FF453A"
     assert data["notification_icon"] == "mdi:alert-outline"
     assert data["silent"] is True
-    assert data["url"] == mobile_dashboard_url(recipient)
+    assert data["url"] == alert_dashboard_url({"fingerprint": "nina:c"}, recipient)
     assert data["clickAction"] == data["url"]
-    assert data["url"].endswith("#meldungen")
+    assert "sd_popup=meldung-nina" in data["url"]
+    assert data["url"].endswith("#meldung-nina")
     assert mobile_live_clear_data(data["tag"]) == {"tag": "smartphone_dashboard_live_1"}
 
 def test_live_activity_uses_category_icons_colors_and_plain_text():
@@ -198,6 +200,21 @@ def test_live_activity_uses_category_icons_colors_and_plain_text():
     ])
     assert waste_data["notification_icon"] == "mdi:trash-can-outline"
     assert waste_data["notification_icon_color"] == "#4169E1"
+    assert waste_data["url"] == "/handy/handy?sd_popup=meldung-abfall#meldung-abfall"
+    expected_popups = {
+        "battery": "meldung-batterien",
+        "contact": "meldung-kontakte",
+        "co2": "meldung-co2",
+        "waste": "meldung-abfall",
+        "ups": "meldung-usv",
+        "frost": "meldung-frost",
+        "nina": "meldung-nina",
+        "summary": "meldungen",
+    }
+    for category, popup in expected_popups.items():
+        url = alert_dashboard_url({"fingerprint": f"{category}:x"})
+        assert f"sd_popup={popup}" in url
+        assert url.endswith(f"#{popup}")
 
 def test_media_live_activity_contains_player_track_and_media_icon():
     entry = media_activity_presentation(
@@ -225,12 +242,12 @@ def test_media_live_activity_contains_player_track_and_media_icon():
     assert data["url"].endswith("#medien")
     assert data["silent"] is True
     remote_url = media_dashboard_url(entry["entity_id"])
-    assert remote_url == "/handy/handy?sd_media=media_player.wohnzimmer#medien"
+    assert remote_url == "/handy/handy?sd_popup=medien&sd_media=media_player.wohnzimmer#medien"
     entry["url"] = remote_url
     remote_data = mobile_media_activity_data(entry, tag=tag)
     assert remote_data["url"] == remote_url
     assert remote_data["clickAction"] == remote_url
-    assert media_dashboard_url("invalid", "#kaputt?") == "/handy/handy#medien"
+    assert media_dashboard_url("invalid", "#kaputt?") == "/handy/handy?sd_popup=medien#medien"
 
 def test_waste_collection_details_support_default_and_dated_attributes():
     details = waste_collection_details(

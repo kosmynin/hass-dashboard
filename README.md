@@ -89,8 +89,11 @@ bei Änderungen aktualisiert und nach vollständiger Entwarnung entfernt.
 Optionale nicht mobile Notify-Dienste erhalten ebenfalls nur eine
 Sammelmeldung. Für `notify.mobile_app_*` pflegt die Integration bis zu vier
 getrennte Warnungs-Live-Activities mit kategoriespezifischen Icons und Farben.
-Sie öffnen beim Antippen den gemeinsamen Meldungsdialog im Handy-Dashboard und
-werden bei Entwarnung beendet.
+Sie öffnen beim Antippen direkt das passende Detail-Pop-up für Batterien,
+Kontakte, CO₂, Abfall, USV, Frost oder NINA; zusammengefasste Restmeldungen
+öffnen den gemeinsamen Meldungsdialog. Der `sd_popup`-Fallback stellt den
+Absprung auch dann wieder her, wenn die Companion-App das URL-Fragment beim
+Kaltstart entfernt. Bei Entwarnung werden die Live Activities beendet.
 Eine zuvor von älteren Versionen erzeugte normale Sammelmitteilung wird beim
 nächsten Lauf entfernt. Wegen der iOS-Laufzeitgrenze
 wird eine weiterhin benötigte Live Activity nach sieben Stunden kontrolliert
@@ -109,7 +112,9 @@ und stellt den zugehörigen Player als Bubble-Card-Fernbedienung an die erste
 Position. Dort stehen die vom Player unterstützten Funktionen wie Wiedergabe,
 Titelsprung und Lautstärke bereit. Direkte Aktionsschaltflächen innerhalb einer
 generischen Home-Assistant-Live-Activity werden von der Companion-Payload nicht
-angeboten.
+angeboten. Der Absprung enthält zusätzlich zum Fragment einen stabilen
+`sd_popup`-Parameter; dadurch öffnet der Loader das Medien-Pop-up auch dann,
+wenn die Companion-App beim Kaltstart den Fragmentteil der URL verwirft.
 
 Der Meldungsdialog bietet die Aktionen **30 Min. stumm** und **Bis Änderung
 stumm**. Die erste blendet die Live Activity dieses Smartphones für 30 Minuten

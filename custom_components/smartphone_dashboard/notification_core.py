@@ -12,6 +12,15 @@ MOBILE_LIVE_ACTIVITY_TAG_PREFIX = "smartphone_dashboard_live"
 MOBILE_MEDIA_ACTIVITY_TAG_PREFIX = "smartphone_dashboard_media"
 MOBILE_DASHBOARD_PATH = "/handy/handy"
 MOBILE_ACTION_PREFIX = "SMARTPHONE_DASHBOARD"
+ALERT_POPUP_BY_CATEGORY = {
+    "battery": "meldung-batterien",
+    "contact": "meldung-kontakte",
+    "co2": "meldung-co2",
+    "waste": "meldung-abfall",
+    "ups": "meldung-usv",
+    "frost": "meldung-frost",
+    "nina": "meldung-nina",
+}
 
 UPS_NORMAL_STATES = frozenset((
     "online", "on", "ok", "normal", "ol", "connected", "available", "mains", "line",
@@ -87,10 +96,21 @@ def notification_recipient_token(recipient: str) -> str:
 
 def mobile_dashboard_url(recipient: str = "") -> str:
     """Open the aggregate alert popup and identify the originating device."""
-    parameters = ["sd_popup=meldungen"]
+    return dashboard_popup_url("meldungen", recipient)
+
+def dashboard_popup_url(popup: str, recipient: str = "") -> str:
+    """Build a Companion-safe popup link with a query fallback for fragments."""
+    if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]*", popup):
+        popup = "meldungen"
+    parameters = [f"sd_popup={quote(popup, safe='')}"]
     if recipient:
         parameters.append(f"sd_recipient={notification_recipient_token(recipient)}")
-    return f"{MOBILE_DASHBOARD_PATH}?{'&'.join(parameters)}#meldungen"
+    return f"{MOBILE_DASHBOARD_PATH}?{'&'.join(parameters)}#{popup}"
+
+def alert_dashboard_url(alert: Mapping[str, object], recipient: str = "") -> str:
+    """Open the detail popup matching one alert category."""
+    category = str(alert.get("fingerprint") or "").partition(":")[0].casefold()
+    return dashboard_popup_url(ALERT_POPUP_BY_CATEGORY.get(category, "meldungen"), recipient)
 
 def mobile_action_ids(recipient: str, digest: str) -> dict[str, str]:
     """Build recipient- and alert-set-specific actionable notification IDs."""
@@ -238,6 +258,7 @@ def mobile_live_activity_data(
         normalized[0] if normalized else {},
     )
     presentation = live_activity_presentation(presentation_alert)
+    destination = alert_dashboard_url(presentation_alert, recipient)
     color = presentation["color"]
     data: dict[str, object] = {
         "tag": tag,
@@ -251,8 +272,8 @@ def mobile_live_activity_data(
         "relevance_score": relevance_score if relevance_score is not None else (1.0 if urgent else 0.8),
         "sticky": True,
         "alert_once": silent,
-        "url": mobile_dashboard_url(recipient),
-        "clickAction": mobile_dashboard_url(recipient),
+        "url": destination,
+        "clickAction": destination,
     }
     if silent:
         data["silent"] = True
@@ -335,8 +356,10 @@ def media_dashboard_url(entity_id: str, media_hash: str = "#medien") -> str:
         entity_id = ""
     if not re.fullmatch(r"#[a-zA-Z0-9][a-zA-Z0-9_-]*", media_hash):
         media_hash = "#medien"
-    query = f"?sd_media={quote(entity_id, safe='')}" if entity_id else ""
-    return f"{MOBILE_DASHBOARD_PATH}{query}{media_hash}"
+    parameters = [f"sd_popup={quote(media_hash.removeprefix('#'), safe='')}"]
+    if entity_id:
+        parameters.append(f"sd_media={quote(entity_id, safe='')}")
+    return f"{MOBILE_DASHBOARD_PATH}?{'&'.join(parameters)}{media_hash}"
 
 def mobile_media_activity_data(
     entry: Mapping[str, object],

@@ -599,6 +599,13 @@ const upgradedDashboard = await upgradedStrategy.generate({}, {
 });
 assert.equal(upgradedDashboard.title, "Handy");
 assert.equal(typeof OldEditor.prototype.setConfig, "function");
+globalThis.location.search = "?sd_popup=meldung-abfall";
+globalThis.location.hash = "#veraltet";
+globalThis.setTimeout = (callback) => { callback(); return 0; };
+await upgradedStrategy.generate({}, {
+  states: {}, areas: {}, devices: {}, entities: {}, services: {},
+});
+assert.equal(globalThis.location.hash, "#meldung-abfall");
 const replacementRegistry = {
   registry: new Map(),
   get(name) { return this.registry.get(name); },
