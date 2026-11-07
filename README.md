@@ -56,8 +56,9 @@ benannte Kalender zuverlässig im Pop-up erscheinen.
 Mehrzeilige Sensorzustände wie „Restmüll und Biomüll werden morgen abgeholt“
 werden sowohl auf der Dashboard-Karte als auch in Persistent Notification und
 Live Activity als gemeinsame Abholung dargestellt.
-Die Live Activity zeigt bis zu vier unabhängige Meldungen in getrennten Zeilen;
-weitere Meldungen werden kompakt gezählt und bleiben im gemeinsamen Meldungsdialog vollständig sichtbar.
+Bis zu vier unabhängige Meldungen erscheinen als getrennte, einzeln lesbare
+Live Activities; weitere Meldungen werden kompakt gezählt und bleiben im
+gemeinsamen Meldungsdialog vollständig sichtbar.
 Batteriemeldungen bleiben neutral; ausschließlich ihr Symbol wird unterhalb des
 Grenzwerts orange und bei höchstens dessen Hälfte rot dargestellt.
 Batteriespannungen in Volt oder Millivolt werden grundsätzlich nicht als
@@ -86,16 +87,28 @@ zusammengefasste Persistent Notification, solange Meldungen aktiv sind. Sie wird
 bei Änderungen aktualisiert und nach vollständiger Entwarnung entfernt.
 
 Optionale nicht mobile Notify-Dienste erhalten ebenfalls nur eine
-Sammelmeldung. Für `notify.mobile_app_*` pflegt die Integration ausschließlich
-eine Live Activity mit
-eigener Kennung. Sie zeigt auf iPhone-Sperrbildschirm und Dynamic Island die
-beiden wichtigsten Meldungen sowie die Gesamtzahl, öffnet beim Antippen den
-gemeinsamen Meldungsdialog im Handy-Dashboard und wird bei Entwarnung beendet.
+Sammelmeldung. Für `notify.mobile_app_*` pflegt die Integration bis zu vier
+getrennte Warnungs-Live-Activities mit kategoriespezifischen Icons und Farben.
+Sie öffnen beim Antippen den gemeinsamen Meldungsdialog im Handy-Dashboard und
+werden bei Entwarnung beendet.
 Eine zuvor von älteren Versionen erzeugte normale Sammelmitteilung wird beim
 nächsten Lauf entfernt. Wegen der iOS-Laufzeitgrenze
 wird eine weiterhin benötigte Live Activity nach sieben Stunden kontrolliert
 erneuert. Voraussetzung sind iOS 17.2 oder neuer, Home Assistant 2026.7 oder
 neuer und aktivierte Live Activities in der Companion App.
+
+Zusätzlich können aktive Media Player eigene stille Live Activities erhalten.
+Sie zeigen Playername, Titel und Interpret mit einem passenden Medien-Icon,
+aktualisieren Titelwechsel ohne zusätzliche Push-Mitteilung und verschwinden
+beim Pausieren oder Stoppen. Verwendet werden die sichtbaren bzw. im Bereich
+„Medien“ ausgewählten Entitäten; gruppierte Player werden zusammengefasst und
+maximal drei gleichzeitig angezeigt. Die Funktion lässt sich unter
+**Meldungen → Aktive Medien** deaktivieren. Ein Antippen öffnet das Medien-Pop-up
+und stellt den zugehörigen Player als Bubble-Card-Fernbedienung an die erste
+Position. Dort stehen die vom Player unterstützten Funktionen wie Wiedergabe,
+Titelsprung und Lautstärke bereit. Direkte Aktionsschaltflächen innerhalb einer
+generischen Home-Assistant-Live-Activity werden von der Companion-Payload nicht
+angeboten.
 
 Der Meldungsdialog bietet die Aktionen **30 Min. stumm** und **Bis Änderung
 stumm**. Die erste blendet die Live Activity dieses Smartphones für 30 Minuten

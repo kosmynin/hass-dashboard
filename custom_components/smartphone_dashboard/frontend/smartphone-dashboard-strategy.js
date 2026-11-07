@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.49";
+const STRATEGY_VERSION = "22.0.50";
 const CONFIG_VERSION = 25;
 
 const ACTIVE_ROOM_STYLES = `
@@ -330,7 +330,7 @@ const NOTIFICATION_HELPERS = {
   ups_entities: "input_text.smartphone_usv_sensoren",
   nina_entities: "input_text.smartphone_nina_muster",
 };
-const BACKEND_NOTIFICATION_KEYS = [...Object.keys(NOTIFICATION_HELPERS), "waste_days"];
+const BACKEND_NOTIFICATION_KEYS = [...Object.keys(NOTIFICATION_HELPERS), "waste_days", "notification_media"];
 
 // Sofort registrieren: Home Assistant wartet maximal fünf Sekunden auf das
 // Strategy-Element. Die Funktionsdeklarationen darunter werden beim Aufruf
@@ -2087,11 +2087,28 @@ function securityFeatureCards(item, hass) {
     .map((entityId) => featureEntityCard(entityId, hass));
 }
 
+function requestedMediaPlayer(hass) {
+  try {
+    const entityId = new URLSearchParams(globalThis.location?.search || "").get("sd_media") || "";
+    return /^media_player\.[a-z0-9_]+$/i.test(entityId) && hass?.states?.[entityId]
+      ? entityId
+      : "";
+  } catch (_error) {
+    return "";
+  }
+}
+
 function featurePopupCards(item, hass) {
   if (item.key === "printer") return printerFeatureCards(item, hass);
   if (item.key === "system") return systemFeatureCards(item, hass);
   if (item.key === "security") return securityFeatureCards(item, hass);
-  return item.entities
+  const preferredMedia = item.key === "media" ? requestedMediaPlayer(hass) : "";
+  return [...item.entities]
+    .sort((left, right) => {
+      if (left === preferredMedia) return -1;
+      if (right === preferredMedia) return 1;
+      return 0;
+    })
     .filter((id) => hass?.states?.[id])
     .map((id) => featureEntityCard(id, hass));
 }
@@ -2294,6 +2311,7 @@ const EDITOR_DEFAULTS = {
   notification_ups: true,
   notification_frost: true,
   notification_nina: true,
+  notification_media: true,
   battery_threshold: 6,
   contact_minutes: 15,
   co2_threshold: 1000,
@@ -2422,7 +2440,7 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
       this._backendKeyLoaded = requestKey;
       this._backendBase = result.config || {};
       let importedNotifications = false;
-      for (const key of Object.keys(NOTIFICATION_HELPERS)) {
+      for (const key of BACKEND_NOTIFICATION_KEYS) {
         if (Object.prototype.hasOwnProperty.call(this._backendBase, key) && !Object.prototype.hasOwnProperty.call(this._sourceConfig || {}, key) && !this._localEditsBeforeBackend?.has(key)) {
           this._config[key] = this._backendBase[key]; importedNotifications = true;
         }
@@ -3339,6 +3357,7 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
             <div class="switch-row"><div class="switch-copy"><div class="switch-title">Frostwarnung</div><div class="switch-description">Bei niedriger Außentemperatur warnen.</div></div><ha-switch data-switch="notification_frost"></ha-switch></div>
             <label class="native-field">Frost-Grenzwert in °C<input data-notification-number="frost_threshold" type="number" min="-30" max="20"></label>
             <div class="switch-row"><div class="switch-copy"><div class="switch-title">NINA</div><div class="switch-description">Aktive amtliche Warnmeldungen anzeigen.</div></div><ha-switch data-switch="notification_nina"></ha-switch></div>
+            <div class="switch-row"><div class="switch-copy"><div class="switch-title">Aktive Medien</div><div class="switch-description">Abspielende Media Player als stille iPhone Live Activities anzeigen. Die Auswahl folgt dem Bereich „Medien“.</div></div><ha-switch data-switch="notification_media"></ha-switch></div>
           </div>
         </details>
 

@@ -4,10 +4,12 @@ from collections.abc import Mapping
 from datetime import date, datetime
 import hashlib
 import re
+from urllib.parse import quote
 
 MOBILE_NOTIFICATION_TAG = "smartphone_dashboard_alerts"
 MOBILE_NOTIFICATION_GROUP = "smartphone_dashboard"
 MOBILE_LIVE_ACTIVITY_TAG_PREFIX = "smartphone_dashboard_live"
+MOBILE_MEDIA_ACTIVITY_TAG_PREFIX = "smartphone_dashboard_media"
 MOBILE_DASHBOARD_PATH = "/handy/handy"
 MOBILE_ACTION_PREFIX = "SMARTPHONE_DASHBOARD"
 
@@ -267,6 +269,102 @@ def mobile_clear_data() -> dict[str, object]:
 def mobile_live_clear_data(tag: str = MOBILE_LIVE_ACTIVITY_TAG_PREFIX) -> dict[str, object]:
     """Build the payload that ends the current Live Activity / Live Update."""
     return {"tag": tag}
+
+def media_activity_presentation(
+    entity_id: str,
+    player_name: object,
+    attributes: Mapping[str, object],
+) -> dict[str, str]:
+    """Create a concise media-player Live Activity presentation."""
+    name = str(player_name or attributes.get("friendly_name") or entity_id).strip()
+    title = str(
+        attributes.get("media_title")
+        or attributes.get("media_series_title")
+        or attributes.get("media_channel")
+        or attributes.get("app_name")
+        or "Wiedergabe aktiv"
+    ).strip()
+    detail_parts = [
+        str(attributes.get(key) or "").strip()
+        for key in ("media_artist", "media_album_name")
+    ]
+    details = [part for part in detail_parts if part and part.casefold() != title.casefold()]
+    message = " · ".join(dict.fromkeys([title, *details]))
+    content_type = " ".join((
+        str(attributes.get("media_content_type") or ""),
+        str(attributes.get("app_name") or ""),
+    )).casefold()
+    configured_icon = str(attributes.get("icon") or "").strip()
+    if configured_icon.startswith("mdi:"):
+        icon = configured_icon
+    elif "podcast" in content_type:
+        icon = "mdi:podcast"
+    elif re.search(r"radio|channel", content_type):
+        icon = "mdi:radio"
+    elif re.search(r"movie|video|tv|episode", content_type):
+        icon = "mdi:television-play"
+    elif re.search(r"music|audio|track", content_type):
+        icon = "mdi:music"
+    else:
+        icon = "mdi:speaker-play"
+    identity = "\0".join((
+        entity_id,
+        name,
+        title,
+        *details,
+        str(attributes.get("media_content_id") or ""),
+        str(attributes.get("app_name") or ""),
+    ))
+    return {
+        "entity_id": entity_id,
+        "title": name,
+        "message": message,
+        "icon": icon,
+        "color": "#5E5CE6",
+        "digest": hashlib.sha256(identity.encode()).hexdigest()[:24],
+    }
+
+def media_live_activity_tag(entity_id: str, generation: int = 0) -> str:
+    """Return a short, stable and entity-specific media Live Activity tag."""
+    token = hashlib.sha256(entity_id.encode()).hexdigest()[:12]
+    return f"{MOBILE_MEDIA_ACTIVITY_TAG_PREFIX}_{token}_{generation % 2}"
+
+def media_dashboard_url(entity_id: str, media_hash: str = "#medien") -> str:
+    """Open the media popup with the originating player selected as its remote."""
+    if not re.fullmatch(r"media_player\.[a-zA-Z0-9_]+", entity_id):
+        entity_id = ""
+    if not re.fullmatch(r"#[a-zA-Z0-9][a-zA-Z0-9_-]*", media_hash):
+        media_hash = "#medien"
+    query = f"?sd_media={quote(entity_id, safe='')}" if entity_id else ""
+    return f"{MOBILE_DASHBOARD_PATH}{query}{media_hash}"
+
+def mobile_media_activity_data(
+    entry: Mapping[str, object],
+    *,
+    tag: str,
+    silent: bool = False,
+) -> dict[str, object]:
+    """Build the Companion payload for one active media player."""
+    url = str(entry.get("url") or f"{MOBILE_DASHBOARD_PATH}#medien")
+    color = str(entry.get("color") or "#5E5CE6")
+    data: dict[str, object] = {
+        "tag": tag,
+        "live_update": True,
+        "critical_text": "▶",
+        "notification_icon": str(entry.get("icon") or "mdi:speaker-play"),
+        "notification_icon_color": color,
+        "color": color,
+        "background_color": "#1C1C1E",
+        "text_color": "#FFFFFF",
+        "relevance_score": 0.45,
+        "sticky": True,
+        "alert_once": silent,
+        "url": url,
+        "clickAction": url,
+    }
+    if silent:
+        data["silent"] = True
+    return data
 
 def area_entity_label(
     area_name: object,

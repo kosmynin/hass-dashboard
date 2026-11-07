@@ -6,6 +6,7 @@ import fnmatch
 import hashlib
 import logging
 import math
+import re
 import time
 from typing import Any
 from homeassistant.config_entries import ConfigEntry
@@ -21,9 +22,13 @@ from .notification_core import (
     is_battery_level_sensor,
     live_activity_entries,
     live_activity_presentation,
+    media_activity_presentation,
+    media_dashboard_url,
+    media_live_activity_tag,
     mobile_clear_data,
     mobile_live_activity_data,
     mobile_live_clear_data,
+    mobile_media_activity_data,
     notification_recipient_token,
     normalized_alerts,
     parse_mobile_action,
@@ -112,12 +117,17 @@ class NotificationCoordinator:
     @callback
     def _state_changed(self, event: Event) -> None:
         entity_id = event.data.get("entity_id", "")
-        if entity_id.startswith(("sensor.", "binary_sensor.", "input_")):
+        if entity_id.startswith(("sensor.", "binary_sensor.", "media_player.", "input_")):
             self._enqueue()
 
     @callback
     def _enqueue(self) -> None:
         if self._queue.empty(): self._queue.put_nowait(None)
+
+    @callback
+    def queue_refresh(self) -> None:
+        """Re-evaluate activities immediately after backend settings change."""
+        self._enqueue()
 
     def _recipients(self) -> list[str]:
         return [
@@ -169,6 +179,11 @@ class NotificationCoordinator:
         generation = "1" if "_live_0_" in previous_tag else "0"
         base = f"smartphone_dashboard_live_{generation}"
         return [f"{base}_{index}" for index in range(1, count + 1)]
+
+    @staticmethod
+    def _next_media_tag(entity_id: str, previous: str = "") -> str:
+        generation = 1 if previous.endswith("_0") else 0
+        return media_live_activity_tag(entity_id, generation)
 
     def _state(self, entity_id: str, default: str = "") -> str:
         dashboards = self.manager.data.get("dashboards", {})
@@ -280,6 +295,63 @@ class NotificationCoordinator:
                     alerts.append({"fingerprint": f"nina:{hashlib.sha256(fingerprint_source.encode()).hexdigest()[:24]}", "message": f"⚠️ {detail}" + (f" ({severity})" if severity else "")})
         return alerts
 
+    def _active_media_entries(self) -> list[dict[str, str]]:
+        """Return visible, configured players that are currently playing."""
+        strategy = self.manager.data.get("dashboards", {}).get("default", {}).get("config", {})
+        if strategy.get("notification_media", True) is False:
+            return []
+        feature = strategy.get("features", {}).get("media", {})
+        if not isinstance(feature, dict):
+            feature = {}
+        if feature.get("enabled") is False:
+            return []
+        media_hash = str(feature.get("hash") or "#medien").strip()
+        if not re.fullmatch(r"#[a-zA-Z0-9][a-zA-Z0-9_-]*", media_hash):
+            media_hash = "#medien"
+        excluded = {
+            str(entity_id) for entity_id in feature.get("excluded_entities", [])
+            if isinstance(entity_id, str)
+        }
+        manual = {
+            str(entity_id) for entity_id in feature.get("entities", [])
+            if isinstance(entity_id, str) and entity_id.startswith("media_player.")
+        }
+        if feature.get("auto_discover", True) is False:
+            candidate_ids = manual
+        else:
+            candidate_ids = {
+                state.entity_id for state in self.hass.states.async_all("media_player")
+            } | manual
+        candidate_ids = {
+            entity_id for entity_id in candidate_ids
+            if entity_id not in excluded and self._dashboard_entity_enabled(entity_id)
+        }
+        playing_ids = {
+            entity_id for entity_id in candidate_ids
+            if (state := self.hass.states.get(entity_id))
+            and state.state in ("playing", "buffering")
+        }
+        entries: list[dict[str, str]] = []
+        for entity_id in sorted(playing_ids):
+            state = self.hass.states.get(entity_id)
+            if state is None:
+                continue
+            group_members = state.attributes.get("group_members")
+            if isinstance(group_members, (list, tuple)):
+                visible_group = [
+                    str(member) for member in group_members if str(member) in playing_ids
+                ]
+                if visible_group and entity_id != visible_group[0]:
+                    continue
+            entry = media_activity_presentation(
+                entity_id,
+                self._entity_label(entity_id, state.attributes),
+                state.attributes,
+            )
+            entry["url"] = media_dashboard_url(entity_id, media_hash)
+            entries.append(entry)
+        return entries[:3]
+
     async def _sync_persistent_notification(self, alerts: list[dict[str, str]]) -> None:
         message = aggregate_alert_message(alerts, bullet="- ") if alerts else ""
         if message == self._persistent_message:
@@ -304,6 +376,116 @@ class NotificationCoordinator:
             )
         self._persistent_message = message
 
+    async def _sync_media_live_activities(
+        self,
+        entries: list[dict[str, str]],
+        recipients: list[str],
+        media_digest_map: dict[str, dict[str, str]],
+        media_tag_map: dict[str, dict[str, str]],
+        media_started_map: dict[str, dict[str, float]],
+        errors: list[str],
+        active_retry_keys: set[tuple[str, str]],
+        now_epoch: float,
+    ) -> None:
+        """Reconcile independently updating media-player Live Activities."""
+        desired_entries = {entry["entity_id"]: entry for entry in entries}
+        all_recipients = set(recipients) | set(media_tag_map)
+        for recipient in all_recipients:
+            if not recipient.startswith("notify.mobile_app_"):
+                media_digest_map.pop(recipient, None)
+                media_tag_map.pop(recipient, None)
+                media_started_map.pop(recipient, None)
+                continue
+            service = recipient.removeprefix("notify.")
+            desired = desired_entries if recipient in recipients else {}
+            digests = media_digest_map.setdefault(recipient, {})
+            tags = media_tag_map.setdefault(recipient, {})
+            started = media_started_map.setdefault(recipient, {})
+
+            for entity_id in set(tags) - set(desired):
+                tag = tags[entity_id]
+                clear_key = (recipient, f"media-clear:{tag}")
+                active_retry_keys.add(clear_key)
+                if self._retry_after.get(clear_key, 0) > time.monotonic():
+                    continue
+                try:
+                    await self.hass.services.async_call(
+                        "notify", service,
+                        {"message": "clear_notification", "data": mobile_live_clear_data(tag)},
+                        blocking=True,
+                    )
+                    tags.pop(entity_id, None)
+                    digests.pop(entity_id, None)
+                    started.pop(entity_id, None)
+                    self._retry_after.pop(clear_key, None)
+                    self._retry_count.pop(clear_key, None)
+                except Exception as err:
+                    count = min(6, self._retry_count.get(clear_key, 0) + 1)
+                    self._retry_count[clear_key] = count
+                    self._retry_after[clear_key] = time.monotonic() + min(3600, 30 * (2 ** (count - 1)))
+                    errors.append(f"{recipient}: Medien-Live-Activity entfernen: {err}")
+
+            for entity_id, entry in desired.items():
+                tag = tags.get(entity_id) or media_live_activity_tag(entity_id)
+                started_at = started.get(entity_id, 0)
+                renewal_due = started_at > 0 and now_epoch - started_at >= LIVE_ACTIVITY_RENEW_AFTER
+                if renewal_due:
+                    clear_key = (recipient, f"media-renew:{tag}")
+                    active_retry_keys.add(clear_key)
+                    if self._retry_after.get(clear_key, 0) > time.monotonic():
+                        continue
+                    try:
+                        await self.hass.services.async_call(
+                            "notify", service,
+                            {"message": "clear_notification", "data": mobile_live_clear_data(tag)},
+                            blocking=True,
+                        )
+                        tag = self._next_media_tag(entity_id, tag)
+                        tags[entity_id] = tag
+                        digests.pop(entity_id, None)
+                        started.pop(entity_id, None)
+                        started_at = 0
+                        self._retry_after.pop(clear_key, None)
+                        self._retry_count.pop(clear_key, None)
+                    except Exception as err:
+                        count = min(6, self._retry_count.get(clear_key, 0) + 1)
+                        self._retry_count[clear_key] = count
+                        self._retry_after[clear_key] = time.monotonic() + min(3600, 30 * (2 ** (count - 1)))
+                        errors.append(f"{recipient}: Medien-Live-Activity erneuern: {err}")
+                        continue
+                if digests.get(entity_id) == entry["digest"] and not renewal_due:
+                    continue
+                live_key = (recipient, f"media:{tag}:{entry['digest']}")
+                active_retry_keys.add(live_key)
+                if self._retry_after.get(live_key, 0) > time.monotonic():
+                    continue
+                payload = {
+                    "title": NOTIFICATION_TITLE,
+                    "message": f"{entry['title']} · {entry['message']}",
+                    "data": mobile_media_activity_data(entry, tag=tag, silent=True),
+                }
+                try:
+                    await self.hass.services.async_call(
+                        "notify", service, payload, blocking=True
+                    )
+                    tags[entity_id] = tag
+                    digests[entity_id] = entry["digest"]
+                    started.setdefault(entity_id, now_epoch)
+                    self._retry_after.pop(live_key, None)
+                    self._retry_count.pop(live_key, None)
+                except Exception as err:
+                    count = min(6, self._retry_count.get(live_key, 0) + 1)
+                    self._retry_count[live_key] = count
+                    self._retry_after[live_key] = time.monotonic() + min(3600, 30 * (2 ** (count - 1)))
+                    errors.append(f"{recipient}: Medien-Live-Activity: {err}")
+
+            if not tags:
+                media_tag_map.pop(recipient, None)
+            if not digests:
+                media_digest_map.pop(recipient, None)
+            if not started:
+                media_started_map.pop(recipient, None)
+
     async def _run(self) -> None:
         while True:
             try: await asyncio.wait_for(self._queue.get(), timeout=60)
@@ -311,6 +493,7 @@ class NotificationCoordinator:
             await asyncio.sleep(0.5)
             try:
                 alerts = normalized_alerts(self.evaluate())
+                media_entries = self._active_media_entries()
                 fingerprints = [alert["fingerprint"] for alert in alerts]
                 digest = alert_set_digest(alerts)
                 digest_token = f"{DIGEST_PREFIX}{digest}" if digest else ""
@@ -348,6 +531,39 @@ class NotificationCoordinator:
                         "live_started_at_by_recipient", {}
                     ).items()
                     if isinstance(key, str) and isinstance(value, (int, float))
+                }
+                media_digest_map = {
+                    recipient: {
+                        entity_id: str(digest_value)
+                        for entity_id, digest_value in values.items()
+                        if isinstance(entity_id, str) and isinstance(digest_value, str)
+                    }
+                    for recipient, values in notification_state.get(
+                        "media_digest_by_recipient", {}
+                    ).items()
+                    if isinstance(recipient, str) and isinstance(values, dict)
+                }
+                media_tag_map = {
+                    recipient: {
+                        entity_id: str(tag)
+                        for entity_id, tag in values.items()
+                        if isinstance(entity_id, str) and isinstance(tag, str) and tag
+                    }
+                    for recipient, values in notification_state.get(
+                        "media_tag_by_recipient", {}
+                    ).items()
+                    if isinstance(recipient, str) and isinstance(values, dict)
+                }
+                media_started_map = {
+                    recipient: {
+                        entity_id: float(started_at)
+                        for entity_id, started_at in values.items()
+                        if isinstance(entity_id, str) and isinstance(started_at, (int, float))
+                    }
+                    for recipient, values in notification_state.get(
+                        "media_started_at_by_recipient", {}
+                    ).items()
+                    if isinstance(recipient, str) and isinstance(values, dict)
                 }
                 snooze_until_map = {
                     key: float(value)
@@ -677,6 +893,16 @@ class NotificationCoordinator:
                             live_digest_map.pop(recipient, None)
                             live_tag_map.pop(recipient, None)
                             live_started_map.pop(recipient, None)
+                await self._sync_media_live_activities(
+                    media_entries,
+                    recipients,
+                    media_digest_map,
+                    media_tag_map,
+                    media_started_map,
+                    errors,
+                    active_retry_keys,
+                    now_epoch,
+                )
                 self._retry_after = {
                     key: value for key, value in self._retry_after.items()
                     if key in active_retry_keys
@@ -693,12 +919,16 @@ class NotificationCoordinator:
                         "recipients": recipients,
                         "persistent_notification_id": PERSISTENT_NOTIFICATION_ID,
                         "live_activities": sum(len(tags) for tags in live_tag_map.values()),
+                        "media_live_activities": sum(len(tags) for tags in media_tag_map.values()),
                         "errors": errors[-10:],
                     },
                     {
                         "live_digest_by_recipient": live_digest_map,
                         "live_tag_by_recipient": live_tag_map,
                         "live_started_at_by_recipient": live_started_map,
+                        "media_digest_by_recipient": media_digest_map,
+                        "media_tag_by_recipient": media_tag_map,
+                        "media_started_at_by_recipient": media_started_map,
                         "snooze_until_by_recipient": snooze_until_map,
                         "muted_digest_by_recipient": muted_digest_map,
                     },

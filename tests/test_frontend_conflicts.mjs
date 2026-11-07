@@ -207,6 +207,28 @@ assert.notEqual(navigationHeadingIndex, -1);
 assert.equal(navigationCards[navigationHeadingIndex + 1].type, "grid");
 assert.equal(navigationCards[navigationHeadingIndex + 1].cards[0].name, "Medien");
 
+globalThis.location = {
+  pathname: "/handy/handy",
+  search: "?sd_media=media_player.kueche",
+  reload() {},
+};
+const mediaRemoteDashboard = await SmartphoneDashboardStrategy.generate({}, {
+  states: {
+    "media_player.wohnzimmer": { state: "playing", attributes: { friendly_name: "Wohnzimmer" } },
+    "media_player.kueche": { state: "playing", attributes: { friendly_name: "Küche" } },
+  },
+  areas: {}, devices: {}, entities: {}, services: {},
+});
+const mediaRemotePopup = mediaRemoteDashboard.views[0].sections[0].cards
+  .find((card) => card.hash === "#medien");
+assert.deepEqual(mediaRemotePopup.cards.map((card) => card.entity), [
+  "media_player.kueche",
+  "media_player.wohnzimmer",
+]);
+assert.equal(mediaRemotePopup.cards[0].type, "custom:bubble-card");
+assert.equal(mediaRemotePopup.cards[0].card_type, "media-player");
+delete globalThis.location;
+
 const securityHass = {
   states: {
     "camera.eingang": { state: "idle", attributes: { friendly_name: "Eingang" } },

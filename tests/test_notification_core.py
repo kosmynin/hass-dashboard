@@ -19,6 +19,10 @@ mobile_live_clear_data = CORE["mobile_live_clear_data"]
 live_activity_message = CORE["live_activity_message"]
 live_activity_entries = CORE["live_activity_entries"]
 live_activity_presentation = CORE["live_activity_presentation"]
+media_activity_presentation = CORE["media_activity_presentation"]
+media_dashboard_url = CORE["media_dashboard_url"]
+media_live_activity_tag = CORE["media_live_activity_tag"]
+mobile_media_activity_data = CORE["mobile_media_activity_data"]
 mobile_action_ids = CORE["mobile_action_ids"]
 parse_mobile_action = CORE["parse_mobile_action"]
 is_battery_level_sensor = CORE["is_battery_level_sensor"]
@@ -194,6 +198,39 @@ def test_live_activity_uses_category_icons_colors_and_plain_text():
     ])
     assert waste_data["notification_icon"] == "mdi:trash-can-outline"
     assert waste_data["notification_icon_color"] == "#4169E1"
+
+def test_media_live_activity_contains_player_track_and_media_icon():
+    entry = media_activity_presentation(
+        "media_player.wohnzimmer",
+        "Wohnzimmer",
+        {
+            "media_title": "A Forest",
+            "media_artist": "The Cure",
+            "media_album_name": "Seventeen Seconds",
+            "media_content_type": "music",
+            "media_content_id": "track-42",
+        },
+    )
+    assert entry["title"] == "Wohnzimmer"
+    assert entry["message"] == "A Forest · The Cure · Seventeen Seconds"
+    assert entry["icon"] == "mdi:music"
+    assert entry["color"] == "#5E5CE6"
+    assert len(entry["digest"]) == 24
+    tag = media_live_activity_tag(entry["entity_id"])
+    assert tag.startswith("smartphone_dashboard_media_") and tag.endswith("_0")
+    assert media_live_activity_tag(entry["entity_id"], 1).endswith("_1")
+    data = mobile_media_activity_data(entry, tag=tag, silent=True)
+    assert data["notification_icon"] == "mdi:music"
+    assert data["critical_text"] == "▶"
+    assert data["url"].endswith("#medien")
+    assert data["silent"] is True
+    remote_url = media_dashboard_url(entry["entity_id"])
+    assert remote_url == "/handy/handy?sd_media=media_player.wohnzimmer#medien"
+    entry["url"] = remote_url
+    remote_data = mobile_media_activity_data(entry, tag=tag)
+    assert remote_data["url"] == remote_url
+    assert remote_data["clickAction"] == remote_url
+    assert media_dashboard_url("invalid", "#kaputt?") == "/handy/handy#medien"
 
 def test_waste_collection_details_support_default_and_dated_attributes():
     details = waste_collection_details(
