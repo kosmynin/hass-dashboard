@@ -16,7 +16,8 @@ from homeassistant.components.lovelace import LOVELACE_DATA
 from homeassistant.components.lovelace.resources import ResourceStorageCollection
 from homeassistant.auth.permissions.const import POLICY_READ
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from .config_manager import ConfigManager
 from .notification import NotificationCoordinator
@@ -71,6 +72,54 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     websocket_api.async_register_command(hass, websocket_save_config)
     websocket_api.async_register_command(hass, websocket_import_legacy)
     websocket_api.async_register_command(hass, websocket_notification_action)
+    if not hass.services.has_service(DOMAIN, "send_test_designs"):
+        async def send_test_designs(call: ServiceCall) -> None:
+            coordinator = _coordinator(hass)
+            if coordinator is None:
+                raise HomeAssistantError("Smartphone Dashboard ist nicht eingerichtet")
+            try:
+                await coordinator.async_send_test_designs(
+                    call.data.get("recipient", ""),
+                    call.data.get("group", "all"),
+                )
+            except ValueError as err:
+                raise HomeAssistantError(str(err)) from err
+
+        hass.services.async_register(
+            DOMAIN,
+            "send_test_designs",
+            send_test_designs,
+            schema=vol.Schema({
+                vol.Optional("recipient", default=""): vol.Any(
+                    "", vol.Match(r"^notify\.mobile_app_[a-z0-9_]+$")
+                ),
+                vol.Optional("group", default="all"): vol.In(
+                    ("all", "messages", "parcels", "media")
+                ),
+            }),
+        )
+    if not hass.services.has_service(DOMAIN, "clear_test_designs"):
+        async def clear_test_designs(call: ServiceCall) -> None:
+            coordinator = _coordinator(hass)
+            if coordinator is None:
+                raise HomeAssistantError("Smartphone Dashboard ist nicht eingerichtet")
+            try:
+                await coordinator.async_clear_test_designs(
+                    call.data.get("recipient", "")
+                )
+            except ValueError as err:
+                raise HomeAssistantError(str(err)) from err
+
+        hass.services.async_register(
+            DOMAIN,
+            "clear_test_designs",
+            clear_test_designs,
+            schema=vol.Schema({
+                vol.Optional("recipient", default=""): vol.Any(
+                    "", vol.Match(r"^notify\.mobile_app_[a-z0-9_]+$")
+                ),
+            }),
+        )
     return True
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

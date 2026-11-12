@@ -103,6 +103,9 @@ Neustarts. Der Kopf benennt die Kategorie kompakt, etwa
 **Homeassistant – CO₂**, **Homeassistant – Abfall** oder
 **Homeassistant – Paket**. Paket-Aktivitäten wechseln Symbol und Akzentfarbe
 passend zu Unterwegs, In Zustellung, Abholbereit, Rücksendung oder Problem.
+Zusätzlich zeigen sie den vierstufigen Versandfortschritt als echten
+systemgerenderten Fortschrittsbalken. Derselbe Status erscheint im
+Paket-Pop-up als farbiger Bubble-Card-Balken.
 Sie öffnen beim Antippen direkt das passende Detail-Pop-up für Batterien,
 Kontakte, CO₂, Abfall, Pakete, USV, Frost oder NINA; zusammengefasste Restmeldungen
 öffnen den gemeinsamen Meldungsdialog. Der `sd_popup`-Fallback stellt den
@@ -113,6 +116,14 @@ nächsten Lauf entfernt. Wegen der iOS-Laufzeitgrenze
 wird eine weiterhin benötigte Live Activity nach sieben Stunden kontrolliert
 erneuert. Voraussetzung sind iOS 17.2 oder neuer, Home Assistant 2026.7 oder
 neuer und aktivierte Live Activities in der Companion App.
+
+Unter **Entwicklerwerkzeuge → Aktionen** sendet
+`smartphone_dashboard.send_test_designs` wahlweise alle Meldungsdesigns, nur
+die fünf Paketstufen oder das Mediendesign als echte Live Activities. Ohne
+expliziten Empfänger werden die Dashboard-Empfänger verwendet.
+`smartphone_dashboard.clear_test_designs` beendet anschließend alle so
+erzeugten Test-Aktivitäten wieder. Die Gruppe **Alle Designs** sollte wegen des
+iOS-Push-to-start-Budgets nur gezielt zur visuellen Prüfung verwendet werden.
 
 Zusätzlich können aktive Media Player eigene stille Live Activities erhalten.
 Sie zeigen **Homeassistant – Playername** als Titel sowie Medientitel, Interpret

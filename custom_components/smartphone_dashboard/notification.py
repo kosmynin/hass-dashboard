@@ -1,7 +1,7 @@
 """Local notification evaluation and serialized delivery."""
 from __future__ import annotations
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 import fnmatch
 import hashlib
 import logging
@@ -48,9 +48,27 @@ DIGEST_PREFIX = "digest:"
 CLEAR_DIGEST = "clear"
 MOBILE_ACTION_EVENT = "mobile_app_notification_action"
 LIVE_ACTIVITY_RENEW_AFTER = 7 * 60 * 60
-LIVE_ACTIVITY_PAYLOAD_VERSION = "5"
+LIVE_ACTIVITY_PAYLOAD_VERSION = "6"
 SNOOZE_SECONDS = 30 * 60
 _LOGGER = logging.getLogger(__name__)
+TEST_ACTIVITY_TAGS = (
+    "smartphone_dashboard_test_battery",
+    "smartphone_dashboard_test_contact",
+    "smartphone_dashboard_test_co2",
+    "smartphone_dashboard_test_waste_yellow",
+    "smartphone_dashboard_test_waste_paper",
+    "smartphone_dashboard_test_waste_bio",
+    "smartphone_dashboard_test_waste_residual",
+    "smartphone_dashboard_test_ups",
+    "smartphone_dashboard_test_frost",
+    "smartphone_dashboard_test_nina",
+    "smartphone_dashboard_test_parcel_registered",
+    "smartphone_dashboard_test_parcel_transit",
+    "smartphone_dashboard_test_parcel_delivery",
+    "smartphone_dashboard_test_parcel_pickup",
+    "smartphone_dashboard_test_parcel_problem",
+    "smartphone_dashboard_test_media",
+)
 LEGACY_TO_CONFIG = {
     "input_boolean.smartphone_meldung_batterien": "notification_batteries", "input_boolean.smartphone_meldung_kontakte": "notification_contacts",
     "input_boolean.smartphone_meldung_co2": "notification_co2", "input_boolean.smartphone_meldung_abfall": "notification_waste",
@@ -144,6 +162,128 @@ class NotificationCoordinator:
             )
             if item.startswith("notify.") and item != "notify.persistent_notification"
         ]
+
+    def _test_alert_designs(self, group: str) -> list[tuple[str, dict[str, object]]]:
+        """Return deterministic samples for visually checking every alert design."""
+        designs: list[tuple[str, dict[str, object]]] = []
+        if group in ("all", "messages"):
+            waste_date = (dt_util.now() + timedelta(days=1)).strftime("%d.%m.")
+            designs.extend((
+                ("battery", {"fingerprint": "battery:test", "message": "🔋 Flur · Bewegungsmelder: 5%"}),
+                ("contact", {"fingerprint": "contact:test", "message": "🚪 Küche · Fenster seit 18 Minuten offen"}),
+                ("co2", {"fingerprint": "co2:test", "message": "💨 Wohnzimmer · Kohlendioxid: 1.180 ppm"}),
+                ("waste_yellow", {"fingerprint": "waste:test-yellow", "message": f"🗑️ Gelbe Tonne: morgen · {waste_date}"}),
+                ("waste_paper", {"fingerprint": "waste:test-paper", "message": f"🗑️ Papier: morgen · {waste_date}"}),
+                ("waste_bio", {"fingerprint": "waste:test-bio", "message": f"🗑️ Biomüll: morgen · {waste_date}"}),
+                ("waste_residual", {"fingerprint": "waste:test-residual", "message": f"🗑️ Restmüll: morgen · {waste_date}"}),
+                ("ups", {"fingerprint": "ups:test", "message": "🔌 USV läuft auf Batterie"}),
+                ("frost", {"fingerprint": "frost:test", "message": "❄️ Außen · Temperatur: −2 °C"}),
+                ("nina", {"fingerprint": "nina:test", "message": "⚠️ Amtliche Warnung vor starkem Gewitter"}),
+            ))
+        if group in ("all", "parcels"):
+            now = dt_util.now()
+            planned_from = (now + timedelta(days=1)).replace(
+                hour=14, minute=0, second=0, microsecond=0
+            )
+            planned_to = planned_from.replace(hour=16)
+            parcel_samples = (
+                ("parcel_registered", "registered", "Beispielshop"),
+                ("parcel_transit", "in_transit", "Technikshop"),
+                ("parcel_delivery", "out_for_delivery", "Versandhaus"),
+                ("parcel_pickup", "at_pickup_point", "Abholung"),
+                ("parcel_problem", "problem", "Mustershop"),
+            )
+            for slug, status, sender in parcel_samples:
+                alert = parcel_alert({
+                    "carrier": "Paketdienst",
+                    "barcode": f"test-{status}",
+                    "sender": sender,
+                    "status": status,
+                    "delivered": False,
+                    "pickup_point": "Paketshop Musterstraße" if status == "at_pickup_point" else "",
+                    "planned_from": planned_from.isoformat(),
+                    "planned_to": planned_to.isoformat(),
+                }, now)
+                if alert is not None:
+                    designs.append((slug, alert))
+        return designs
+
+    def _test_recipients(self, recipient: str = "") -> list[str]:
+        candidates = [recipient] if recipient else self._recipients()
+        return [
+            item for item in dict.fromkeys(candidates)
+            if item.startswith("notify.mobile_app_")
+        ]
+
+    async def async_send_test_designs(
+        self, recipient: str = "", group: str = "all"
+    ) -> int:
+        """Send real Companion Live Activities for visual verification."""
+        recipients = self._test_recipients(recipient)
+        if not recipients:
+            raise ValueError("Kein Mobile-App-Benachrichtigungsdienst konfiguriert")
+        sent = 0
+        for target in recipients:
+            service = target.removeprefix("notify.")
+            for slug, alert in self._test_alert_designs(group):
+                presentation = live_activity_presentation(alert)
+                await self.hass.services.async_call(
+                    "notify",
+                    service,
+                    {
+                        "title": f"{NOTIFICATION_TITLE} – {live_activity_title(alert)}",
+                        "message": presentation["message"],
+                        "data": mobile_live_activity_data(
+                            [alert],
+                            tag=f"smartphone_dashboard_test_{slug}",
+                            recipient=target,
+                            relevance_score=0.2,
+                        ),
+                    },
+                    blocking=True,
+                )
+                sent += 1
+            if group in ("all", "media"):
+                media_entry = {
+                    "title": "Wohnzimmer",
+                    "message": "Beispieltitel · Beispielinterpret",
+                    "icon": "mdi:music",
+                    "color": "#5E5CE6",
+                    "url": media_dashboard_url("media_player.test"),
+                }
+                await self.hass.services.async_call(
+                    "notify",
+                    service,
+                    {
+                        "title": f"{NOTIFICATION_TITLE} – Wohnzimmer",
+                        "message": media_entry["message"],
+                        "data": mobile_media_activity_data(
+                            media_entry,
+                            tag="smartphone_dashboard_test_media",
+                        ),
+                    },
+                    blocking=True,
+                )
+                sent += 1
+        return sent
+
+    async def async_clear_test_designs(self, recipient: str = "") -> int:
+        """End all Live Activities created by the design test action."""
+        recipients = self._test_recipients(recipient)
+        if not recipients:
+            raise ValueError("Kein Mobile-App-Benachrichtigungsdienst konfiguriert")
+        cleared = 0
+        for target in recipients:
+            service = target.removeprefix("notify.")
+            for tag in TEST_ACTIVITY_TAGS:
+                await self.hass.services.async_call(
+                    "notify",
+                    service,
+                    {"message": "clear_notification", "data": mobile_live_clear_data(tag)},
+                    blocking=True,
+                )
+                cleared += 1
+        return cleared
 
     @callback
     def _notification_action(self, event: Event) -> None:

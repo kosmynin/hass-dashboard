@@ -1,0 +1,44 @@
+send_test_designs:
+  name: Testdesigns senden
+  description: >-
+    Sendet echte Live Activities mit den verwendeten Meldungs-, Paket- und
+    Mediendesigns. Die Option „Alle“ startet viele Aktivitäten und sollte nur
+    gezielt zur visuellen Prüfung verwendet werden.
+  fields:
+    recipient:
+      name: Empfänger
+      description: >-
+        Optionaler Mobile-App-Notify-Dienst. Ohne Angabe werden die in den
+        Dashboard-Einstellungen konfigurierten Empfänger verwendet.
+      example: notify.mobile_app_mein_iphone
+      selector:
+        text:
+    group:
+      name: Designgruppe
+      description: Welche Testdesigns gesendet werden sollen.
+      default: all
+      required: true
+      selector:
+        select:
+          options:
+            - label: Alle Designs
+              value: all
+            - label: Meldungen
+              value: messages
+            - label: Pakete mit Fortschritt
+              value: parcels
+            - label: Medien
+              value: media
+
+clear_test_designs:
+  name: Testdesigns entfernen
+  description: Beendet alle durch „Testdesigns senden“ gestarteten Live Activities.
+  fields:
+    recipient:
+      name: Empfänger
+      description: >-
+        Optionaler Mobile-App-Notify-Dienst. Ohne Angabe werden die in den
+        Dashboard-Einstellungen konfigurierten Empfänger verwendet.
+      example: notify.mobile_app_mein_iphone
+      selector:
+        text:

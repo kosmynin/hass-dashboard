@@ -135,6 +135,10 @@ def test_parcel_contract_becomes_stable_german_live_alert():
     assert alert == {
         "fingerprint": "parcel:dhl:00340434161094000000",
         "message": "📦 Beispielshop: In Zustellung · heute 14:00–16:00",
+        "critical_text": "3/4",
+        "progress": 3,
+        "progress_max": 4,
+        "progress_bar_direction": "increasing",
     }
     presentation = live_activity_presentation(alert)
     assert presentation == {
@@ -143,6 +147,13 @@ def test_parcel_contract_becomes_stable_german_live_alert():
         "color": "#30D158",
     }
     assert live_activity_title(alert) == "Paket"
+    live_data = mobile_live_activity_data([alert], critical_text="1/1")
+    assert live_data["critical_text"] == "3/4"
+    assert live_data["progress"] == 3
+    assert live_data["progress_max"] == 4
+    assert live_data["progress_bar_color"] == "#30D158"
+    assert live_data["progress_bar_direction"] == "increasing"
+    assert live_data["background_color"] == "#101820"
     assert parcel_alert({"status": "delivered", "delivered": True}) is None
     assert "sd_popup=meldung-pakete" in alert_dashboard_url(alert)
 

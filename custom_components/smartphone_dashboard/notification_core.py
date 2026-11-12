@@ -34,6 +34,16 @@ PARCEL_STATUS_LABELS = {
     "unknown": "Status unbekannt",
 }
 
+PARCEL_STATUS_PROGRESS = {
+    "registered": 1,
+    "in_transit": 2,
+    "out_for_delivery": 3,
+    "at_pickup_point": 4,
+    "returning": 2,
+    "problem": 2,
+    "unknown": 1,
+}
+
 UPS_NORMAL_STATES = frozenset((
     "online", "on", "ok", "normal", "ol", "connected", "available", "mains", "line",
 ))
@@ -72,9 +82,9 @@ def is_battery_level_sensor(entity_id: str, attributes: Mapping[str, object]) ->
     named_battery = bool(re.search(r"battery|batterie", entity_id, re.IGNORECASE))
     return device_class == "battery" or (named_battery and unit in ("", "%", "percent"))
 
-def normalized_alerts(alerts: list[Mapping[str, object]]) -> list[dict[str, str]]:
+def normalized_alerts(alerts: list[Mapping[str, object]]) -> list[dict[str, object]]:
     """Return valid alerts once per fingerprint while preserving display order."""
-    result: list[dict[str, str]] = []
+    result: list[dict[str, object]] = []
     seen: set[str] = set()
     for alert in alerts:
         fingerprint = str(alert.get("fingerprint") or "").strip()
@@ -82,7 +92,19 @@ def normalized_alerts(alerts: list[Mapping[str, object]]) -> list[dict[str, str]
         if not fingerprint or not message or fingerprint in seen:
             continue
         seen.add(fingerprint)
-        result.append({"fingerprint": fingerprint, "message": message})
+        normalized: dict[str, object] = {
+            "fingerprint": fingerprint,
+            "message": message,
+        }
+        for key in (
+            "critical_text",
+            "progress",
+            "progress_max",
+            "progress_bar_direction",
+        ):
+            if key in alert:
+                normalized[key] = alert[key]
+        result.append(normalized)
     return result
 
 def alert_set_digest(alerts: list[Mapping[str, object]]) -> str:
@@ -101,7 +123,7 @@ def alert_content_digest(alerts: list[Mapping[str, object]]) -> str:
 def parcel_alert(
     parcel: Mapping[str, object],
     now: datetime | None = None,
-) -> dict[str, str] | None:
+) -> dict[str, object] | None:
     """Turn one canonical parcel-contract entry into a German active alert."""
     status = str(parcel.get("status") or "unknown").strip().casefold()
     if parcel.get("delivered") is True or status == "delivered":
@@ -151,9 +173,14 @@ def parcel_alert(
     identity = barcode or hashlib.sha256(
         "\0".join((carrier, sender, str(parcel.get("planned_from") or ""))).encode()
     ).hexdigest()[:16]
+    progress = PARCEL_STATUS_PROGRESS.get(status, PARCEL_STATUS_PROGRESS["unknown"])
     return {
         "fingerprint": f"parcel:{carrier.casefold()}:{identity}",
         "message": f"📦 {label}: {' · '.join(details)}",
+        "critical_text": f"{progress}/4",
+        "progress": progress,
+        "progress_max": 4,
+        "progress_bar_direction": "increasing",
     }
 
 def aggregate_alert_message(
@@ -269,7 +296,7 @@ def live_activity_message(alerts: list[Mapping[str, object]], limit: int = 4) ->
 
 def live_activity_entries(
     alerts: list[Mapping[str, object]], limit: int = 4
-) -> list[dict[str, str]]:
+) -> list[dict[str, object]]:
     """Split independent alerts into independently readable Live Activities."""
     normalized = normalized_alerts(alerts)
     maximum = max(1, limit)
@@ -364,14 +391,18 @@ def mobile_live_activity_data(
     presentation = live_activity_presentation(presentation_alert)
     destination = alert_dashboard_url(presentation_alert, recipient)
     color = presentation["color"]
+    fingerprint = str(presentation_alert.get("fingerprint") or "")
+    critical = str(
+        presentation_alert.get("critical_text") or critical_text or count
+    )
     data: dict[str, object] = {
         "tag": tag,
         "live_update": True,
-        "critical_text": critical_text or str(count),
+        "critical_text": critical,
         "notification_icon": presentation["icon"],
         "notification_icon_color": color,
         "color": color,
-        "background_color": "#1C1C1E",
+        "background_color": "#101820" if fingerprint.startswith("parcel:") else "#1C1C1E",
         "text_color": "#FFFFFF",
         "relevance_score": relevance_score if relevance_score is not None else (1.0 if urgent else 0.8),
         "sticky": True,
@@ -379,6 +410,20 @@ def mobile_live_activity_data(
         "url": destination,
         "clickAction": destination,
     }
+    try:
+        progress = int(presentation_alert.get("progress"))
+        progress_max = int(presentation_alert.get("progress_max"))
+    except (TypeError, ValueError):
+        progress = progress_max = 0
+    if progress_max > 0:
+        data.update({
+            "progress": min(progress_max, max(0, progress)),
+            "progress_max": progress_max,
+            "progress_bar_color": color,
+            "progress_bar_direction": str(
+                presentation_alert.get("progress_bar_direction") or "increasing"
+            ),
+        })
     if silent:
         data["silent"] = True
     return data

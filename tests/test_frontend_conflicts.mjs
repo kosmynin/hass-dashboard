@@ -580,10 +580,15 @@ const parcelSummary = parcelDashboard.views[0].sections[0].cards.find((card) => 
 assert.equal(parcelSummary.filter.include[0].entity_id, "sensor.parcel_aggregator_incoming_parcels");
 assert.equal(parcelSummary.filter.include[0].state, "> 0");
 assert.match(parcelSummary.filter.include[0].options.styles, /Pakete unterwegs/);
+assert.match(parcelSummary.filter.include[0].options.styles, /mdi:truck-delivery/);
+assert.match(parcelSummary.filter.include[0].options.styles, /design\.progress \* 25/);
 const parcelPopup = parcelDashboard.views[0].sections[0].cards.find((card) => card.hash === "#meldung-pakete");
 assert.equal(parcelPopup.name, "Pakete");
 assert.equal(parcelPopup.cards[0].type, "custom:button-card");
 assert.match(parcelPopup.cards[0].custom_fields.parcels, /out_for_delivery/);
+assert.match(parcelPopup.cards[0].custom_fields.parcels, /parcel-progress/);
+assert.match(parcelPopup.cards[0].custom_fields.parcels, /mdi:truck-delivery/);
+assert.match(parcelPopup.cards[0].extra_styles, /parcel-icon/);
 assert.deepEqual(parcelPopup.cards[1].entities, [
   { entity: "calendar.parcel_aggregator_deliveries", color: "#0A84FF" },
 ]);

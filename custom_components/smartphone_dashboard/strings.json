@@ -2,5 +2,31 @@
   "config": {
     "abort": {"already_configured": "Smartphone Dashboard is already configured."},
     "step": {"user": {"description": "Set up the backend, dashboard strategy and legacy helper compatibility together.", "title": "Set up Smartphone Dashboard"}}
+  },
+  "services": {
+    "send_test_designs": {
+      "name": "Send test designs",
+      "description": "Send real Live Activities for visually checking the notification, parcel and media designs.",
+      "fields": {
+        "recipient": {
+          "name": "Recipient",
+          "description": "Optional mobile app notify service. Configured dashboard recipients are used when empty."
+        },
+        "group": {
+          "name": "Design group",
+          "description": "Select the group of designs to send."
+        }
+      }
+    },
+    "clear_test_designs": {
+      "name": "Clear test designs",
+      "description": "End all Live Activities created by the test design action.",
+      "fields": {
+        "recipient": {
+          "name": "Recipient",
+          "description": "Optional mobile app notify service. Configured dashboard recipients are used when empty."
+        }
+      }
+    }
   }
 }

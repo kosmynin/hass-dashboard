@@ -2,5 +2,31 @@
   "config": {
     "abort": {"already_configured": "Smartphone Dashboard ist bereits eingerichtet."},
     "step": {"user": {"description": "Richtet Backend, Strategy-Frontend und die sichere Kompatibilität mit vorhandenen Meldungshelfern gemeinsam ein.", "title": "Smartphone Dashboard einrichten"}}
+  },
+  "services": {
+    "send_test_designs": {
+      "name": "Testdesigns senden",
+      "description": "Sendet echte Live Activities zur visuellen Prüfung der Meldungs-, Paket- und Mediendesigns.",
+      "fields": {
+        "recipient": {
+          "name": "Empfänger",
+          "description": "Optionaler Mobile-App-Notify-Dienst. Ohne Angabe werden die Dashboard-Empfänger verwendet."
+        },
+        "group": {
+          "name": "Designgruppe",
+          "description": "Legt fest, welche Testdesigns gesendet werden."
+        }
+      }
+    },
+    "clear_test_designs": {
+      "name": "Testdesigns entfernen",
+      "description": "Beendet alle durch die Testaktion gestarteten Live Activities.",
+      "fields": {
+        "recipient": {
+          "name": "Empfänger",
+          "description": "Optionaler Mobile-App-Notify-Dienst. Ohne Angabe werden die Dashboard-Empfänger verwendet."
+        }
+      }
+    }
   }
 }

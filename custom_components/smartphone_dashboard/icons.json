@@ -1,0 +1,6 @@
+{
+  "services": {
+    "send_test_designs": {"service": "mdi:cellphone-arrow-down"},
+    "clear_test_designs": {"service": "mdi:notification-clear-all"}
+  }
+}

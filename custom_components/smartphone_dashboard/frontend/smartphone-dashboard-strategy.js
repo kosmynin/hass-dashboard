@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.55";
+const STRATEGY_VERSION = "22.0.56";
 const CONFIG_VERSION = 26;
 
 const ACTIVE_ROOM_STYLES = `
@@ -297,13 +297,31 @@ const PARCEL_SUMMARY_STYLES = `\${(() => {
   const parcels = (Array.isArray(source?.attributes?.parcels) ? source.attributes.parcels : [])
     .filter((parcel) => parcel && parcel.delivered !== true && parcel.status !== 'delivered');
   const first = parcels[0] || {};
+  const designs = {
+    registered: { progress: 1, icon: 'mdi:package-variant-closed', color: '#0A84FF' },
+    in_transit: { progress: 2, icon: 'mdi:truck-fast', color: '#0A84FF' },
+    out_for_delivery: { progress: 3, icon: 'mdi:truck-delivery', color: 'var(--success-color)' },
+    at_pickup_point: { progress: 4, icon: 'mdi:package-variant', color: '#FF9F0A' },
+    returning: { progress: 2, icon: 'mdi:package-variant-remove', color: 'var(--error-color)' },
+    problem: { progress: 2, icon: 'mdi:alert-circle-outline', color: 'var(--error-color)' },
+    unknown: { progress: 1, icon: 'mdi:package-variant-closed', color: '#8E8E93' },
+  };
+  const design = designs[first.status] || designs.unknown;
   const name = card.querySelector('.bubble-name');
   const state = card.querySelector('.bubble-state');
   const icon = card.querySelector('.bubble-icon');
+  const background = card.querySelector('.bubble-button-background');
   if (name) name.innerText = parcels.length === 1 ? '1 Paket unterwegs' : parcels.length + ' Pakete unterwegs';
   if (state) state.innerText = [first.sender || first.carrier, labels[first.status] || labels.unknown].filter(Boolean).join(' · ');
-  const color = first.status === 'problem' ? 'var(--error-color)' : first.status === 'out_for_delivery' ? 'var(--success-color)' : '#0A84FF';
-  if (icon) icon.style.setProperty('color', color, 'important');
+  if (icon) {
+    icon.setAttribute('icon', design.icon);
+    icon.style.setProperty('color', design.color, 'important');
+  }
+  if (background) {
+    background.style.setProperty('width', (design.progress * 25) + '%', 'important');
+    background.style.setProperty('opacity', '0.14', 'important');
+    background.style.setProperty('background-color', design.color, 'important');
+  }
 })()}`;
 function batterySummaryStyles(threshold) {
   const limit = Number.isFinite(Number(threshold)) ? Number(threshold) : 6;
@@ -1006,10 +1024,15 @@ function parcelOverviewCard(entityIds) {
     custom_fields: {
       parcels: `[[[
         const ids = ${JSON.stringify(ids)};
-        const labels = {
-          registered: 'Registriert', in_transit: 'Unterwegs', out_for_delivery: 'In Zustellung',
-          at_pickup_point: 'Abholbereit', delivered: 'Zugestellt', returning: 'Rücksendung',
-          problem: 'Problem', unknown: 'Status unbekannt',
+        const designs = {
+          registered: { label: 'Registriert', step: 1, icon: 'mdi:package-variant-closed', color: '#0A84FF' },
+          in_transit: { label: 'Unterwegs', step: 2, icon: 'mdi:truck-fast', color: '#0A84FF' },
+          out_for_delivery: { label: 'In Zustellung', step: 3, icon: 'mdi:truck-delivery', color: '#30D158' },
+          at_pickup_point: { label: 'Abholbereit', step: 4, icon: 'mdi:package-variant', color: '#FF9F0A' },
+          delivered: { label: 'Zugestellt', step: 4, icon: 'mdi:package-check', color: '#30D158' },
+          returning: { label: 'Rücksendung', step: 2, icon: 'mdi:package-variant-remove', color: '#FF453A' },
+          problem: { label: 'Problem', step: 2, icon: 'mdi:alert-circle-outline', color: '#FF453A' },
+          unknown: { label: 'Status unbekannt', step: 1, icon: 'mdi:package-variant-closed', color: '#8E8E93' },
         };
         const escape = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({
           '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -1027,7 +1050,8 @@ function parcelOverviewCard(entityIds) {
         return parcels.map((parcel) => {
           const sender = escape(parcel.sender || 'Unbekannter Absender');
           const carrier = escape(parcel.carrier || 'Paketdienst');
-          const status = escape(labels[parcel.status] || labels.unknown);
+          const design = designs[parcel.status] || designs.unknown;
+          const status = escape(design.label);
           const point = parcel.status === 'at_pickup_point' && parcel.pickup_point
             ? ' · ' + escape(parcel.pickup_point) : '';
           let planned = '';
@@ -1042,12 +1066,17 @@ function parcelOverviewCard(entityIds) {
               planned = '<div class="parcel-time">' + day + ' · ' + start + end + '</div>';
             }
           }
-          const content = '<div class="parcel-copy"><div class="parcel-name">' + sender +
-            '</div><div class="parcel-meta">' + carrier + ' · ' + status + point + '</div>' + planned + '</div>';
+          const progress = Math.max(1, Math.min(4, design.step)) * 25;
+          const content = '<div class="parcel-icon" style="--parcel-color:' + design.color + '">' +
+            '<ha-icon icon="' + design.icon + '"></ha-icon></div>' +
+            '<div class="parcel-copy"><div class="parcel-name">' + sender +
+            '</div><div class="parcel-meta">' + carrier + ' · ' + status + point + '</div>' + planned +
+            '<div class="parcel-progress" aria-label="Fortschritt ' + progress + ' Prozent">' +
+            '<span style="width:' + progress + '%;background:' + design.color + '"></span></div></div>';
           const url = /^https?:\\/\\//i.test(String(parcel.url || '')) ? String(parcel.url) : '';
           return url
-            ? '<a class="parcel-row" href="' + escape(url) + '" target="_blank" rel="noopener">' + content + '<ha-icon icon="mdi:open-in-new"></ha-icon></a>'
-            : '<div class="parcel-row">' + content + '<ha-icon icon="mdi:package-variant"></ha-icon></div>';
+            ? '<a class="parcel-row" href="' + escape(url) + '" target="_blank" rel="noopener">' + content + '<ha-icon class="parcel-open" icon="mdi:open-in-new"></ha-icon></a>'
+            : '<div class="parcel-row">' + content + '</div>';
         }).join('');
       ]]]`,
     },
@@ -1060,10 +1089,14 @@ function parcelOverviewCard(entityIds) {
     },
     extra_styles: `
       .parcel-row { display:flex; align-items:center; gap:12px; padding:12px 14px; margin-top:8px; border-radius:20px; background:var(--secondary-background-color); color:var(--primary-text-color); text-decoration:none; }
+      .parcel-icon { width:44px; height:44px; border-radius:50%; display:grid; place-items:center; flex:0 0 44px; color:var(--parcel-color); background:color-mix(in srgb, var(--parcel-color) 18%, var(--card-background-color)); }
+      .parcel-icon ha-icon { width:25px; height:25px; color:inherit; }
       .parcel-copy { flex:1; min-width:0; }
       .parcel-name { font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
       .parcel-meta, .parcel-time, .parcel-empty { margin-top:3px; color:var(--secondary-text-color); font-size:13px; line-height:1.35; }
-      .parcel-row ha-icon { color:#0A84FF; flex:0 0 auto; }
+      .parcel-progress { height:5px; margin-top:9px; overflow:hidden; border-radius:999px; background:color-mix(in srgb, var(--secondary-text-color) 18%, transparent); }
+      .parcel-progress span { display:block; height:100%; border-radius:inherit; }
+      .parcel-row .parcel-open { color:#0A84FF; flex:0 0 auto; }
       .parcel-empty { padding:10px 2px; }
     `,
   };
