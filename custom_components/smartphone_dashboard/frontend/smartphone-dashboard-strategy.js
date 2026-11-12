@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.56";
+const STRATEGY_VERSION = "22.0.57";
 const CONFIG_VERSION = 26;
 
 const ACTIVE_ROOM_STYLES = `
@@ -1075,7 +1075,7 @@ function parcelOverviewCard(entityIds) {
             '<span style="width:' + progress + '%;background:' + design.color + '"></span></div></div>';
           const url = /^https?:\\/\\//i.test(String(parcel.url || '')) ? String(parcel.url) : '';
           return url
-            ? '<a class="parcel-row" href="' + escape(url) + '" target="_blank" rel="noopener">' + content + '<ha-icon class="parcel-open" icon="mdi:open-in-new"></ha-icon></a>'
+            ? '<a class="parcel-row" href="' + escape(url) + '" target="_blank" rel="noopener">' + content + '<span class="parcel-open" aria-hidden="true">↗</span></a>'
             : '<div class="parcel-row">' + content + '</div>';
         }).join('');
       ]]]`,
@@ -1096,7 +1096,7 @@ function parcelOverviewCard(entityIds) {
       .parcel-meta, .parcel-time, .parcel-empty { margin-top:3px; color:var(--secondary-text-color); font-size:13px; line-height:1.35; }
       .parcel-progress { height:5px; margin-top:9px; overflow:hidden; border-radius:999px; background:color-mix(in srgb, var(--secondary-text-color) 18%, transparent); }
       .parcel-progress span { display:block; height:100%; border-radius:inherit; }
-      .parcel-row .parcel-open { color:#0A84FF; flex:0 0 auto; }
+      .parcel-row .parcel-open { width:22px; height:22px; display:grid; place-items:center; align-self:center; color:#0A84FF; flex:0 0 22px; font-size:20px; font-weight:700; line-height:1; }
       .parcel-empty { padding:10px 2px; }
     `,
   };
