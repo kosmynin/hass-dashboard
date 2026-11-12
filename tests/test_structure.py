@@ -10,7 +10,7 @@ def test_manifest_and_hacs():
     hacs = json.loads((ROOT / "hacs.json").read_text())
     assert manifest["domain"] == "smartphone_dashboard"
     assert manifest["config_flow"] is True
-    assert manifest["version"] == "22.0.52"
+    assert manifest["version"] == "22.0.53"
     assert hacs["name"] == "Smartphone Dashboard"
     assert hacs["zip_release"] is True
     assert hacs["filename"] == "smartphone_dashboard.zip"
@@ -78,8 +78,9 @@ def test_backend_notifications_are_active_and_legacy_yaml_is_not():
     ).read_text()
     assert "asyncio.Queue" in runtime and "blocking=True" in runtime
     assert "alert_set_digest" in runtime and "valid_nina_glob" in runtime
-    assert 'LIVE_ACTIVITY_PAYLOAD_VERSION = "4"' in runtime
-    assert 'live_payload_digest = f"{LIVE_ACTIVITY_PAYLOAD_VERSION}:{digest}"' in runtime
+    assert 'LIVE_ACTIVITY_PAYLOAD_VERSION = "5"' in runtime
+    assert "alert_content_digest(alerts)" in runtime
+    assert "same_alert_set" in runtime and "reuse_existing" in runtime
     assert "entry.async_create_background_task" in runtime
     assert "hass.async_create_task" not in runtime
     assert not list((COMPONENT / "compatibility").glob("*notifications_package.yaml"))

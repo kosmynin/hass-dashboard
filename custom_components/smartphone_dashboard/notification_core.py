@@ -78,6 +78,14 @@ def alert_set_digest(alerts: list[Mapping[str, object]]) -> str:
     fingerprints = sorted(alert["fingerprint"] for alert in normalized_alerts(alerts))
     return hashlib.sha256("\0".join(fingerprints).encode()).hexdigest()[:32] if fingerprints else ""
 
+def alert_content_digest(alerts: list[Mapping[str, object]]) -> str:
+    """Track displayed values separately from the stable alert identity."""
+    normalized = normalized_alerts(alerts)
+    content = "\0".join(
+        f"{alert['fingerprint']}\n{alert['message']}" for alert in normalized
+    )
+    return hashlib.sha256(content.encode()).hexdigest()[:32] if content else ""
+
 def aggregate_alert_message(
     alerts: list[Mapping[str, object]],
     bullet: str = "• ",
@@ -239,6 +247,20 @@ def live_activity_presentation(alert: Mapping[str, object]) -> dict[str, str]:
             category, ("mdi:bell-badge-outline", "#FF9F0A")
         )
     return {"message": message, "icon": icon, "color": color}
+
+def live_activity_title(alert: Mapping[str, object]) -> str:
+    """Return a short German category title for the Live Activity header."""
+    category = str(alert.get("fingerprint") or "").partition(":")[0].casefold()
+    return {
+        "battery": "Batterie",
+        "contact": "Kontakt",
+        "co2": "CO₂",
+        "waste": "Abfall",
+        "ups": "USV",
+        "frost": "Frost",
+        "nina": "Warnung",
+        "summary": "Meldungen",
+    }.get(category, "Meldung")
 
 def mobile_live_activity_data(
     alerts: list[Mapping[str, object]],

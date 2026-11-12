@@ -16,12 +16,14 @@ from homeassistant.helpers import area_registry as ar, device_registry as dr, en
 from .config_manager import ConfigManager
 from .notification_core import (
     aggregate_alert_message,
+    alert_content_digest,
     alert_set_digest,
     area_entity_label,
     dashboard_entity_enabled,
     is_battery_level_sensor,
     live_activity_entries,
     live_activity_presentation,
+    live_activity_title,
     media_activity_presentation,
     media_dashboard_url,
     media_live_activity_tag,
@@ -44,7 +46,7 @@ DIGEST_PREFIX = "digest:"
 CLEAR_DIGEST = "clear"
 MOBILE_ACTION_EVENT = "mobile_app_notification_action"
 LIVE_ACTIVITY_RENEW_AFTER = 7 * 60 * 60
-LIVE_ACTIVITY_PAYLOAD_VERSION = "4"
+LIVE_ACTIVITY_PAYLOAD_VERSION = "5"
 SNOOZE_SECONDS = 30 * 60
 _LOGGER = logging.getLogger(__name__)
 LEGACY_TO_CONFIG = {
@@ -622,12 +624,20 @@ class NotificationCoordinator:
                     muted = bool(digest) and muted_digest_map.get(recipient) == digest
                     if alerts:
                         if mobile_app and not snoozed and not muted:
-                            live_payload_digest = f"{LIVE_ACTIVITY_PAYLOAD_VERSION}:{digest}"
+                            content_digest = alert_content_digest(alerts)
+                            live_payload_digest = (
+                                f"{LIVE_ACTIVITY_PAYLOAD_VERSION}:{digest}:{content_digest}"
+                            )
                             previous_live_tags = live_tag_map.get(recipient, [])
                             live_started = live_started_map.get(recipient, 0)
+                            previous_live_payload = live_digest_map.get(recipient, "")
+                            previous_live_parts = previous_live_payload.split(":", 2)
+                            same_alert_set = (
+                                len(previous_live_parts) >= 2
+                                and previous_live_parts[1] == digest
+                            )
                             renewal_due = (
-                                live_digest_map.get(recipient) == live_payload_digest
-                                and live_started > 0
+                                live_started > 0
                                 and now_epoch - live_started >= LIVE_ACTIVITY_RENEW_AFTER
                             )
                             live_due = (
@@ -635,8 +645,14 @@ class NotificationCoordinator:
                                 or renewal_due
                             )
                             if live_due:
+                                entries = live_activity_entries(alerts)
+                                reuse_existing = (
+                                    same_alert_set
+                                    and len(previous_live_tags) == len(entries)
+                                    and not renewal_due
+                                )
                                 clear_succeeded = True
-                                for old_tag in previous_live_tags:
+                                for old_tag in ([] if reuse_existing else previous_live_tags):
                                     clear_key = (recipient, f"replace-live:{old_tag}")
                                     active_retry_keys.add(clear_key)
                                     if self._retry_after.get(clear_key, 0) > time.monotonic():
@@ -658,30 +674,38 @@ class NotificationCoordinator:
                                         errors.append(f"{recipient}: Alte Live Activity entfernen: {err}")
 
                                 if clear_succeeded:
-                                    live_digest_map.pop(recipient, None)
-                                    live_tag_map.pop(recipient, None)
-                                    live_started_map.pop(recipient, None)
-                                    entries = live_activity_entries(alerts)
-                                    new_live_tags = self._next_live_tags(
-                                        previous_live_tags, len(entries)
-                                    )
+                                    if reuse_existing:
+                                        new_live_tags = previous_live_tags
+                                    else:
+                                        live_digest_map.pop(recipient, None)
+                                        live_tag_map.pop(recipient, None)
+                                        live_started_map.pop(recipient, None)
+                                        new_live_tags = self._next_live_tags(
+                                            previous_live_tags, len(entries)
+                                        )
                                     sent_tags: list[str] = []
                                     for index, (entry, live_tag) in enumerate(
                                         zip(entries, new_live_tags, strict=True), start=1
                                     ):
-                                        live_key = (recipient, f"live:{live_tag}:{digest}")
+                                        live_key = (
+                                            recipient,
+                                            f"live:{live_tag}:{live_payload_digest}",
+                                        )
                                         active_retry_keys.add(live_key)
                                         urgent = entry["fingerprint"].startswith("nina:")
                                         presentation = live_activity_presentation(entry)
                                         live_payload = {
-                                            "title": NOTIFICATION_TITLE,
+                                            "title": (
+                                                f"{NOTIFICATION_TITLE} – "
+                                                f"{live_activity_title(entry)}"
+                                            ),
                                             "message": presentation["message"],
                                             "data": mobile_live_activity_data(
                                                 [entry],
                                                 tag=live_tag,
                                                 silent=bool(live_started or previous_live_tags),
                                                 recipient=recipient,
-                                                critical_text=f"{index}/{len(alerts)}",
+                                                critical_text=f"{index}/{len(entries)}",
                                                 relevance_score=(
                                                     1.0 if urgent
                                                     else max(0.55, 0.9 - ((index - 1) * 0.05))
@@ -703,10 +727,17 @@ class NotificationCoordinator:
                                             self._retry_after[live_key] = time.monotonic() + min(3600, 30 * (2 ** (count - 1)))
                                             errors.append(f"{recipient}: Live Activity {index}: {err}")
                                     if sent_tags:
-                                        live_tag_map[recipient] = sent_tags
+                                        live_tag_map[recipient] = (
+                                            previous_live_tags
+                                            if reuse_existing else sent_tags
+                                        )
                                     if len(sent_tags) == len(entries):
                                         live_digest_map[recipient] = live_payload_digest
-                                        live_started_map[recipient] = now_epoch
+                                        live_started_map[recipient] = (
+                                            live_started
+                                            if reuse_existing and live_started > 0
+                                            else now_epoch
+                                        )
 
                         if mobile_app and (snoozed or muted):
                             live_tags = live_tag_map.get(recipient, [])

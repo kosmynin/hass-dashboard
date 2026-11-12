@@ -10,6 +10,7 @@ ups_state_is_alert = CORE["ups_state_is_alert"]
 waste_collection_details = CORE["waste_collection_details"]
 normalized_alerts = CORE["normalized_alerts"]
 alert_set_digest = CORE["alert_set_digest"]
+alert_content_digest = CORE["alert_content_digest"]
 aggregate_alert_message = CORE["aggregate_alert_message"]
 mobile_notification_data = CORE["mobile_notification_data"]
 mobile_clear_data = CORE["mobile_clear_data"]
@@ -20,6 +21,7 @@ mobile_live_clear_data = CORE["mobile_live_clear_data"]
 live_activity_message = CORE["live_activity_message"]
 live_activity_entries = CORE["live_activity_entries"]
 live_activity_presentation = CORE["live_activity_presentation"]
+live_activity_title = CORE["live_activity_title"]
 media_activity_presentation = CORE["media_activity_presentation"]
 media_dashboard_url = CORE["media_dashboard_url"]
 media_live_activity_tag = CORE["media_live_activity_tag"]
@@ -95,6 +97,11 @@ def test_aggregate_alerts_are_deduplicated_and_digest_is_order_independent():
     assert alert_set_digest(alerts) == alert_set_digest(list(reversed(alerts)))
     assert alert_set_digest([{"fingerprint": "battery:a", "message": "Neuer Wert"}]) == alert_set_digest(
         [{"fingerprint": "battery:a", "message": "Alter Wert"}]
+    )
+    assert alert_content_digest(
+        [{"fingerprint": "co2:a", "message": "Wohnzimmer: 1200 ppm"}]
+    ) != alert_content_digest(
+        [{"fingerprint": "co2:a", "message": "Wohnzimmer: 1450 ppm"}]
     )
 
 def test_aggregate_message_and_iphone_replacement_payloads():
@@ -186,6 +193,8 @@ def test_live_activity_uses_category_icons_colors_and_plain_text():
         "icon": "mdi:molecule-co2",
         "color": "#A2AA52",
     }
+    assert live_activity_title({"fingerprint": "co2:sensor.air_quality"}) == "CO₂"
+    assert live_activity_title({"fingerprint": "waste:sensor.abfall"}) == "Abfall"
     waste = live_activity_presentation({
         "fingerprint": "waste:sensor.abfall:2026-11-04",
         "message": "🗑️ Gelbe Tonne: morgen · 04.11.",

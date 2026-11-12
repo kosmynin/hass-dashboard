@@ -89,6 +89,10 @@ bei Änderungen aktualisiert und nach vollständiger Entwarnung entfernt.
 Optionale nicht mobile Notify-Dienste erhalten ebenfalls nur eine
 Sammelmeldung. Für `notify.mobile_app_*` pflegt die Integration bis zu vier
 getrennte Warnungs-Live-Activities mit kategoriespezifischen Icons und Farben.
+Messwertänderungen wie ein neuer CO₂-Wert aktualisieren dabei dieselbe Live
+Activity still und sofort; die stabile Meldungsidentität verhindert unnötige
+Neustarts. Der Kopf benennt die Kategorie kompakt, etwa
+**Homeassistant – CO₂** oder **Homeassistant – Abfall**.
 Sie öffnen beim Antippen direkt das passende Detail-Pop-up für Batterien,
 Kontakte, CO₂, Abfall, USV, Frost oder NINA; zusammengefasste Restmeldungen
 öffnen den gemeinsamen Meldungsdialog. Der `sd_popup`-Fallback stellt den
