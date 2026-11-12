@@ -116,20 +116,24 @@ def parcel_alert(
     if status == "at_pickup_point" and pickup_point:
         details.append(pickup_point)
 
+    reference = now or datetime.now().astimezone()
+    if reference.tzinfo is None:
+        reference = reference.astimezone()
+    reference_timezone = reference.tzinfo
+
     def parse_timestamp(value: object) -> datetime | None:
         if not value:
             return None
         try:
             parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
             if parsed.tzinfo is None:
-                parsed = parsed.astimezone()
-            return parsed.astimezone()
+                return parsed.replace(tzinfo=reference_timezone)
+            return parsed.astimezone(reference_timezone)
         except (TypeError, ValueError):
             return None
 
     planned_from = parse_timestamp(parcel.get("planned_from"))
     planned_to = parse_timestamp(parcel.get("planned_to"))
-    reference = (now or datetime.now().astimezone()).astimezone()
     if planned_from:
         day_delta = (planned_from.date() - reference.date()).days
         day = (

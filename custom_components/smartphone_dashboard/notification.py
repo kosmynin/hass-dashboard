@@ -13,6 +13,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_STATE_CHANGED
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers import area_registry as ar, device_registry as dr, entity_registry as er
+from homeassistant.util import dt as dt_util
 from .config_manager import ConfigManager
 from .notification_core import (
     aggregate_alert_message,
@@ -241,7 +242,7 @@ class NotificationCoordinator:
         battery_exclusions = {x.strip() for x in self._state("input_text.smartphone_batterie_ausnahmen").split(",") if x.strip()}
         contact_minutes = self._number("input_number.smartphone_kontakt_minuten", DEFAULTS["contact"], 1, 1440)
         co2_limit = self._number("input_number.smartphone_co2_grenzwert", DEFAULTS["co2"], 400, 5000)
-        now = datetime.now().astimezone()
+        now = dt_util.now()
         for state in self.hass.states.async_all():
             entity_id, attrs = state.entity_id, state.attributes
             if self._enabled("batterien") and entity_id.startswith("sensor.") and entity_id not in battery_exclusions and self._dashboard_entity_enabled(entity_id, allow_hidden=True) and is_battery_level_sensor(entity_id, attrs):
