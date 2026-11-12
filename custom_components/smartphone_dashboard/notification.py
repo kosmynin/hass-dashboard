@@ -4,6 +4,7 @@ import asyncio
 from datetime import datetime, timedelta
 import fnmatch
 import hashlib
+import json
 import logging
 import math
 import re
@@ -48,7 +49,11 @@ DIGEST_PREFIX = "digest:"
 CLEAR_DIGEST = "clear"
 MOBILE_ACTION_EVENT = "mobile_app_notification_action"
 LIVE_ACTIVITY_RENEW_AFTER = 7 * 60 * 60
-LIVE_ACTIVITY_PAYLOAD_VERSION = "6"
+LIVE_ACTIVITY_CONTENT_UPDATE_INTERVAL = 30 * 60
+LIVE_ACTIVITY_PAYLOAD_VERSION = "7"
+MOBILE_PUSH_DUPLICATE_INTERVAL = 10 * 60
+MOBILE_PUSH_HOURLY_LIMIT = 60
+MOBILE_PUSH_DAILY_LIMIT = 200
 SNOOZE_SECONDS = 30 * 60
 _LOGGER = logging.getLogger(__name__)
 TEST_ACTIVITY_TAGS = (
@@ -93,6 +98,8 @@ class NotificationCoordinator:
         self._retry_count = {}
         self._persistent_message: str | None = None
         self._pending_actions: list[dict[str, str]] = []
+        self._mobile_send_times: dict[str, list[float]] = {}
+        self._mobile_payload_sent_at: dict[tuple[str, str], float] = {}
 
     async def async_start(self) -> None:
         if self._worker: return
@@ -163,6 +170,44 @@ class NotificationCoordinator:
             if item.startswith("notify.") and item != "notify.persistent_notification"
         ]
 
+    async def _async_notify(
+        self, recipient: str, service: str, payload: dict[str, Any]
+    ) -> bool:
+        """Send once through a local circuit breaker before Companion limits apply."""
+        if not recipient.startswith("notify.mobile_app_"):
+            await self.hass.services.async_call(
+                "notify", service, payload, blocking=True
+            )
+            return True
+        now = time.monotonic()
+        signature = hashlib.sha256(
+            json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str).encode()
+        ).hexdigest()
+        signature_key = (recipient, signature)
+        last_sent = self._mobile_payload_sent_at.get(signature_key, 0)
+        if last_sent and now - last_sent < MOBILE_PUSH_DUPLICATE_INTERVAL:
+            return False
+        history = [
+            sent_at for sent_at in self._mobile_send_times.get(recipient, [])
+            if now - sent_at < 24 * 60 * 60
+        ]
+        recent_hour = sum(now - sent_at < 60 * 60 for sent_at in history)
+        if recent_hour >= MOBILE_PUSH_HOURLY_LIMIT or len(history) >= MOBILE_PUSH_DAILY_LIMIT:
+            raise RuntimeError(
+                "Lokaler Push-Schutz aktiv: zu viele Companion-Aktualisierungen"
+            )
+        await self.hass.services.async_call(
+            "notify", service, payload, blocking=True
+        )
+        history.append(now)
+        self._mobile_send_times[recipient] = history
+        self._mobile_payload_sent_at[signature_key] = now
+        self._mobile_payload_sent_at = {
+            key: sent_at for key, sent_at in self._mobile_payload_sent_at.items()
+            if now - sent_at < MOBILE_PUSH_DUPLICATE_INTERVAL
+        }
+        return True
+
     def _test_alert_designs(self, group: str) -> list[tuple[str, dict[str, object]]]:
         """Return deterministic samples for visually checking every alert design."""
         designs: list[tuple[str, dict[str, object]]] = []
@@ -227,8 +272,8 @@ class NotificationCoordinator:
             service = target.removeprefix("notify.")
             for slug, alert in self._test_alert_designs(group):
                 presentation = live_activity_presentation(alert)
-                await self.hass.services.async_call(
-                    "notify",
+                await self._async_notify(
+                    target,
                     service,
                     {
                         "title": f"{NOTIFICATION_TITLE} – {live_activity_title(alert)}",
@@ -240,7 +285,6 @@ class NotificationCoordinator:
                             relevance_score=0.2,
                         ),
                     },
-                    blocking=True,
                 )
                 sent += 1
             if group in ("all", "media"):
@@ -251,8 +295,8 @@ class NotificationCoordinator:
                     "color": "#5E5CE6",
                     "url": media_dashboard_url("media_player.test"),
                 }
-                await self.hass.services.async_call(
-                    "notify",
+                await self._async_notify(
+                    target,
                     service,
                     {
                         "title": f"{NOTIFICATION_TITLE} – Wohnzimmer",
@@ -262,7 +306,6 @@ class NotificationCoordinator:
                             tag="smartphone_dashboard_test_media",
                         ),
                     },
-                    blocking=True,
                 )
                 sent += 1
         return sent
@@ -276,11 +319,10 @@ class NotificationCoordinator:
         for target in recipients:
             service = target.removeprefix("notify.")
             for tag in TEST_ACTIVITY_TAGS:
-                await self.hass.services.async_call(
-                    "notify",
+                await self._async_notify(
+                    target,
                     service,
                     {"message": "clear_notification", "data": mobile_live_clear_data(tag)},
-                    blocking=True,
                 )
                 cleared += 1
         return cleared
@@ -594,10 +636,9 @@ class NotificationCoordinator:
                 if self._retry_after.get(clear_key, 0) > time.monotonic():
                     continue
                 try:
-                    await self.hass.services.async_call(
-                        "notify", service,
+                    await self._async_notify(
+                        recipient, service,
                         {"message": "clear_notification", "data": mobile_live_clear_data(tag)},
-                        blocking=True,
                     )
                     tags.pop(entity_id, None)
                     digests.pop(entity_id, None)
@@ -620,10 +661,9 @@ class NotificationCoordinator:
                     if self._retry_after.get(clear_key, 0) > time.monotonic():
                         continue
                     try:
-                        await self.hass.services.async_call(
-                            "notify", service,
+                        await self._async_notify(
+                            recipient, service,
                             {"message": "clear_notification", "data": mobile_live_clear_data(tag)},
-                            blocking=True,
                         )
                         tag = self._next_media_tag(entity_id, tag)
                         tags[entity_id] = tag
@@ -650,9 +690,7 @@ class NotificationCoordinator:
                     "data": mobile_media_activity_data(entry, tag=tag, silent=True),
                 }
                 try:
-                    await self.hass.services.async_call(
-                        "notify", service, payload, blocking=True
-                    )
+                    await self._async_notify(recipient, service, payload)
                     tags[entity_id] = tag
                     digests[entity_id] = entry["digest"]
                     started.setdefault(entity_id, now_epoch)
@@ -714,6 +752,13 @@ class NotificationCoordinator:
                     key: float(value)
                     for key, value in notification_state.get(
                         "live_started_at_by_recipient", {}
+                    ).items()
+                    if isinstance(key, str) and isinstance(value, (int, float))
+                }
+                live_updated_map = {
+                    key: float(value)
+                    for key, value in notification_state.get(
+                        "live_updated_at_by_recipient", {}
                     ).items()
                     if isinstance(key, str) and isinstance(value, (int, float))
                 }
@@ -813,6 +858,7 @@ class NotificationCoordinator:
                             )
                             previous_live_tags = live_tag_map.get(recipient, [])
                             live_started = live_started_map.get(recipient, 0)
+                            live_updated = live_updated_map.get(recipient, 0)
                             previous_live_payload = live_digest_map.get(recipient, "")
                             previous_live_parts = previous_live_payload.split(":", 2)
                             same_alert_set = (
@@ -823,9 +869,19 @@ class NotificationCoordinator:
                                 live_started > 0
                                 and now_epoch - live_started >= LIVE_ACTIVITY_RENEW_AFTER
                             )
+                            content_changed = (
+                                previous_live_payload != live_payload_digest
+                            )
+                            content_update_due = (
+                                live_updated <= 0
+                                or now_epoch - live_updated
+                                >= LIVE_ACTIVITY_CONTENT_UPDATE_INTERVAL
+                            )
                             live_due = (
-                                live_digest_map.get(recipient) != live_payload_digest
-                                or renewal_due
+                                renewal_due
+                                or not previous_live_tags
+                                or not same_alert_set
+                                or (content_changed and content_update_due)
                             )
                             if live_due:
                                 entries = live_activity_entries(alerts)
@@ -842,10 +898,9 @@ class NotificationCoordinator:
                                         clear_succeeded = False
                                         continue
                                     try:
-                                        await self.hass.services.async_call(
-                                            "notify", service,
+                                        await self._async_notify(
+                                            recipient, service,
                                             {"message": "clear_notification", "data": mobile_live_clear_data(old_tag)},
-                                            blocking=True,
                                         )
                                         self._retry_after.pop(clear_key, None)
                                         self._retry_count.pop(clear_key, None)
@@ -863,6 +918,7 @@ class NotificationCoordinator:
                                         live_digest_map.pop(recipient, None)
                                         live_tag_map.pop(recipient, None)
                                         live_started_map.pop(recipient, None)
+                                        live_updated_map.pop(recipient, None)
                                         new_live_tags = self._next_live_tags(
                                             previous_live_tags, len(entries)
                                         )
@@ -898,8 +954,8 @@ class NotificationCoordinator:
                                         if self._retry_after.get(live_key, 0) > time.monotonic():
                                             continue
                                         try:
-                                            await self.hass.services.async_call(
-                                                "notify", service, live_payload, blocking=True
+                                            await self._async_notify(
+                                                recipient, service, live_payload
                                             )
                                             sent_tags.append(live_tag)
                                             self._retry_after.pop(live_key, None)
@@ -921,6 +977,7 @@ class NotificationCoordinator:
                                             if reuse_existing and live_started > 0
                                             else now_epoch
                                         )
+                                        live_updated_map[recipient] = now_epoch
 
                         if mobile_app and (snoozed or muted):
                             live_tags = live_tag_map.get(recipient, [])
@@ -933,10 +990,9 @@ class NotificationCoordinator:
                                         all_cleared = False
                                         continue
                                     try:
-                                        await self.hass.services.async_call(
-                                            "notify", service,
+                                        await self._async_notify(
+                                            recipient, service,
                                             {"message": "clear_notification", "data": mobile_live_clear_data(live_tag)},
-                                            blocking=True,
                                         )
                                         self._retry_after.pop(clear_key, None)
                                         self._retry_count.pop(clear_key, None)
@@ -950,6 +1006,7 @@ class NotificationCoordinator:
                                     live_digest_map.pop(recipient, None)
                                     live_tag_map.pop(recipient, None)
                                     live_started_map.pop(recipient, None)
+                                    live_updated_map.pop(recipient, None)
 
                         if mobile_app:
                             if delivered:
@@ -957,10 +1014,9 @@ class NotificationCoordinator:
                                 active_retry_keys.add(clear_key)
                                 if self._retry_after.get(clear_key, 0) <= time.monotonic():
                                     try:
-                                        await self.hass.services.async_call(
-                                            "notify", service,
+                                        await self._async_notify(
+                                            recipient, service,
                                             {"message": "clear_notification", "data": mobile_clear_data()},
-                                            blocking=True,
                                         )
                                         delivered_map[recipient] = []
                                         self._retry_after.pop(clear_key, None)
@@ -985,9 +1041,7 @@ class NotificationCoordinator:
                                     ),
                                 }
                                 try:
-                                    await self.hass.services.async_call(
-                                        "notify", service, payload, blocking=True
-                                    )
+                                    await self._async_notify(recipient, service, payload)
                                     delivered_map[recipient] = [digest_token, *fingerprints]
                                     self._retry_after.pop(retry_key, None)
                                     self._retry_count.pop(retry_key, None)
@@ -1004,16 +1058,16 @@ class NotificationCoordinator:
                             live_digest_map.pop(recipient, None)
                             live_tag_map.pop(recipient, None)
                             live_started_map.pop(recipient, None)
+                            live_updated_map.pop(recipient, None)
                             continue
                         if delivered:
                             clear_key = (recipient, CLEAR_DIGEST)
                             active_retry_keys.add(clear_key)
                             if self._retry_after.get(clear_key, 0) <= time.monotonic():
                                 try:
-                                    await self.hass.services.async_call(
-                                        "notify", service,
+                                    await self._async_notify(
+                                        recipient, service,
                                         {"message": "clear_notification", "data": mobile_clear_data()},
-                                        blocking=True,
                                     )
                                     delivered_map[recipient] = []
                                     self._retry_after.pop(clear_key, None)
@@ -1033,10 +1087,9 @@ class NotificationCoordinator:
                                     all_cleared = False
                                     continue
                                 try:
-                                    await self.hass.services.async_call(
-                                        "notify", service,
+                                    await self._async_notify(
+                                        recipient, service,
                                         {"message": "clear_notification", "data": mobile_live_clear_data(live_tag)},
-                                        blocking=True,
                                     )
                                     self._retry_after.pop(live_clear_key, None)
                                     self._retry_count.pop(live_clear_key, None)
@@ -1050,6 +1103,7 @@ class NotificationCoordinator:
                                 live_digest_map.pop(recipient, None)
                                 live_tag_map.pop(recipient, None)
                                 live_started_map.pop(recipient, None)
+                                live_updated_map.pop(recipient, None)
 
                 removed_recipients = (
                     set(stored_deliveries) | set(live_tag_map)
@@ -1059,6 +1113,7 @@ class NotificationCoordinator:
                         live_digest_map.pop(recipient, None)
                         live_tag_map.pop(recipient, None)
                         live_started_map.pop(recipient, None)
+                        live_updated_map.pop(recipient, None)
                         continue
                     service = recipient.removeprefix("notify.")
                     delivered = stored_deliveries.get(recipient, [])
@@ -1067,10 +1122,9 @@ class NotificationCoordinator:
                         active_retry_keys.add(clear_key)
                         if self._retry_after.get(clear_key, 0) <= time.monotonic():
                             try:
-                                await self.hass.services.async_call(
-                                    "notify", service,
+                                await self._async_notify(
+                                    recipient, service,
                                     {"message": "clear_notification", "data": mobile_clear_data()},
-                                    blocking=True,
                                 )
                                 self._retry_after.pop(clear_key, None)
                                 self._retry_count.pop(clear_key, None)
@@ -1090,10 +1144,9 @@ class NotificationCoordinator:
                                 all_cleared = False
                                 continue
                             try:
-                                await self.hass.services.async_call(
-                                    "notify", service,
+                                await self._async_notify(
+                                    recipient, service,
                                     {"message": "clear_notification", "data": mobile_live_clear_data(live_tag)},
-                                    blocking=True,
                                 )
                                 self._retry_after.pop(clear_key, None)
                                 self._retry_count.pop(clear_key, None)
@@ -1107,6 +1160,7 @@ class NotificationCoordinator:
                             live_digest_map.pop(recipient, None)
                             live_tag_map.pop(recipient, None)
                             live_started_map.pop(recipient, None)
+                            live_updated_map.pop(recipient, None)
                 await self._sync_media_live_activities(
                     media_entries,
                     recipients,
@@ -1140,6 +1194,7 @@ class NotificationCoordinator:
                         "live_digest_by_recipient": live_digest_map,
                         "live_tag_by_recipient": live_tag_map,
                         "live_started_at_by_recipient": live_started_map,
+                        "live_updated_at_by_recipient": live_updated_map,
                         "media_digest_by_recipient": media_digest_map,
                         "media_tag_by_recipient": media_tag_map,
                         "media_started_at_by_recipient": media_started_map,

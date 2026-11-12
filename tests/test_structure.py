@@ -10,7 +10,7 @@ def test_manifest_and_hacs():
     hacs = json.loads((ROOT / "hacs.json").read_text())
     assert manifest["domain"] == "smartphone_dashboard"
     assert manifest["config_flow"] is True
-    assert manifest["version"] == "22.0.57"
+    assert manifest["version"] == "22.0.58"
     assert hacs["name"] == "Smartphone Dashboard"
     assert hacs["zip_release"] is True
     assert hacs["filename"] == "smartphone_dashboard.zip"
@@ -78,9 +78,13 @@ def test_backend_notifications_are_active_and_legacy_yaml_is_not():
     ).read_text()
     assert "asyncio.Queue" in runtime and "blocking=True" in runtime
     assert "alert_set_digest" in runtime and "valid_nina_glob" in runtime
-    assert 'LIVE_ACTIVITY_PAYLOAD_VERSION = "6"' in runtime
+    assert 'LIVE_ACTIVITY_PAYLOAD_VERSION = "7"' in runtime
     assert "alert_content_digest(alerts)" in runtime
     assert "same_alert_set" in runtime and "reuse_existing" in runtime
+    assert "LIVE_ACTIVITY_CONTENT_UPDATE_INTERVAL = 30 * 60" in runtime
+    assert "MOBILE_PUSH_DAILY_LIMIT = 200" in runtime
+    assert "self._async_notify" in runtime
+    assert "live_updated_at_by_recipient" in runtime
     assert "parcel_alert" in runtime and '"notification_parcels"' in runtime
     services = (COMPONENT / "services.yaml").read_text()
     assert "send_test_designs:" in services
