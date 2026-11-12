@@ -20,6 +20,18 @@ ALERT_POPUP_BY_CATEGORY = {
     "ups": "meldung-usv",
     "frost": "meldung-frost",
     "nina": "meldung-nina",
+    "parcel": "meldung-pakete",
+}
+
+PARCEL_STATUS_LABELS = {
+    "registered": "Registriert",
+    "in_transit": "Unterwegs",
+    "out_for_delivery": "In Zustellung",
+    "at_pickup_point": "Abholbereit",
+    "delivered": "Zugestellt",
+    "returning": "Rücksendung",
+    "problem": "Problem",
+    "unknown": "Status unbekannt",
 }
 
 UPS_NORMAL_STATES = frozenset((
@@ -85,6 +97,60 @@ def alert_content_digest(alerts: list[Mapping[str, object]]) -> str:
         f"{alert['fingerprint']}\n{alert['message']}" for alert in normalized
     )
     return hashlib.sha256(content.encode()).hexdigest()[:32] if content else ""
+
+def parcel_alert(
+    parcel: Mapping[str, object],
+    now: datetime | None = None,
+) -> dict[str, str] | None:
+    """Turn one canonical parcel-contract entry into a German active alert."""
+    status = str(parcel.get("status") or "unknown").strip().casefold()
+    if parcel.get("delivered") is True or status == "delivered":
+        return None
+    carrier = str(parcel.get("carrier") or "Paketdienst").strip()
+    barcode = str(parcel.get("barcode") or "").strip()
+    sender = str(parcel.get("sender") or "").strip()
+    pickup_point = str(parcel.get("pickup_point") or "").strip()
+    label = sender or carrier
+    status_label = PARCEL_STATUS_LABELS.get(status, PARCEL_STATUS_LABELS["unknown"])
+    details = [status_label]
+    if status == "at_pickup_point" and pickup_point:
+        details.append(pickup_point)
+
+    def parse_timestamp(value: object) -> datetime | None:
+        if not value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.astimezone()
+            return parsed.astimezone()
+        except (TypeError, ValueError):
+            return None
+
+    planned_from = parse_timestamp(parcel.get("planned_from"))
+    planned_to = parse_timestamp(parcel.get("planned_to"))
+    reference = (now or datetime.now().astimezone()).astimezone()
+    if planned_from:
+        day_delta = (planned_from.date() - reference.date()).days
+        day = (
+            "heute" if day_delta == 0
+            else "morgen" if day_delta == 1
+            else planned_from.strftime("%d.%m.")
+        )
+        if planned_to and planned_to.date() == planned_from.date():
+            window = f"{day} {planned_from:%H:%M}–{planned_to:%H:%M}"
+        elif planned_from.hour or planned_from.minute:
+            window = f"{day} {planned_from:%H:%M}"
+        else:
+            window = day
+        details.append(window)
+    identity = barcode or hashlib.sha256(
+        "\0".join((carrier, sender, str(parcel.get("planned_from") or ""))).encode()
+    ).hexdigest()[:16]
+    return {
+        "fingerprint": f"parcel:{carrier.casefold()}:{identity}",
+        "message": f"📦 {label}: {' · '.join(details)}",
+    }
 
 def aggregate_alert_message(
     alerts: list[Mapping[str, object]],
@@ -219,7 +285,7 @@ def live_activity_presentation(alert: Mapping[str, object]) -> dict[str, str]:
     """Return Bubble-Card-like icon, color and text for one Live Activity."""
     fingerprint = str(alert.get("fingerprint") or "").strip().casefold()
     message = str(alert.get("message") or "").strip()
-    message = re.sub(r"^(?:🔋|🚪|💨|🗑️?|🔌|❄️?|⚠️)\s*", "", message)
+    message = re.sub(r"^(?:🔋|🚪|💨|🗑️?|🔌|❄️?|⚠️|📦)\s*", "", message)
     category = fingerprint.partition(":")[0]
     presentations = {
         "battery": ("mdi:battery-alert", "#FF9F0A"),
@@ -228,9 +294,20 @@ def live_activity_presentation(alert: Mapping[str, object]) -> dict[str, str]:
         "ups": ("mdi:power-plug-battery", "#FF9F0A"),
         "frost": ("mdi:snowflake-alert", "#64D2FF"),
         "nina": ("mdi:alert-outline", "#FF453A"),
+        "parcel": ("mdi:package-variant-closed", "#0A84FF"),
         "summary": ("mdi:bell-badge-outline", "#FF9F0A"),
     }
-    if category == "waste":
+    if category == "parcel":
+        descriptor = message.casefold()
+        if "problem" in descriptor or "rücksendung" in descriptor:
+            icon, color = "mdi:package-variant-remove", "#FF453A"
+        elif "in zustellung" in descriptor:
+            icon, color = "mdi:truck-delivery", "#30D158"
+        elif "abholbereit" in descriptor:
+            icon, color = "mdi:package-variant", "#FF9F0A"
+        else:
+            icon, color = "mdi:package-variant-closed", "#0A84FF"
+    elif category == "waste":
         descriptor = message.casefold()
         if re.search(r"gelb|wertstoff|verpack", descriptor):
             icon, color = "mdi:trash-can-outline", "#FFD700"
@@ -259,6 +336,7 @@ def live_activity_title(alert: Mapping[str, object]) -> str:
         "ups": "USV",
         "frost": "Frost",
         "nina": "Warnung",
+        "parcel": "Paket",
         "summary": "Meldungen",
     }.get(category, "Meldung")
 

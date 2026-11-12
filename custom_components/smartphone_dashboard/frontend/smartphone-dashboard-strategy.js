@@ -7,8 +7,8 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.53";
-const CONFIG_VERSION = 25;
+const STRATEGY_VERSION = "22.0.54";
+const CONFIG_VERSION = 26;
 
 const ACTIVE_ROOM_STYLES = `
   ha-card, .bubble-button-card-container, .bubble-name-container,
@@ -52,6 +52,7 @@ const NOTIFICATION_POPUPS = {
   ups: ["#meldung-usv", "USV", "mdi:power-plug-battery"],
   frost: ["#meldung-frost", "Frost", "mdi:snowflake-alert"],
   nina: ["#meldung-nina", "NINA-Warnungen", "mdi:alert-outline"],
+  parcels: ["#meldung-pakete", "Pakete", "mdi:package-variant-closed"],
 };
 
 class SmartphoneDashboardNotificationControls extends HTMLElement {
@@ -283,6 +284,27 @@ const WASTE_SUMMARY_STYLES = `\${(() => {
   if (state) state.innerText = dateLabel ? 'Nächster Termin: ' + dateLabel : 'Kein Termin verfügbar';
   if (icon) icon.style.setProperty('color', iconColor, 'important');
 })()}`;
+const PARCEL_SUMMARY_STYLES = `\${(() => {
+  const runtimeEntity = typeof entity === 'undefined' ? null : entity;
+  const entityId = (typeof runtimeEntity === 'string' ? runtimeEntity : runtimeEntity?.entity_id)
+    || this?.config?.entity
+    || this?._config?.entity;
+  const source = hass.states[entityId];
+  const labels = {
+    registered: 'Registriert', in_transit: 'Unterwegs', out_for_delivery: 'In Zustellung',
+    at_pickup_point: 'Abholbereit', returning: 'Rücksendung', problem: 'Problem', unknown: 'Status unbekannt',
+  };
+  const parcels = (Array.isArray(source?.attributes?.parcels) ? source.attributes.parcels : [])
+    .filter((parcel) => parcel && parcel.delivered !== true && parcel.status !== 'delivered');
+  const first = parcels[0] || {};
+  const name = card.querySelector('.bubble-name');
+  const state = card.querySelector('.bubble-state');
+  const icon = card.querySelector('.bubble-icon');
+  if (name) name.innerText = parcels.length === 1 ? '1 Paket unterwegs' : parcels.length + ' Pakete unterwegs';
+  if (state) state.innerText = [first.sender || first.carrier, labels[first.status] || labels.unknown].filter(Boolean).join(' · ');
+  const color = first.status === 'problem' ? 'var(--error-color)' : first.status === 'out_for_delivery' ? 'var(--success-color)' : '#0A84FF';
+  if (icon) icon.style.setProperty('color', color, 'important');
+})()}`;
 function batterySummaryStyles(threshold) {
   const limit = Number.isFinite(Number(threshold)) ? Number(threshold) : 6;
   return `\${(() => {
@@ -330,7 +352,9 @@ const NOTIFICATION_HELPERS = {
   ups_entities: "input_text.smartphone_usv_sensoren",
   nina_entities: "input_text.smartphone_nina_muster",
 };
-const BACKEND_NOTIFICATION_KEYS = [...Object.keys(NOTIFICATION_HELPERS), "waste_days", "notification_media"];
+const BACKEND_NOTIFICATION_KEYS = [
+  ...Object.keys(NOTIFICATION_HELPERS), "waste_days", "notification_media", "notification_parcels",
+];
 
 // Sofort registrieren: Home Assistant wartet maximal fünf Sekunden auf das
 // Strategy-Element. Die Funktionsdeklarationen darunter werden beim Aufruf
@@ -450,6 +474,7 @@ const BASE_DASHBOARD = {
         { domain: "sensor", attributes: { device_class: "carbon_dioxide" }, options: { type: "custom:bubble-card", card_type: "button" } },
         { entity_id: "sensor.*abfall", options: { type: "custom:bubble-card", card_type: "button" } },
         { entity_id: "sensor.*ups_status", options: { type: "custom:bubble-card", card_type: "button" } },
+        { entity_id: "sensor.*parcel_incoming", options: { type: "custom:bubble-card", card_type: "button" } },
         { entity_id: "sensor.*temperature", options: { type: "custom:bubble-card", card_type: "button" } },
         { entity_id: "binary_sensor.nina_warning_*", state: "on", options: {
           type: "custom:bubble-card", card_type: "button", button_type: "state",
@@ -838,6 +863,35 @@ function withNotificationPopup(entry, category) {
   };
 }
 
+function parcelSensorEntities(hass) {
+  const registry = entityRegistryMap(hass);
+  const candidates = Object.entries(hass?.states || {})
+    .filter(([entityId, state]) =>
+      entityId.startsWith("sensor.") &&
+      isEntityVisible(hass, entityId, registry) &&
+      Array.isArray(state?.attributes?.parcels) &&
+      !/(?:^|_)outgoing|delivered/i.test(entityId),
+    )
+    .map(([entityId]) => entityId);
+  if (candidates.includes("sensor.parcel_aggregator_incoming_parcels")) {
+    return ["sensor.parcel_aggregator_incoming_parcels"];
+  }
+  const incoming = candidates.filter((entityId) => /incoming.*parcel|parcel.*incoming/i.test(entityId));
+  return (incoming.length ? incoming : candidates).sort((left, right) => left.localeCompare(right, "de"));
+}
+
+function parcelCalendarEntities(hass) {
+  const registry = entityRegistryMap(hass);
+  return Object.entries(hass?.states || {})
+    .filter(([entityId, state]) =>
+      entityId.startsWith("calendar.") &&
+      isEntityVisible(hass, entityId, registry) &&
+      /parcel|paket|delivery|liefer/i.test(`${entityId} ${state?.attributes?.friendly_name || ""}`),
+    )
+    .map(([entityId]) => entityId)
+    .sort((left, right) => left.localeCompare(right, "de"));
+}
+
 function notificationCalendarEntities(hass, wasteEntityIds = []) {
   const registry = entityRegistryMap(hass);
   const candidates = Object.entries(hass?.states || {})
@@ -940,12 +994,89 @@ function notificationDetailCard(filters, category, hiddenEntityIds = []) {
   };
 }
 
+function parcelOverviewCard(entityIds) {
+  const ids = [...new Set(entityIds.filter(Boolean))];
+  return {
+    type: "custom:button-card",
+    icon: "mdi:package-variant-closed",
+    name: "Aktive Pakete",
+    show_state: false,
+    show_label: false,
+    tap_action: { action: "none" },
+    custom_fields: {
+      parcels: `[[[
+        const ids = ${JSON.stringify(ids)};
+        const labels = {
+          registered: 'Registriert', in_transit: 'Unterwegs', out_for_delivery: 'In Zustellung',
+          at_pickup_point: 'Abholbereit', delivered: 'Zugestellt', returning: 'Rücksendung',
+          problem: 'Problem', unknown: 'Status unbekannt',
+        };
+        const escape = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({
+          '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+        })[character]);
+        const seen = new Set();
+        const parcels = ids.flatMap((id) => hass.states[id]?.attributes?.parcels || [])
+          .filter((parcel) => {
+            if (!parcel || parcel.delivered === true || parcel.status === 'delivered') return false;
+            const key = parcel.barcode || [parcel.carrier, parcel.sender, parcel.planned_from].join('|');
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+        if (!parcels.length) return '<div class="parcel-empty">Aktuell sind keine Pakete unterwegs.</div>';
+        return parcels.map((parcel) => {
+          const sender = escape(parcel.sender || 'Unbekannter Absender');
+          const carrier = escape(parcel.carrier || 'Paketdienst');
+          const status = escape(labels[parcel.status] || labels.unknown);
+          const point = parcel.status === 'at_pickup_point' && parcel.pickup_point
+            ? ' · ' + escape(parcel.pickup_point) : '';
+          let planned = '';
+          if (parcel.planned_from) {
+            const from = new Date(parcel.planned_from);
+            const to = parcel.planned_to ? new Date(parcel.planned_to) : null;
+            if (!Number.isNaN(from.getTime())) {
+              const day = from.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit' });
+              const start = from.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+              const end = to && !Number.isNaN(to.getTime())
+                ? '–' + to.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '';
+              planned = '<div class="parcel-time">' + day + ' · ' + start + end + '</div>';
+            }
+          }
+          const content = '<div class="parcel-copy"><div class="parcel-name">' + sender +
+            '</div><div class="parcel-meta">' + carrier + ' · ' + status + point + '</div>' + planned + '</div>';
+          const url = /^https?:\\/\\//i.test(String(parcel.url || '')) ? String(parcel.url) : '';
+          return url
+            ? '<a class="parcel-row" href="' + escape(url) + '" target="_blank" rel="noopener">' + content + '<ha-icon icon="mdi:open-in-new"></ha-icon></a>'
+            : '<div class="parcel-row">' + content + '<ha-icon icon="mdi:package-variant"></ha-icon></div>';
+        }).join('');
+      ]]]`,
+    },
+    styles: {
+      card: [{ padding: "18px" }, { "border-radius": "28px" }, { "text-align": "left" }],
+      grid: [{ "grid-template-areas": "'i n' 'parcels parcels'" }, { "grid-template-columns": "44px 1fr" }],
+      icon: [{ color: "#0A84FF" }, { width: "30px" }],
+      name: [{ "font-size": "18px" }, { "font-weight": "700" }, { "justify-self": "start" }],
+      custom_fields: { parcels: [{ "margin-top": "14px" }, { width: "100%" }] },
+    },
+    extra_styles: `
+      .parcel-row { display:flex; align-items:center; gap:12px; padding:12px 14px; margin-top:8px; border-radius:20px; background:var(--secondary-background-color); color:var(--primary-text-color); text-decoration:none; }
+      .parcel-copy { flex:1; min-width:0; }
+      .parcel-name { font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      .parcel-meta, .parcel-time, .parcel-empty { margin-top:3px; color:var(--secondary-text-color); font-size:13px; line-height:1.35; }
+      .parcel-row ha-icon { color:#0A84FF; flex:0 0 auto; }
+      .parcel-empty { padding:10px 2px; }
+    `,
+  };
+}
+
 function notificationDetailPopups(filtersByCategory, hass, hiddenEntityIds = [], wasteEntityIds = []) {
   const calendars = notificationCalendarEntities(hass, wasteEntityIds);
   return Object.entries(filtersByCategory).flatMap(([category, filters]) => {
     if (!filters.length || !NOTIFICATION_POPUPS[category]) return [];
     const [hash, name, icon] = NOTIFICATION_POPUPS[category];
-    const cards = [notificationDetailCard(filters, category, hiddenEntityIds)];
+    const cards = category === "parcels"
+      ? [parcelOverviewCard(filters.map((entry) => entry.entity_id))]
+      : [notificationDetailCard(filters, category, hiddenEntityIds)];
     if (category === "waste" && calendars.length) {
       cards.push({
         type: "custom:bubble-card",
@@ -956,6 +1087,20 @@ function notificationDetailPopups(filtersByCategory, hass, hiddenEntityIds = [],
         card_layout: "normal",
         rows: 4,
         show_end: false,
+        show_progress: false,
+      });
+    }
+    if (category === "parcels") {
+      const parcelCalendars = parcelCalendarEntities(hass);
+      if (parcelCalendars.length) cards.push({
+        type: "custom:bubble-card",
+        card_type: "calendar",
+        entities: parcelCalendars.map((entity) => ({ entity, color: "#0A84FF" })),
+        days: 30,
+        limit: 8,
+        card_layout: "normal",
+        rows: 5,
+        show_end: true,
         show_progress: false,
       });
     }
@@ -994,6 +1139,7 @@ function applyNotificationOptions(dashboard, config, hass) {
     ups: notificationSetting(config, hass, "notification_ups") !== false,
     frost: notificationSetting(config, hass, "notification_frost") !== false,
     nina: notificationSetting(config, hass, "notification_nina") !== false,
+    parcels: notificationSetting(config, hass, "notification_parcels") !== false,
   };
   const batteryThreshold = Number(notificationSetting(config, hass, "battery_threshold")) || 6;
   const contactMinutes = Number(notificationSetting(config, hass, "contact_minutes")) || 15;
@@ -1011,6 +1157,7 @@ function applyNotificationOptions(dashboard, config, hass) {
   const wasteEntities = csv(notificationSetting(config, hass, "waste_entities"));
   const upsEntities = csv(notificationSetting(config, hass, "ups_entities"));
   const ninaEntities = normalizeNinaGlob(notificationSetting(config, hass, "nina_entities"));
+  const parcelEntities = parcelSensorEntities(hass);
   const batteryExclusions = String(
     notificationSetting(config, hass, "battery_exclusions") ||
       "",
@@ -1146,6 +1293,22 @@ function applyNotificationOptions(dashboard, config, hass) {
         };
       }).filter(Boolean);
       return settings.ups ? emit("ups", entries) : [];
+    }
+    if (entityId === "sensor.*parcel_incoming") {
+      const entries = parcelEntities.map((entity_id) => ({
+        ...entry,
+        entity_id,
+        state: "> 0",
+        options: {
+          ...(entry.options || {}),
+          button_type: "state",
+          show_state: true,
+          icon: "mdi:package-variant-closed",
+          styles: [entry.options?.styles, ENTITY_NOTIFICATION_STYLES, PARCEL_SUMMARY_STYLES]
+            .filter(Boolean).join("\n"),
+        },
+      }));
+      return settings.parcels ? emit("parcels", entries) : [];
     }
     if (entityId === "sensor.*temperature") {
       entry.entity_id = frostEntity;
@@ -1719,6 +1882,7 @@ function configurationValidationErrors(config) {
 
 function autoFeatureEntities(hass, key, systemGroups = []) {
   if (key === "media") return entityIds(hass, "media_player");
+  if (key === "parcels") return parcelSensorEntities(hass);
   if (key === "security") {
     const printerDeviceIds = new Set(autoBambuPrinterIds(hass));
     return [
@@ -1800,6 +1964,7 @@ function isPrinterCameraEntity(hass, entityId, knownPrinterDeviceIds = new Set(a
 
 const FEATURE_META = {
   media: ["Medien", "mdi:cast-audio", "#medien"],
+  parcels: ["Pakete", "mdi:package-variant-closed", "#pakete"],
   security: ["Sicherheit", "mdi:shield-home-outline", "#sicherheit"],
   printer: ["3D-Druck", "mdi:printer-3d", "#3ddruck"],
   system: ["System", "mdi:server", "#system"],
@@ -2099,6 +2264,7 @@ function requestedMediaPlayer(hass) {
 }
 
 function featurePopupCards(item, hass) {
+  if (item.key === "parcels") return parcelFeatureCards(item, hass);
   if (item.key === "printer") return printerFeatureCards(item, hass);
   if (item.key === "system") return systemFeatureCards(item, hass);
   if (item.key === "security") return securityFeatureCards(item, hass);
@@ -2113,10 +2279,28 @@ function featurePopupCards(item, hass) {
     .map((id) => featureEntityCard(id, hass));
 }
 
+function parcelFeatureCards(item, hass) {
+  const calendars = parcelCalendarEntities(hass);
+  if (!item.entities.length && !calendars.length) return [];
+  const cards = item.entities.length ? [parcelOverviewCard(item.entities)] : [];
+  if (calendars.length) cards.push({
+    type: "custom:bubble-card",
+    card_type: "calendar",
+    entities: calendars.map((entity) => ({ entity, color: "#0A84FF" })),
+    days: 30,
+    limit: 8,
+    card_layout: "normal",
+    rows: 5,
+    show_end: true,
+    show_progress: false,
+  });
+  return cards;
+}
+
 function applyDynamicFeatures(dashboard, config, hass) {
   const cards = dashboard.views?.[0]?.sections?.[0]?.cards;
   if (!Array.isArray(cards)) return dashboard;
-  const legacyHashes = new Set(["#medien", "#3ddruck", "#info", "#camera_alarm", "#system", "#sicherheit"]);
+  const legacyHashes = new Set(["#medien", "#pakete", "#3ddruck", "#info", "#camera_alarm", "#system", "#sicherheit"]);
   const isOldNavigation = (card) => card?.type === "grid" && card.cards?.some((x) =>
     ["Medien", "System", "Alarm", "3D Drucker"].includes(x?.name),
   );
@@ -2311,6 +2495,7 @@ const EDITOR_DEFAULTS = {
   notification_ups: true,
   notification_frost: true,
   notification_nina: true,
+  notification_parcels: true,
   notification_media: true,
   battery_threshold: 6,
   contact_minutes: 15,
@@ -3357,6 +3542,7 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
             <div class="switch-row"><div class="switch-copy"><div class="switch-title">Frostwarnung</div><div class="switch-description">Bei niedriger Außentemperatur warnen.</div></div><ha-switch data-switch="notification_frost"></ha-switch></div>
             <label class="native-field">Frost-Grenzwert in °C<input data-notification-number="frost_threshold" type="number" min="-30" max="20"></label>
             <div class="switch-row"><div class="switch-copy"><div class="switch-title">NINA</div><div class="switch-description">Aktive amtliche Warnmeldungen anzeigen.</div></div><ha-switch data-switch="notification_nina"></ha-switch></div>
+            <div class="switch-row"><div class="switch-copy"><div class="switch-title">Pakete</div><div class="switch-description">Aktive Sendungen aus den HA Parcel Integrations im Dashboard und als iPhone Live Activities anzeigen.</div></div><ha-switch data-switch="notification_parcels"></ha-switch></div>
             <div class="switch-row"><div class="switch-copy"><div class="switch-title">Aktive Medien</div><div class="switch-description">Abspielende Media Player als stille iPhone Live Activities anzeigen. Die Auswahl folgt dem Bereich „Medien“.</div></div><ha-switch data-switch="notification_media"></ha-switch></div>
           </div>
         </details>
@@ -3442,7 +3628,7 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
       ["show_notifications", "Meldungen", "Batterien, Kontakte und Warnungen anzeigen."],
       ["show_quick_actions", "Schnellaktionen", "Den Bereich „Aktionen“ anzeigen."],
       ["show_rooms", "Räume", "Raumkacheln und deren Navigation anzeigen."],
-      ["show_navigation", "Weitere Bereiche", "Medien, System, Alarm und 3D-Drucker anzeigen."],
+      ["show_navigation", "Weitere Bereiche", "Pakete, Medien, System, Sicherheit und 3D-Druck anzeigen."],
     ];
 
     const switchPanel = this.shadowRoot.querySelector("[data-switch-panel]");
@@ -3731,4 +3917,5 @@ export {
   synchronizationStatus,
   detectedRooms,
   applyRoomOptions,
+  parcelSensorEntities,
 };

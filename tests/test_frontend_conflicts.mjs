@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 globalThis.HTMLElement = class { attachShadow() { this.shadowRoot = { activeElement: null, querySelector: () => null, querySelectorAll: () => [] }; return this.shadowRoot; } dispatchEvent() {} };
 globalThis.customElements = { registry: new Map(), get(name) { return this.registry.get(name); }, define(name, value) { this.registry.set(name, value); }, whenDefined() { return Promise.resolve(); } };
 globalThis.window = globalThis;
-const { SmartphoneDashboardStrategy, SmartphoneDashboardStrategyEditor, partitionConflictPatch, applyNotificationOptions, mergeBackendNotifications, detectedRooms, applyRoomOptions, configuredFeatures } = await import("../custom_components/smartphone_dashboard/frontend/smartphone-dashboard-strategy.js");
+const { SmartphoneDashboardStrategy, SmartphoneDashboardStrategyEditor, partitionConflictPatch, applyNotificationOptions, mergeBackendNotifications, detectedRooms, applyRoomOptions, configuredFeatures, parcelSensorEntities } = await import("../custom_components/smartphone_dashboard/frontend/smartphone-dashboard-strategy.js");
 
 const roomHass = {
   states: {
@@ -535,6 +535,57 @@ const wasteCalendarFallbackPopup = wasteCalendarWithoutSensorRegistry.views[0].s
   .find((card) => card.hash === "#meldung-abfall");
 assert.deepEqual(wasteCalendarFallbackPopup.cards[1].entities, [
   { entity: "calendar.hausplan", color: "var(--success-color)" },
+]);
+
+const parcelHass = {
+  states: {
+    "sensor.parcel_aggregator_incoming_parcels": {
+      state: "2",
+      attributes: { friendly_name: "Incoming parcels", parcels: [
+        { carrier: "DHL", barcode: "abc", sender: "Shop", status: "in_transit", delivered: false },
+        { carrier: "UPS", barcode: "def", sender: "Apple", status: "out_for_delivery", delivered: false },
+      ] },
+    },
+    "sensor.dhl_incoming_parcels": {
+      state: "1",
+      attributes: { parcels: [{ carrier: "DHL", barcode: "abc", status: "in_transit", delivered: false }] },
+    },
+    "sensor.parcel_aggregator_delivered_parcels": {
+      state: "1",
+      attributes: { parcels: [{ carrier: "DHL", barcode: "old", status: "delivered", delivered: true }] },
+    },
+    "calendar.parcel_aggregator_deliveries": { state: "on", attributes: { friendly_name: "Parcel deliveries" } },
+  },
+  entities: {
+    aggregator: { entity_id: "sensor.parcel_aggregator_incoming_parcels", platform: "parcel_aggregator" },
+    dhl: { entity_id: "sensor.dhl_incoming_parcels", platform: "dhl" },
+    delivered: { entity_id: "sensor.parcel_aggregator_delivered_parcels", platform: "parcel_aggregator" },
+    calendar: { entity_id: "calendar.parcel_aggregator_deliveries", platform: "parcel_aggregator" },
+  },
+  areas: {}, devices: {}, services: {},
+};
+assert.deepEqual(parcelSensorEntities(parcelHass), ["sensor.parcel_aggregator_incoming_parcels"]);
+const parcelFeature = configuredFeatures({}, parcelHass).find((feature) => feature.key === "parcels");
+assert.equal(parcelFeature.name, "Pakete");
+assert.equal(parcelFeature.hash, "#pakete");
+assert.deepEqual(parcelFeature.entities, ["sensor.parcel_aggregator_incoming_parcels"]);
+const parcelDashboard = { views: [{ sections: [{ cards: [
+  { type: "heading", heading: "Meldungen" },
+  { type: "custom:auto-entities", filter: { include: [
+    { entity_id: "sensor.*parcel_incoming", options: { type: "custom:bubble-card", card_type: "button" } },
+  ], exclude: [] } },
+] }] }] };
+applyNotificationOptions(parcelDashboard, { notification_parcels: true }, parcelHass);
+const parcelSummary = parcelDashboard.views[0].sections[0].cards.find((card) => card.type === "custom:auto-entities");
+assert.equal(parcelSummary.filter.include[0].entity_id, "sensor.parcel_aggregator_incoming_parcels");
+assert.equal(parcelSummary.filter.include[0].state, "> 0");
+assert.match(parcelSummary.filter.include[0].options.styles, /Pakete unterwegs/);
+const parcelPopup = parcelDashboard.views[0].sections[0].cards.find((card) => card.hash === "#meldung-pakete");
+assert.equal(parcelPopup.name, "Pakete");
+assert.equal(parcelPopup.cards[0].type, "custom:button-card");
+assert.match(parcelPopup.cards[0].custom_fields.parcels, /out_for_delivery/);
+assert.deepEqual(parcelPopup.cards[1].entities, [
+  { entity: "calendar.parcel_aggregator_deliveries", color: "#0A84FF" },
 ]);
 const editor = new SmartphoneDashboardStrategyEditor();
 let timerFired = false;

@@ -56,6 +56,14 @@ benannte Kalender zuverlässig im Pop-up erscheinen.
 Mehrzeilige Sensorzustände wie „Restmüll und Biomüll werden morgen abgeholt“
 werden sowohl auf der Dashboard-Karte als auch in Persistent Notification und
 Live Activity als gemeinsame Abholung dargestellt.
+Sensoren der [Home Assistant Parcel Integrations](https://ha-parcel-integrations.github.io/)
+werden automatisch erkannt. Wenn der Parcel Aggregator installiert ist, nutzt
+das Dashboard bevorzugt `sensor.parcel_aggregator_incoming_parcels`; andernfalls
+werden die Carrier-Sensoren mit demselben `parcels`-Vertrag verwendet. Der
+Bereich **Pakete** zeigt aktive Sendungen mit Absender, Zusteller, deutschem
+Status, Lieferfenster und Tracking-Link. Ein vorhandener
+`calendar.parcel_aggregator_deliveries` wird als Bubble-Card-Kalender ergänzt.
+Zugestellte Sendungen verschwinden automatisch.
 Bis zu vier unabhängige Meldungen erscheinen als getrennte, einzeln lesbare
 Live Activities; weitere Meldungen werden kompakt gezählt und bleiben im
 gemeinsamen Meldungsdialog vollständig sichtbar.
@@ -92,9 +100,11 @@ getrennte Warnungs-Live-Activities mit kategoriespezifischen Icons und Farben.
 Messwertänderungen wie ein neuer CO₂-Wert aktualisieren dabei dieselbe Live
 Activity still und sofort; die stabile Meldungsidentität verhindert unnötige
 Neustarts. Der Kopf benennt die Kategorie kompakt, etwa
-**Homeassistant – CO₂** oder **Homeassistant – Abfall**.
+**Homeassistant – CO₂**, **Homeassistant – Abfall** oder
+**Homeassistant – Paket**. Paket-Aktivitäten wechseln Symbol und Akzentfarbe
+passend zu Unterwegs, In Zustellung, Abholbereit, Rücksendung oder Problem.
 Sie öffnen beim Antippen direkt das passende Detail-Pop-up für Batterien,
-Kontakte, CO₂, Abfall, USV, Frost oder NINA; zusammengefasste Restmeldungen
+Kontakte, CO₂, Abfall, Pakete, USV, Frost oder NINA; zusammengefasste Restmeldungen
 öffnen den gemeinsamen Meldungsdialog. Der `sd_popup`-Fallback stellt den
 Absprung auch dann wieder her, wenn die Companion-App das URL-Fragment beim
 Kaltstart entfernt. Bei Entwarnung werden die Live Activities beendet.

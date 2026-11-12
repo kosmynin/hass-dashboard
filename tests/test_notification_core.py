@@ -1,5 +1,5 @@
 import runpy
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 CORE = runpy.run_path(str(Path(__file__).parents[1] / "custom_components/smartphone_dashboard/notification_core.py"))
 pending_fingerprints = CORE["pending_fingerprints"]
@@ -11,6 +11,7 @@ waste_collection_details = CORE["waste_collection_details"]
 normalized_alerts = CORE["normalized_alerts"]
 alert_set_digest = CORE["alert_set_digest"]
 alert_content_digest = CORE["alert_content_digest"]
+parcel_alert = CORE["parcel_alert"]
 aggregate_alert_message = CORE["aggregate_alert_message"]
 mobile_notification_data = CORE["mobile_notification_data"]
 mobile_clear_data = CORE["mobile_clear_data"]
@@ -120,6 +121,30 @@ def test_aggregate_message_and_iphone_replacement_payloads():
     assert active["push"] == {"interruption-level": "active", "badge": 2}
     assert passive["push"] == {"interruption-level": "passive", "badge": 1}
     assert mobile_clear_data()["push"] == {"badge": 0}
+
+def test_parcel_contract_becomes_stable_german_live_alert():
+    alert = parcel_alert({
+        "carrier": "DHL",
+        "barcode": "00340434161094000000",
+        "sender": "Beispielshop",
+        "status": "out_for_delivery",
+        "delivered": False,
+        "planned_from": "2026-11-12T14:00:00+01:00",
+        "planned_to": "2026-11-12T16:00:00+01:00",
+    }, datetime.fromisoformat("2026-11-12T10:00:00+01:00"))
+    assert alert == {
+        "fingerprint": "parcel:dhl:00340434161094000000",
+        "message": "📦 Beispielshop: In Zustellung · heute 14:00–16:00",
+    }
+    presentation = live_activity_presentation(alert)
+    assert presentation == {
+        "message": "Beispielshop: In Zustellung · heute 14:00–16:00",
+        "icon": "mdi:truck-delivery",
+        "color": "#30D158",
+    }
+    assert live_activity_title(alert) == "Paket"
+    assert parcel_alert({"status": "delivered", "delivered": True}) is None
+    assert "sd_popup=meldung-pakete" in alert_dashboard_url(alert)
 
 def test_iphone_actions_are_scoped_to_recipient_and_alert_set():
     recipient = "notify.mobile_app_boris_iphone"

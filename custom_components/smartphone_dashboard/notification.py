@@ -33,6 +33,7 @@ from .notification_core import (
     mobile_media_activity_data,
     notification_recipient_token,
     normalized_alerts,
+    parcel_alert,
     parse_mobile_action,
     ups_state_is_alert,
     valid_nina_glob,
@@ -257,6 +258,47 @@ class NotificationCoordinator:
                     if value >= co2_limit: alerts.append({"fingerprint": f"co2:{entity_id}", "message": f"💨 {self._entity_label(entity_id, attrs)}: {value:g} ppm"})
                 except ValueError: pass
         alerts.extend(self._configured_alerts(now))
+        alerts.extend(self._parcel_alerts(now))
+        return alerts
+
+    def _parcel_alerts(self, now: datetime) -> list[dict[str, str]]:
+        """Read the shared ha-parcel-integrations contract without carrier coupling."""
+        strategy = self.manager.data.get("dashboards", {}).get("default", {}).get("config", {})
+        if strategy.get("notification_parcels", True) is False:
+            return []
+        candidates = [
+            state for state in self.hass.states.async_all("sensor")
+            if self._dashboard_entity_enabled(state.entity_id)
+            and isinstance(state.attributes.get("parcels"), list)
+            and not re.search(r"(?:^|_)outgoing|delivered", state.entity_id, re.IGNORECASE)
+        ]
+        aggregator = next(
+            (
+                state for state in candidates
+                if state.entity_id == "sensor.parcel_aggregator_incoming_parcels"
+            ),
+            None,
+        )
+        if aggregator is not None:
+            candidates = [aggregator]
+        else:
+            incoming = [
+                state for state in candidates
+                if re.search(r"incoming.*parcel|parcel.*incoming", state.entity_id, re.IGNORECASE)
+            ]
+            if incoming:
+                candidates = incoming
+        alerts: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for state in candidates:
+            for parcel in state.attributes.get("parcels", []):
+                if not isinstance(parcel, dict):
+                    continue
+                alert = parcel_alert(parcel, now)
+                if alert is None or alert["fingerprint"] in seen:
+                    continue
+                seen.add(alert["fingerprint"])
+                alerts.append(alert)
         return alerts
 
     def _configured_alerts(self, now: datetime) -> list[dict[str, str]]:
