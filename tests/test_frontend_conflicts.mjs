@@ -592,6 +592,8 @@ assert.match(parcelPopup.cards[0].extra_styles, /parcel-icon/);
 assert.match(parcelPopup.cards[0].custom_fields.parcels, /span class="parcel-open"/);
 assert.doesNotMatch(parcelPopup.cards[0].custom_fields.parcels, /ha-icon class="parcel-open"/);
 assert.match(parcelPopup.cards[0].extra_styles, /flex:0 0 22px/);
+assert.match(parcelPopup.cards[0].extra_styles, /a\.parcel-row > \* \{ pointer-events:none/);
+assert.equal(parcelPopup.cards[0].styles.custom_fields.parcels.some((style) => style["pointer-events"] === "auto"), true);
 assert.deepEqual(parcelPopup.cards[1].entities, [
   { entity: "calendar.parcel_aggregator_deliveries", color: "#0A84FF" },
 ]);

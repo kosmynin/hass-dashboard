@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.58";
+const STRATEGY_VERSION = "22.0.59";
 const CONFIG_VERSION = 26;
 
 const ACTIVE_ROOM_STYLES = `
@@ -297,6 +297,15 @@ const PARCEL_SUMMARY_STYLES = `\${(() => {
   const parcels = (Array.isArray(source?.attributes?.parcels) ? source.attributes.parcels : [])
     .filter((parcel) => parcel && parcel.delivered !== true && parcel.status !== 'delivered');
   const first = parcels[0] || {};
+  const cleanParcelText = (value) => {
+    let text = String(value || '').replaceAll(String.fromCharCode(8203), ' ').replace(/\\s+/g, ' ').trim();
+    const placeholder = text.match(/\\(\\s*(?:not\\s+sel(?:ected)?|not\\s+set|none|null|unknown|n\\/?a)\\b/i);
+    if (placeholder) text = text.slice(0, placeholder.index);
+    else if ((text.match(/\\(/g) || []).length > (text.match(/\\)/g) || []).length) text = text.slice(0, text.lastIndexOf('('));
+    text = text.replace(/^[\\s\\-–—·,:;()]+|[\\s\\-–—·,:;()]+$/g, '');
+    return /^(?:none|null|unknown|unbekannt|not set|not selected|n\\/?a)$/i.test(text) ? '' : text;
+  };
+  const parcelLabel = cleanParcelText(first.sender) || cleanParcelText(first.carrier);
   const designs = {
     registered: { progress: 1, icon: 'mdi:package-variant-closed', color: '#0A84FF' },
     in_transit: { progress: 2, icon: 'mdi:truck-fast', color: '#0A84FF' },
@@ -312,7 +321,7 @@ const PARCEL_SUMMARY_STYLES = `\${(() => {
   const icon = card.querySelector('.bubble-icon');
   const background = card.querySelector('.bubble-button-background');
   if (name) name.innerText = parcels.length === 1 ? '1 Paket unterwegs' : parcels.length + ' Pakete unterwegs';
-  if (state) state.innerText = [first.sender || first.carrier, labels[first.status] || labels.unknown].filter(Boolean).join(' · ');
+  if (state) state.innerText = [parcelLabel, labels[first.status] || labels.unknown].filter(Boolean).join(' · ');
   if (icon) {
     icon.setAttribute('icon', design.icon);
     icon.style.setProperty('color', design.color, 'important');
@@ -1047,9 +1056,18 @@ function parcelOverviewCard(entityIds) {
             return true;
           });
         if (!parcels.length) return '<div class="parcel-empty">Aktuell sind keine Pakete unterwegs.</div>';
+        const cleanParcelText = (value) => {
+          let text = String(value || '').replaceAll(String.fromCharCode(8203), ' ').replace(/\\s+/g, ' ').trim();
+          const placeholder = text.match(/\\(\\s*(?:not\\s+sel(?:ected)?|not\\s+set|none|null|unknown|n\\/?a)\\b/i);
+          if (placeholder) text = text.slice(0, placeholder.index);
+          else if ((text.match(/\\(/g) || []).length > (text.match(/\\)/g) || []).length) text = text.slice(0, text.lastIndexOf('('));
+          text = text.replace(/^[\\s\\-–—·,:;()]+|[\\s\\-–—·,:;()]+$/g, '');
+          return /^(?:none|null|unknown|unbekannt|not set|not selected|n\\/?a)$/i.test(text) ? '' : text;
+        };
         return parcels.map((parcel) => {
-          const sender = escape(parcel.sender || 'Unbekannter Absender');
-          const carrier = escape(parcel.carrier || 'Paketdienst');
+          const cleanCarrier = cleanParcelText(parcel.carrier) || 'Paketdienst';
+          const sender = escape(cleanParcelText(parcel.sender) || cleanCarrier);
+          const carrier = escape(cleanCarrier);
           const design = designs[parcel.status] || designs.unknown;
           const status = escape(design.label);
           const point = parcel.status === 'at_pickup_point' && parcel.pickup_point
@@ -1085,10 +1103,12 @@ function parcelOverviewCard(entityIds) {
       grid: [{ "grid-template-areas": "'i n' 'parcels parcels'" }, { "grid-template-columns": "44px 1fr" }],
       icon: [{ color: "#0A84FF" }, { width: "30px" }],
       name: [{ "font-size": "18px" }, { "font-weight": "700" }, { "justify-self": "start" }],
-      custom_fields: { parcels: [{ "margin-top": "14px" }, { width: "100%" }] },
+      custom_fields: { parcels: [{ "margin-top": "14px" }, { width: "100%" }, { "pointer-events": "auto" }, { "z-index": "3" }] },
     },
     extra_styles: `
-      .parcel-row { display:flex; align-items:center; gap:12px; padding:12px 14px; margin-top:8px; border-radius:20px; background:var(--secondary-background-color); color:var(--primary-text-color); text-decoration:none; }
+      .parcel-row { display:flex; align-items:center; gap:12px; width:100%; box-sizing:border-box; padding:12px 14px; margin-top:8px; border-radius:20px; background:var(--secondary-background-color); color:var(--primary-text-color); text-decoration:none; }
+      a.parcel-row { position:relative; z-index:3; pointer-events:auto !important; cursor:pointer; touch-action:manipulation; }
+      a.parcel-row > * { pointer-events:none !important; }
       .parcel-icon { width:44px; height:44px; border-radius:50%; display:grid; place-items:center; flex:0 0 44px; color:var(--parcel-color); background:color-mix(in srgb, var(--parcel-color) 18%, var(--card-background-color)); }
       .parcel-icon ha-icon { width:25px; height:25px; color:inherit; }
       .parcel-copy { flex:1; min-width:0; }

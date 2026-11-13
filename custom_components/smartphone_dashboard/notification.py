@@ -50,7 +50,7 @@ CLEAR_DIGEST = "clear"
 MOBILE_ACTION_EVENT = "mobile_app_notification_action"
 LIVE_ACTIVITY_RENEW_AFTER = 7 * 60 * 60
 LIVE_ACTIVITY_CONTENT_UPDATE_INTERVAL = 30 * 60
-LIVE_ACTIVITY_PAYLOAD_VERSION = "7"
+LIVE_ACTIVITY_PAYLOAD_VERSION = "8"
 MOBILE_PUSH_DUPLICATE_INTERVAL = 10 * 60
 MOBILE_PUSH_HOURLY_LIMIT = 60
 MOBILE_PUSH_DAILY_LIMIT = 200
@@ -861,6 +861,11 @@ class NotificationCoordinator:
                             live_updated = live_updated_map.get(recipient, 0)
                             previous_live_payload = live_digest_map.get(recipient, "")
                             previous_live_parts = previous_live_payload.split(":", 2)
+                            same_payload_version = (
+                                len(previous_live_parts) >= 1
+                                and previous_live_parts[0]
+                                == LIVE_ACTIVITY_PAYLOAD_VERSION
+                            )
                             same_alert_set = (
                                 len(previous_live_parts) >= 2
                                 and previous_live_parts[1] == digest
@@ -880,6 +885,7 @@ class NotificationCoordinator:
                             live_due = (
                                 renewal_due
                                 or not previous_live_tags
+                                or not same_payload_version
                                 or not same_alert_set
                                 or (content_changed and content_update_due)
                             )

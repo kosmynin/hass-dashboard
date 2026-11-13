@@ -12,6 +12,7 @@ normalized_alerts = CORE["normalized_alerts"]
 alert_set_digest = CORE["alert_set_digest"]
 alert_content_digest = CORE["alert_content_digest"]
 parcel_alert = CORE["parcel_alert"]
+parcel_display_label = CORE["parcel_display_label"]
 aggregate_alert_message = CORE["aggregate_alert_message"]
 mobile_notification_data = CORE["mobile_notification_data"]
 mobile_clear_data = CORE["mobile_clear_data"]
@@ -135,7 +136,7 @@ def test_parcel_contract_becomes_stable_german_live_alert():
     assert alert == {
         "fingerprint": "parcel:dhl:00340434161094000000",
         "message": "📦 Beispielshop: In Zustellung · heute 14:00–16:00",
-        "critical_text": "3/4",
+        "critical_text": "Heute",
         "progress": 3,
         "progress_max": 4,
         "progress_bar_direction": "increasing",
@@ -148,7 +149,7 @@ def test_parcel_contract_becomes_stable_german_live_alert():
     }
     assert live_activity_title(alert) == "Paket"
     live_data = mobile_live_activity_data([alert], critical_text="1/1")
-    assert live_data["critical_text"] == "3/4"
+    assert live_data["critical_text"] == "Heute"
     assert live_data["progress"] == 3
     assert live_data["progress_max"] == 4
     assert live_data["progress_bar_color"] == "#30D158"
@@ -156,6 +157,20 @@ def test_parcel_contract_becomes_stable_german_live_alert():
     assert live_data["background_color"] == "#101820"
     assert parcel_alert({"status": "delivered", "delivered": True}) is None
     assert "sd_popup=meldung-pakete" in alert_dashboard_url(alert)
+
+def test_parcel_label_removes_broken_scraper_placeholders():
+    assert parcel_display_label(
+        "Gebrüder Weiss Express Ltd. (Not Sel Ths-", "Gebrüder Weiss"
+    ) == "Gebrüder Weiss Express Ltd."
+    assert parcel_display_label("Not Selected", "DHL") == "DHL"
+    assert parcel_display_label(None, "UPS") == "UPS"
+    alert = parcel_alert({
+        "carrier": "Gebrüder Weiss",
+        "barcode": "broken-label",
+        "sender": "Gebrüder Weiss Express Ltd. (Not Sel Ths-",
+        "status": "registered",
+    })
+    assert alert["message"] == "📦 Gebrüder Weiss Express Ltd.: Registriert"
 
 def test_iphone_actions_are_scoped_to_recipient_and_alert_set():
     recipient = "notify.mobile_app_boris_iphone"

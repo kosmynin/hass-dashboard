@@ -44,6 +44,39 @@ PARCEL_STATUS_PROGRESS = {
     "unknown": 1,
 }
 
+PARCEL_STATUS_CRITICAL_TEXT = {
+    "registered": "Erfasst",
+    "in_transit": "Unterwegs",
+    "out_for_delivery": "Heute",
+    "at_pickup_point": "Abholbereit",
+    "delivered": "Zugestellt",
+    "returning": "Rückweg",
+    "problem": "Problem",
+    "unknown": "Offen",
+}
+
+def parcel_display_label(sender: object, carrier: object = None) -> str:
+    """Return a readable parcel label without scraper placeholders."""
+    def clean(value: object) -> str:
+        text = re.sub(r"\s+", " ", str(value or "").replace("\u200b", " ")).strip()
+        placeholder = re.search(
+            r"\(\s*(?:not\s+sel(?:ected)?|not\s+set|none|null|unknown|n/?a)\b",
+            text,
+            re.IGNORECASE,
+        )
+        if placeholder:
+            text = text[:placeholder.start()]
+        elif text.count("(") > text.count(")"):
+            text = text[:text.rfind("(")]
+        text = text.strip(" \t\r\n-–—·,:;()")
+        return "" if text.casefold() in {
+            "none", "null", "unknown", "unbekannt", "not set", "not selected", "n/a"
+        } else text
+
+    clean_sender = clean(sender)
+    clean_carrier = clean(carrier)
+    return clean_sender or clean_carrier or "Paket"
+
 UPS_NORMAL_STATES = frozenset((
     "online", "on", "ok", "normal", "ol", "connected", "available", "mains", "line",
 ))
@@ -132,7 +165,7 @@ def parcel_alert(
     barcode = str(parcel.get("barcode") or "").strip()
     sender = str(parcel.get("sender") or "").strip()
     pickup_point = str(parcel.get("pickup_point") or "").strip()
-    label = sender or carrier
+    label = parcel_display_label(sender, carrier)
     status_label = PARCEL_STATUS_LABELS.get(status, PARCEL_STATUS_LABELS["unknown"])
     details = [status_label]
     if status == "at_pickup_point" and pickup_point:
@@ -177,7 +210,9 @@ def parcel_alert(
     return {
         "fingerprint": f"parcel:{carrier.casefold()}:{identity}",
         "message": f"📦 {label}: {' · '.join(details)}",
-        "critical_text": f"{progress}/4",
+        "critical_text": PARCEL_STATUS_CRITICAL_TEXT.get(
+            status, PARCEL_STATUS_CRITICAL_TEXT["unknown"]
+        ),
         "progress": progress,
         "progress_max": 4,
         "progress_bar_direction": "increasing",
