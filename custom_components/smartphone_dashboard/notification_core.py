@@ -10,6 +10,7 @@ MOBILE_NOTIFICATION_TAG = "smartphone_dashboard_alerts"
 MOBILE_NOTIFICATION_GROUP = "smartphone_dashboard"
 MOBILE_LIVE_ACTIVITY_TAG_PREFIX = "smartphone_dashboard_live"
 MOBILE_MEDIA_ACTIVITY_TAG_PREFIX = "smartphone_dashboard_media"
+MOBILE_APPLIANCE_ACTIVITY_TAG_PREFIX = "smartphone_dashboard_appliance"
 MOBILE_DASHBOARD_PATH = "/handy/handy"
 MOBILE_ACTION_PREFIX = "SMARTPHONE_DASHBOARD"
 ALERT_POPUP_BY_CATEGORY = {
@@ -591,6 +592,152 @@ def mobile_media_activity_data(
         "url": url,
         "clickAction": url,
     }
+    if silent:
+        data["silent"] = True
+    return data
+
+APPLIANCE_PRESENTATIONS = {
+    "dishwasher": ("Spülmaschine", "mdi:dishwasher", "#0A84FF"),
+    "washer": ("Waschmaschine", "mdi:washing-machine", "#0A84FF"),
+    "dryer": ("Trockner", "mdi:tumble-dryer", "#FF9F0A"),
+    "oven": ("Backofen", "mdi:stove", "#FF453A"),
+}
+
+def appliance_kind(descriptor: object) -> str:
+    """Identify supported program-driven household appliances."""
+    value = str(descriptor or "").casefold()
+    patterns = (
+        ("dishwasher", r"dish[ _-]?washer|sp[üu]lmaschine|spuelmaschine|geschirrsp[üu]ler|geschirrspueler"),
+        ("washer", r"washing[ _-]?machine|(^|[^a-z])washer([^a-z]|$)|waschmaschine"),
+        ("dryer", r"tumble[ _-]?dryer|(^|[^a-z])dryer([^a-z]|$)|w[äa]schetrockner|waeschetrockner|(^|[^a-z])trockner([^a-z]|$)"),
+        ("oven", r"(^|[^a-z])oven([^a-z]|$)|backofen"),
+    )
+    return next((kind for kind, pattern in patterns if re.search(pattern, value)), "")
+
+def appliance_phase(value: object) -> str:
+    """Normalize common integration-specific operation states."""
+    state = re.sub(r"[^a-z0-9äöü]+", " ", str(value or "").casefold()).strip()
+    if not state or state in {"unknown", "unavailable", "none", "null"}:
+        return ""
+    if re.search(r"\b(error|fault|problem|action required|störung|stoerung|fehler)\b", state):
+        return "error"
+    if re.search(r"\b(pause|paused|pausiert|hold)\b", state):
+        return "paused"
+    if re.search(r"\b(off|idle|inactive|ready|standby|finished|finish|complete|completed|end|ended|aus|bereit|fertig|beendet)\b", state):
+        return "inactive"
+    if re.search(r"\b(delayed start|scheduled|pending|start delayed|zeitvorwahl)\b", state):
+        return "scheduled"
+    if re.search(r"\b(run|running|active|on|washing|drying|heat|heating|bake|baking|preheat|preheating|cleaning|rinse|rinsing|spinning|in use|aktiv|eingeschaltet|läuft|laeuft|waschen|trocknen|heizen|backen|spülen|spuelen|reinigen|schleudern|betrieb)\b", state):
+        return "active"
+    return ""
+
+def appliance_live_activity_tag(device_id: str, generation: int = 0) -> str:
+    """Return a short, stable tag for one household appliance."""
+    token = hashlib.sha256(device_id.encode()).hexdigest()[:12]
+    return f"{MOBILE_APPLIANCE_ACTIVITY_TAG_PREFIX}_{token}_{generation % 2}"
+
+def appliance_activity_presentation(
+    device_id: str,
+    device_name: object,
+    kind: str,
+    status: object,
+    *,
+    program: object = "",
+    progress: object = None,
+    remaining_minutes: object = None,
+    url: str = "",
+) -> dict[str, object]:
+    """Build a concise, rate-limit-friendly appliance Live Activity."""
+    fallback_name, icon, color = APPLIANCE_PRESENTATIONS.get(
+        kind, ("Haushaltsgerät", "mdi:progress-wrench", "#0A84FF")
+    )
+    title = str(device_name or fallback_name).strip() or fallback_name
+    phase = appliance_phase(status)
+    phase_label = {
+        "active": "Läuft", "paused": "Pausiert", "error": "Prüfen",
+        "scheduled": "Geplant",
+    }.get(phase, str(status or "").strip() or "Aktiv")
+    program_label = re.sub(r"[_-]+", " ", str(program or "").strip())
+    if "." in program_label and " " not in program_label:
+        program_label = program_label.rsplit(".", 1)[-1]
+    program_label = re.sub(r"(?<=[a-zäöü])(?=[A-ZÄÖÜ0-9])", " ", program_label).strip()
+
+    try:
+        numeric_progress = max(0.0, min(100.0, float(progress)))
+    except (TypeError, ValueError):
+        numeric_progress = None
+    try:
+        numeric_remaining = max(0, int(round(float(remaining_minutes))))
+    except (TypeError, ValueError):
+        numeric_remaining = None
+
+    details: list[str] = []
+    if program_label and appliance_phase(program_label) != "inactive":
+        details.append(program_label)
+    if numeric_remaining is not None and numeric_remaining > 0:
+        hours, minutes = divmod(numeric_remaining, 60)
+        remaining_label = f"{hours} Std. {minutes} Min." if hours and minutes else (
+            f"{hours} Std." if hours else f"{minutes} Min."
+        )
+        details.append(f"noch {remaining_label}")
+        critical_text = remaining_label
+    elif numeric_progress is not None:
+        critical_text = f"{numeric_progress:.0f} %"
+    else:
+        critical_text = phase_label
+    message = " · ".join(dict.fromkeys(details)) or phase_label
+
+    # Digest buckets deliberately suppress minute-by-minute push updates while
+    # still reflecting meaningful progress roughly every ten minutes/percent.
+    progress_bucket = None if numeric_progress is None else int(numeric_progress // 10 * 10)
+    remaining_bucket = None if numeric_remaining is None else int((numeric_remaining + 9) // 10 * 10)
+    identity = "\0".join(map(str, (
+        device_id, title, kind, phase, program_label, progress_bucket, remaining_bucket, url,
+    )))
+    result: dict[str, object] = {
+        "entity_id": device_id,
+        "title": title,
+        "message": message,
+        "critical_text": critical_text,
+        "icon": icon,
+        "color": color,
+        "url": url or MOBILE_DASHBOARD_PATH,
+        "digest": hashlib.sha256(identity.encode()).hexdigest()[:24],
+    }
+    if numeric_progress is not None:
+        result.update({
+            "progress": int(round(numeric_progress)),
+            "progress_max": 100,
+            "progress_bar_direction": "increasing",
+        })
+    return result
+
+def mobile_appliance_activity_data(
+    entry: Mapping[str, object], *, tag: str, silent: bool = False
+) -> dict[str, object]:
+    """Build a Companion payload for one running household appliance."""
+    url = str(entry.get("url") or MOBILE_DASHBOARD_PATH)
+    color = str(entry.get("color") or "#0A84FF")
+    data: dict[str, object] = {
+        "tag": tag,
+        "live_update": True,
+        "critical_text": str(entry.get("critical_text") or "Läuft"),
+        "notification_icon": str(entry.get("icon") or "mdi:progress-wrench"),
+        "notification_icon_color": color,
+        "color": color,
+        "background_color": "#1C1C1E",
+        "text_color": "#FFFFFF",
+        "relevance_score": 0.35,
+        "sticky": True,
+        "alert_once": silent,
+        "url": url,
+        "clickAction": url,
+    }
+    for key in ("progress", "progress_max", "progress_bar_direction"):
+        if key in entry:
+            data[key] = entry[key]
+    if "progress" in data:
+        data["progress_bar_color"] = color
     if silent:
         data["silent"] = True
     return data

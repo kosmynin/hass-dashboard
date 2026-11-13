@@ -29,6 +29,11 @@ media_activity_presentation = CORE["media_activity_presentation"]
 media_dashboard_url = CORE["media_dashboard_url"]
 media_live_activity_tag = CORE["media_live_activity_tag"]
 mobile_media_activity_data = CORE["mobile_media_activity_data"]
+appliance_kind = CORE["appliance_kind"]
+appliance_phase = CORE["appliance_phase"]
+appliance_activity_presentation = CORE["appliance_activity_presentation"]
+appliance_live_activity_tag = CORE["appliance_live_activity_tag"]
+mobile_appliance_activity_data = CORE["mobile_appliance_activity_data"]
 mobile_action_ids = CORE["mobile_action_ids"]
 parse_mobile_action = CORE["parse_mobile_action"]
 is_battery_level_sensor = CORE["is_battery_level_sensor"]
@@ -339,6 +344,43 @@ def test_media_live_activity_contains_player_track_and_media_icon():
     assert remote_data["url"] == remote_url
     assert remote_data["clickAction"] == remote_url
     assert media_dashboard_url("invalid", "#kaputt?") == "/handy/handy?sd_popup=medien#medien"
+
+def test_appliance_live_activity_normalizes_integrations_and_throttles_progress():
+    assert appliance_kind("Bosch Geschirrspüler SMV") == "dishwasher"
+    assert appliance_kind("LG washing_machine") == "washer"
+    assert appliance_kind("Miele Tumble Dryer") == "dryer"
+    assert appliance_kind("Küche Backofen") == "oven"
+    assert appliance_phase("BSH.Common.EnumType.OperationState.Run") == "active"
+    assert appliance_phase("Programme running") == "active"
+    assert appliance_phase("Pause") == "paused"
+    assert appliance_phase("Ready") == "inactive"
+    assert appliance_phase("Finished") == "inactive"
+
+    entry = appliance_activity_presentation(
+        "device-42", "Spülmaschine", "dishwasher", "Run",
+        program="Eco_50", progress=63, remaining_minutes=47,
+        url="/handy/handy?sd_popup=raum-kueche#raum-kueche",
+    )
+    assert entry["title"] == "Spülmaschine"
+    assert entry["message"] == "Eco 50 · noch 47 Min."
+    assert entry["critical_text"] == "47 Min."
+    assert entry["icon"] == "mdi:dishwasher"
+    assert entry["progress"] == 63
+    # Small minute/progress changes share a digest and therefore do not create
+    # one push update per sensor tick.
+    near = appliance_activity_presentation(
+        "device-42", "Spülmaschine", "dishwasher", "Run",
+        program="Eco_50", progress=64, remaining_minutes=46,
+        url="/handy/handy?sd_popup=raum-kueche#raum-kueche",
+    )
+    assert entry["digest"] == near["digest"]
+    tag = appliance_live_activity_tag("device-42")
+    assert tag.startswith("smartphone_dashboard_appliance_") and tag.endswith("_0")
+    data = mobile_appliance_activity_data(entry, tag=tag, silent=True)
+    assert data["progress"] == 63 and data["progress_max"] == 100
+    assert data["critical_text"] == "47 Min."
+    assert data["url"].endswith("#raum-kueche")
+    assert data["silent"] is True
 
 def test_waste_collection_details_support_default_and_dated_attributes():
     details = waste_collection_details(

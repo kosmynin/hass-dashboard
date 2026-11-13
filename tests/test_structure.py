@@ -10,7 +10,7 @@ def test_manifest_and_hacs():
     hacs = json.loads((ROOT / "hacs.json").read_text())
     assert manifest["domain"] == "smartphone_dashboard"
     assert manifest["config_flow"] is True
-    assert manifest["version"] == "22.0.63"
+    assert manifest["version"] == "22.0.64"
     assert hacs["name"] == "Smartphone Dashboard"
     assert hacs["zip_release"] is True
     assert hacs["filename"] == "smartphone_dashboard.zip"
@@ -70,7 +70,10 @@ def test_backend_notifications_are_active_and_legacy_yaml_is_not():
     assert '"title": f"{NOTIFICATION_TITLE} – {entry[\'title\']}"' in runtime
     assert '"message": entry["message"]' in runtime
     assert "def queue_refresh" in runtime
-    assert 'entity_id.startswith(("sensor.", "binary_sensor.", "media_player.", "input_"))' in runtime
+    assert '"sensor.", "binary_sensor.", "media_player.", "switch.",' in runtime
+    assert '"select.", "number.", "datetime.", "climate.", "input_",' in runtime
+    assert "_active_appliance_entries" in runtime and "_sync_appliance_live_activities" in runtime
+    assert '"notification_appliances"' in runtime
     assert 'state.state in ("playing", "buffering")' in runtime
     assert 'if mobile_app:' in runtime and '"retire-standard"' in runtime
     assert 'type: "smartphone_dashboard/notifications/action"' in (

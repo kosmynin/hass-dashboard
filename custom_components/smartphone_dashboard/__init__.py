@@ -94,7 +94,7 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
                     "", vol.Match(r"^notify\.mobile_app_[a-z0-9_]+$")
                 ),
                 vol.Optional("group", default="all"): vol.In(
-                    ("all", "messages", "parcels", "media")
+                    ("all", "messages", "parcels", "media", "appliances")
                 ),
             }),
         )
@@ -166,7 +166,7 @@ def _valid_config(value: dict[str, Any]) -> dict[str, Any]:
     numeric_ranges = {"battery_threshold": (1, 100), "contact_minutes": (1, 1440), "co2_threshold": (400, 5000), "frost_threshold": (-30, 20), "waste_days": (0, 30), "max_columns": (1, 4)}
     for key, (minimum, maximum) in numeric_ranges.items():
         if key in value and (isinstance(value[key], bool) or not isinstance(value[key], (int, float)) or not math.isfinite(value[key]) or not minimum <= value[key] <= maximum): raise vol.Invalid(f"{key} ist außerhalb des gültigen Bereichs")
-    boolean_keys = ("notification_batteries", "notification_contacts", "notification_co2", "notification_waste", "notification_ups", "notification_frost", "notification_nina", "notification_parcels", "notification_media")
+    boolean_keys = ("notification_batteries", "notification_contacts", "notification_co2", "notification_waste", "notification_ups", "notification_frost", "notification_nina", "notification_parcels", "notification_media", "notification_appliances")
     for key in boolean_keys:
         if key in value and not isinstance(value[key], bool): raise vol.Invalid(f"{key} muss ein Wahrheitswert sein")
     if "nina_entities" in value and (not isinstance(value["nina_entities"], str) or not re.fullmatch(r"binary_sensor\.[a-zA-Z0-9_]+\*[a-zA-Z0-9_]*", value["nina_entities"])): raise vol.Invalid("nina_entities ist ungültig")
@@ -240,7 +240,7 @@ def _valid_key(value: str) -> str:
 PUBLIC_NOTIFICATION_TYPES = {
     "notification_batteries": bool, "notification_contacts": bool, "notification_co2": bool,
     "notification_waste": bool, "notification_ups": bool, "notification_frost": bool,
-    "notification_nina": bool, "notification_parcels": bool, "notification_media": bool, "battery_threshold": (int, float),
+    "notification_nina": bool, "notification_parcels": bool, "notification_media": bool, "notification_appliances": bool, "battery_threshold": (int, float),
     "contact_minutes": (int, float), "co2_threshold": (int, float), "frost_threshold": (int, float), "waste_days": (int, float),
 }
 DISPLAY_ENTITY_LISTS = ("battery_exclusions", "waste_entities", "ups_entities")

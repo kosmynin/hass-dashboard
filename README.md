@@ -73,8 +73,9 @@ Batteriespannungen in Volt oder Millivolt werden grundsätzlich nicht als
 niedriger Batteriestand in den Meldungen geführt.
 Dashboard, Persistent Notification und optionale Push-Mitteilungen verwenden
 dieselben Aktivierungs-, Grenzwert- und Sichtbarkeitsregeln. Ausgeblendete
-Entitäten werden ignoriert; nur Batteriesensoren bleiben absichtlich sichtbar,
-solange sie nicht in den Batterie-Ausnahmen stehen.
+Entitäten werden ignoriert; nur Batteriesensoren und technische Statushelfer
+laufender Haushaltsgeräte bleiben absichtlich auswertbar. Batteriesensoren
+lassen sich weiterhin über die Batterie-Ausnahmen ausschließen.
 
 Im Sicherheits-Pop-up stehen Alarm-Panels vor Kameras und Schlössern. Die
 Master-Alarmanlage wird anhand ihres Namens erkannt oder in den Einstellungen
@@ -119,7 +120,7 @@ neuer und aktivierte Live Activities in der Companion App.
 
 Unter **Entwicklerwerkzeuge → Aktionen** sendet
 `smartphone_dashboard.send_test_designs` wahlweise alle Meldungsdesigns, nur
-die fünf Paketstufen oder das Mediendesign als echte Live Activities. Ohne
+die Paketstufen, das Mediendesign oder vier Haushaltsgerätedesigns als echte Live Activities. Ohne
 expliziten Empfänger werden die Dashboard-Empfänger verwendet.
 `smartphone_dashboard.clear_test_designs` beendet anschließend alle so
 erzeugten Test-Aktivitäten wieder. Die Gruppe **Alle Designs** sollte wegen des
@@ -140,6 +141,17 @@ generischen Home-Assistant-Live-Activity werden von der Companion-Payload nicht
 angeboten. Der Absprung enthält zusätzlich zum Fragment einen stabilen
 `sd_popup`-Parameter; dadurch öffnet der Loader das Medien-Pop-up auch dann,
 wenn die Companion-App beim Kaltstart den Fragmentteil der URL verwirft.
+
+Laufende Programme von **Spülmaschine, Waschmaschine, Trockner und Backofen**
+werden automatisch über ihre Geräte- und Entitätszuordnung erkannt. Ihre stillen
+Live Activities zeigen Programm, Restzeit und – sofern die Integration ihn
+bereitstellt – einen Fortschrittsbalken. Versteckte technische Statushelfer
+dürfen dafür ausgewertet werden, deaktivierte Entitäten nicht. Fortschrittswerte
+werden in Zehnerschritten gebündelt, damit minütliche Sensorupdates das
+iPhone-Push-Limit nicht erneut ausschöpfen. Bei „Fertig“, „Bereit“ oder „Aus“
+endet die Activity automatisch. Die Funktion lässt sich unter
+**Meldungen → Laufende Haushaltsgeräte** deaktivieren; ein Antippen öffnet den
+zugehörigen Raumbereich.
 
 Der Meldungsdialog bietet die Aktionen **30 Min. stumm** und **Bis Änderung
 stumm**. Die erste blendet die Live Activity dieses Smartphones für 30 Minuten

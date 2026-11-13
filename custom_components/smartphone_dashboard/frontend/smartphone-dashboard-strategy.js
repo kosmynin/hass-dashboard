@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.63";
+const STRATEGY_VERSION = "22.0.64";
 const CONFIG_VERSION = 26;
 
 const ACTIVE_ROOM_STYLES = `
@@ -399,7 +399,7 @@ const NOTIFICATION_HELPERS = {
   nina_entities: "input_text.smartphone_nina_muster",
 };
 const BACKEND_NOTIFICATION_KEYS = [
-  ...Object.keys(NOTIFICATION_HELPERS), "waste_days", "notification_media", "notification_parcels",
+  ...Object.keys(NOTIFICATION_HELPERS), "waste_days", "notification_media", "notification_parcels", "notification_appliances",
 ];
 
 // Sofort registrieren: Home Assistant wartet maximal fünf Sekunden auf das
@@ -2588,6 +2588,7 @@ const EDITOR_DEFAULTS = {
   notification_nina: true,
   notification_parcels: true,
   notification_media: true,
+  notification_appliances: true,
   battery_threshold: 6,
   contact_minutes: 15,
   co2_threshold: 1000,
@@ -3635,6 +3636,7 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
             <div class="switch-row"><div class="switch-copy"><div class="switch-title">NINA</div><div class="switch-description">Aktive amtliche Warnmeldungen anzeigen.</div></div><ha-switch data-switch="notification_nina"></ha-switch></div>
             <div class="switch-row"><div class="switch-copy"><div class="switch-title">Pakete</div><div class="switch-description">Aktive Sendungen aus den HA Parcel Integrations im Dashboard und als iPhone Live Activities anzeigen.</div></div><ha-switch data-switch="notification_parcels"></ha-switch></div>
             <div class="switch-row"><div class="switch-copy"><div class="switch-title">Aktive Medien</div><div class="switch-description">Abspielende Media Player als stille iPhone Live Activities anzeigen. Die Auswahl folgt dem Bereich „Medien“.</div></div><ha-switch data-switch="notification_media"></ha-switch></div>
+            <div class="switch-row"><div class="switch-copy"><div class="switch-title">Laufende Haushaltsgeräte</div><div class="switch-description">Spülmaschine, Waschmaschine, Trockner und Backofen während eines laufenden Programms mit Fortschritt und Restzeit als iPhone Live Activities anzeigen.</div></div><ha-switch data-switch="notification_appliances"></ha-switch></div>
           </div>
         </details>
 

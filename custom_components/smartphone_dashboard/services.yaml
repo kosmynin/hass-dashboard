@@ -2,7 +2,7 @@ send_test_designs:
   name: Testdesigns senden
   description: >-
     Sendet echte Live Activities mit den verwendeten Meldungs-, Paket- und
-    Mediendesigns. Die Option „Alle“ startet viele Aktivitäten und sollte nur
+    Medien- und Haushaltsgerätedesigns. Die Option „Alle“ startet viele Aktivitäten und sollte nur
     gezielt zur visuellen Prüfung verwendet werden.
   fields:
     recipient:
@@ -29,6 +29,8 @@ send_test_designs:
               value: parcels
             - label: Medien
               value: media
+            - label: Haushaltsgeräte
+              value: appliances
 
 clear_test_designs:
   name: Testdesigns entfernen

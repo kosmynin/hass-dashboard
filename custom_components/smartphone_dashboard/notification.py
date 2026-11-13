@@ -20,7 +20,12 @@ from .notification_core import (
     aggregate_alert_message,
     alert_content_digest,
     alert_set_digest,
+    appliance_activity_presentation,
+    appliance_kind,
+    appliance_live_activity_tag,
+    appliance_phase,
     area_entity_label,
+    dashboard_popup_url,
     dashboard_entity_enabled,
     is_battery_level_sensor,
     live_activity_entries,
@@ -30,6 +35,7 @@ from .notification_core import (
     media_dashboard_url,
     media_live_activity_tag,
     mobile_clear_data,
+    mobile_appliance_activity_data,
     mobile_live_activity_data,
     mobile_live_clear_data,
     mobile_media_activity_data,
@@ -74,6 +80,10 @@ TEST_ACTIVITY_TAGS = (
     "smartphone_dashboard_test_parcel_pickup",
     "smartphone_dashboard_test_parcel_problem",
     "smartphone_dashboard_test_media",
+    "smartphone_dashboard_test_dishwasher",
+    "smartphone_dashboard_test_washer",
+    "smartphone_dashboard_test_dryer",
+    "smartphone_dashboard_test_oven",
 )
 LEGACY_TO_CONFIG = {
     "input_boolean.smartphone_meldung_batterien": "notification_batteries", "input_boolean.smartphone_meldung_kontakte": "notification_contacts",
@@ -147,7 +157,10 @@ class NotificationCoordinator:
     @callback
     def _state_changed(self, event: Event) -> None:
         entity_id = event.data.get("entity_id", "")
-        if entity_id.startswith(("sensor.", "binary_sensor.", "media_player.", "input_")):
+        if entity_id.startswith((
+            "sensor.", "binary_sensor.", "media_player.", "switch.",
+            "select.", "number.", "datetime.", "climate.", "input_",
+        )):
             self._enqueue()
 
     @callback
@@ -308,6 +321,32 @@ class NotificationCoordinator:
                     },
                 )
                 sent += 1
+            if group in ("all", "appliances"):
+                samples = (
+                    ("dishwasher", "Spülmaschine", "Eco 50 °C", 62, 48),
+                    ("washer", "Waschmaschine", "Pflegeleicht", 35, 72),
+                    ("dryer", "Trockner", "Schranktrocken", 78, 24),
+                    ("oven", "Backofen", "Heißluft 180 °C", 50, 18),
+                )
+                for kind, name, program, progress, remaining in samples:
+                    entry = appliance_activity_presentation(
+                        f"test-{kind}", name, kind, "running",
+                        program=program, progress=progress,
+                        remaining_minutes=remaining,
+                    )
+                    await self._async_notify(
+                        target,
+                        service,
+                        {
+                            "title": f"{NOTIFICATION_TITLE} – {name}",
+                            "message": entry["message"],
+                            "data": mobile_appliance_activity_data(
+                                entry,
+                                tag=f"smartphone_dashboard_test_{kind}",
+                            ),
+                        },
+                    )
+                    sent += 1
         return sent
 
     async def async_clear_test_designs(self, recipient: str = "") -> int:
@@ -370,6 +409,11 @@ class NotificationCoordinator:
     def _next_media_tag(entity_id: str, previous: str = "") -> str:
         generation = 1 if previous.endswith("_0") else 0
         return media_live_activity_tag(entity_id, generation)
+
+    @staticmethod
+    def _next_appliance_tag(device_id: str, previous: str = "") -> str:
+        generation = 1 if previous.endswith("_0") else 0
+        return appliance_live_activity_tag(device_id, generation)
 
     def _state(self, entity_id: str, default: str = "") -> str:
         dashboards = self.manager.data.get("dashboards", {})
@@ -596,6 +640,150 @@ class NotificationCoordinator:
             entries.append(entry)
         return entries[:3]
 
+    @staticmethod
+    def _appliance_remaining_minutes(state, descriptor: str, now: datetime) -> int | None:
+        """Interpret duration and end-time sensors used by common integrations."""
+        value = state.state if hasattr(state, "state") else state
+        attributes = state.attributes if hasattr(state, "attributes") else {}
+        raw = str(value or "").strip()
+        if not raw or raw.casefold() in ("unknown", "unavailable", "none", "null"):
+            return None
+        device_class = str(attributes.get("device_class") or "").casefold()
+        if device_class == "timestamp" or re.search(r"finish|end.?time|fertig", descriptor):
+            parsed = dt_util.parse_datetime(raw)
+            if parsed is not None:
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=now.tzinfo)
+                return max(0, int(math.ceil((parsed - now).total_seconds() / 60)))
+        match = re.fullmatch(r"(?:(\d+):)?(\d{1,2}):(\d{2})", raw)
+        if match:
+            hours = int(match.group(1) or 0)
+            return hours * 60 + int(match.group(2)) + (1 if int(match.group(3)) else 0)
+        try:
+            numeric = float(raw.replace(",", "."))
+        except ValueError:
+            return None
+        unit = str(attributes.get("unit_of_measurement") or "").casefold()
+        if unit in ("s", "sec", "second", "seconds", "sek", "sekunden"):
+            numeric /= 60
+        elif unit in ("ms", "millisecond", "milliseconds"):
+            numeric /= 60000
+        elif unit in ("h", "hr", "hour", "hours", "std", "stunden"):
+            numeric *= 60
+        return max(0, int(math.ceil(numeric)))
+
+    def _active_appliance_entries(self) -> list[dict[str, object]]:
+        """Discover running appliances and create one entry per physical device."""
+        strategy = self.manager.data.get("dashboards", {}).get("default", {}).get("config", {})
+        if strategy.get("notification_appliances", True) is False:
+            return []
+        entity_registry = er.async_get(self.hass)
+        device_registry = dr.async_get(self.hass)
+        grouped: dict[str, list[tuple[Any, Any, str]]] = {}
+        for state in self.hass.states.async_all():
+            entity_entry = entity_registry.async_get(state.entity_id)
+            if not entity_entry or not entity_entry.device_id:
+                continue
+            if not self._dashboard_entity_enabled(state.entity_id, allow_hidden=True):
+                continue
+            descriptor = " ".join(filter(None, (
+                state.entity_id,
+                entity_entry.name,
+                entity_entry.original_name,
+                str(state.attributes.get("friendly_name") or ""),
+            ))).casefold()
+            grouped.setdefault(entity_entry.device_id, []).append((state, entity_entry, descriptor))
+
+        now = dt_util.now()
+        entries: list[dict[str, object]] = []
+        for device_id, candidates in grouped.items():
+            device = device_registry.async_get(device_id)
+            if device is None:
+                continue
+            device_name = str(device.name_by_user or device.name or "").strip()
+            device_descriptor = " ".join(filter(None, (
+                device_name, device.model, device.manufacturer,
+                *(descriptor for _, _, descriptor in candidates),
+            )))
+            kind = appliance_kind(device_descriptor)
+            if not kind:
+                continue
+
+            status_candidates: list[tuple[int, Any, str, str]] = []
+            for state, _entry, descriptor in candidates:
+                if re.search(r"door|t[üu]r|lock|remote|child|warning|alarm|progress|fortschritt|remaining|restzeit|finish.?time|end.?time", descriptor):
+                    continue
+                phase = appliance_phase(state.state)
+                if not phase:
+                    continue
+                score = 0
+                if re.search(r"operation|operating|machine.?state|program.?state|status|zustand|betrieb", descriptor):
+                    score += 100
+                elif re.search(r"activity|phase|power|state", descriptor):
+                    score += 50
+                if phase in ("active", "paused", "error"):
+                    score += 25
+                status_candidates.append((score, state, descriptor, phase))
+            if not status_candidates:
+                continue
+            _score, status_state, _descriptor, phase = max(
+                status_candidates, key=lambda item: item[0]
+            )
+            if phase not in ("active", "paused", "error"):
+                continue
+
+            progress: float | None = None
+            remaining: int | None = None
+            program: object = ""
+            for key in ("progress", "program_progress", "percentage"):
+                if key in status_state.attributes:
+                    try:
+                        progress = float(status_state.attributes[key])
+                    except (TypeError, ValueError):
+                        pass
+                    if progress is not None:
+                        break
+            for key in ("remaining_time", "remaining_program_time", "time_remaining"):
+                if key in status_state.attributes:
+                    remaining = self._appliance_remaining_minutes(
+                        status_state.attributes[key], key, now
+                    )
+                    if remaining is not None:
+                        break
+            for key in ("current_program", "active_program", "program_name", "program"):
+                if status_state.attributes.get(key) not in (None, "", "unknown", "unavailable"):
+                    program = status_state.attributes[key]
+                    break
+
+            for state, _entry, descriptor in candidates:
+                if progress is None and re.search(r"progress|fortschritt|percent|percentage", descriptor):
+                    try:
+                        value = float(state.state.replace(",", "."))
+                        unit = str(state.attributes.get("unit_of_measurement") or "")
+                        progress = value * 100 if 0 <= value <= 1 and unit != "%" else value
+                    except (TypeError, ValueError):
+                        pass
+                if remaining is None and re.search(r"remaining.*time|time.*remaining|restzeit|program.*remaining|remaining.*program|finish.?time|end.?time", descriptor):
+                    remaining = self._appliance_remaining_minutes(state, descriptor, now)
+                if not program and re.search(r"current.*program|active.*program|selected.*program|program.*name|gew[äa]hltes.*programm|aktuelles.*programm", descriptor) and not re.search(r"progress|state|status", descriptor):
+                    if state.state not in ("unknown", "unavailable", "none", ""):
+                        program = state.state
+
+            area_id = dr.async_get_effective_area_id(self.hass, device)
+            popup = f"raum-{area_id}" if area_id else ""
+            url = dashboard_popup_url(popup) if popup else "/handy/handy"
+            entries.append(appliance_activity_presentation(
+                device_id,
+                device_name,
+                kind,
+                status_state.state,
+                program=program,
+                progress=progress,
+                remaining_minutes=remaining,
+                url=url,
+            ))
+        return sorted(entries, key=lambda entry: str(entry["title"]).casefold())[:4]
+
     async def _sync_persistent_notification(self, alerts: list[dict[str, str]]) -> None:
         message = aggregate_alert_message(alerts, bullet="- ") if alerts else ""
         if message == self._persistent_message:
@@ -726,6 +914,112 @@ class NotificationCoordinator:
             if not started:
                 media_started_map.pop(recipient, None)
 
+    async def _sync_appliance_live_activities(
+        self,
+        entries: list[dict[str, object]],
+        recipients: list[str],
+        digest_map: dict[str, dict[str, str]],
+        tag_map: dict[str, dict[str, str]],
+        started_map: dict[str, dict[str, float]],
+        errors: list[str],
+        active_retry_keys: set[tuple[str, str]],
+        now_epoch: float,
+    ) -> None:
+        """Reconcile independently updating household-appliance activities."""
+        desired_entries = {str(entry["entity_id"]): entry for entry in entries}
+        all_recipients = set(recipients) | set(tag_map)
+        for recipient in all_recipients:
+            if not recipient.startswith("notify.mobile_app_"):
+                digest_map.pop(recipient, None)
+                tag_map.pop(recipient, None)
+                started_map.pop(recipient, None)
+                continue
+            service = recipient.removeprefix("notify.")
+            desired = desired_entries if recipient in recipients else {}
+            digests = digest_map.setdefault(recipient, {})
+            tags = tag_map.setdefault(recipient, {})
+            started = started_map.setdefault(recipient, {})
+
+            for device_id in set(tags) - set(desired):
+                tag = tags[device_id]
+                clear_key = (recipient, f"appliance-clear:{tag}")
+                active_retry_keys.add(clear_key)
+                if self._retry_after.get(clear_key, 0) > time.monotonic():
+                    continue
+                try:
+                    await self._async_notify(
+                        recipient, service,
+                        {"message": "clear_notification", "data": mobile_live_clear_data(tag)},
+                    )
+                    tags.pop(device_id, None)
+                    digests.pop(device_id, None)
+                    started.pop(device_id, None)
+                    self._retry_after.pop(clear_key, None)
+                    self._retry_count.pop(clear_key, None)
+                except Exception as err:
+                    count = min(6, self._retry_count.get(clear_key, 0) + 1)
+                    self._retry_count[clear_key] = count
+                    self._retry_after[clear_key] = time.monotonic() + min(3600, 30 * (2 ** (count - 1)))
+                    errors.append(f"{recipient}: Geräte-Live-Activity entfernen: {err}")
+
+            for device_id, entry in desired.items():
+                tag = tags.get(device_id) or appliance_live_activity_tag(device_id)
+                started_at = started.get(device_id, 0)
+                renewal_due = started_at > 0 and now_epoch - started_at >= LIVE_ACTIVITY_RENEW_AFTER
+                if renewal_due:
+                    clear_key = (recipient, f"appliance-renew:{tag}")
+                    active_retry_keys.add(clear_key)
+                    if self._retry_after.get(clear_key, 0) > time.monotonic():
+                        continue
+                    try:
+                        await self._async_notify(
+                            recipient, service,
+                            {"message": "clear_notification", "data": mobile_live_clear_data(tag)},
+                        )
+                        tag = self._next_appliance_tag(device_id, tag)
+                        tags[device_id] = tag
+                        digests.pop(device_id, None)
+                        started.pop(device_id, None)
+                        started_at = 0
+                        self._retry_after.pop(clear_key, None)
+                        self._retry_count.pop(clear_key, None)
+                    except Exception as err:
+                        count = min(6, self._retry_count.get(clear_key, 0) + 1)
+                        self._retry_count[clear_key] = count
+                        self._retry_after[clear_key] = time.monotonic() + min(3600, 30 * (2 ** (count - 1)))
+                        errors.append(f"{recipient}: Geräte-Live-Activity erneuern: {err}")
+                        continue
+                if digests.get(device_id) == entry["digest"] and not renewal_due:
+                    continue
+                live_key = (recipient, f"appliance:{tag}:{entry['digest']}")
+                active_retry_keys.add(live_key)
+                if self._retry_after.get(live_key, 0) > time.monotonic():
+                    continue
+                payload = {
+                    "title": f"{NOTIFICATION_TITLE} – {entry['title']}",
+                    "message": entry["message"],
+                    "data": mobile_appliance_activity_data(entry, tag=tag, silent=True),
+                }
+                try:
+                    await self._async_notify(recipient, service, payload)
+                    tags[device_id] = tag
+                    digests[device_id] = str(entry["digest"])
+                    started.setdefault(device_id, now_epoch)
+                    self._retry_after.pop(live_key, None)
+                    self._retry_count.pop(live_key, None)
+                except Exception as err:
+                    count = min(6, self._retry_count.get(live_key, 0) + 1)
+                    self._retry_count[live_key] = count
+                    self._retry_after[live_key] = time.monotonic() + min(3600, 30 * (2 ** (count - 1)))
+                    errors.append(f"{recipient}: Geräte-Live-Activity: {err}")
+
+            if not tags:
+                tag_map.pop(recipient, None)
+            if not digests:
+                digest_map.pop(recipient, None)
+            if not started:
+                started_map.pop(recipient, None)
+
     async def _run(self) -> None:
         while True:
             try: await asyncio.wait_for(self._queue.get(), timeout=60)
@@ -734,6 +1028,7 @@ class NotificationCoordinator:
             try:
                 alerts = normalized_alerts(self.evaluate())
                 media_entries = self._active_media_entries()
+                appliance_entries = self._active_appliance_entries()
                 fingerprints = [alert["fingerprint"] for alert in alerts]
                 digest = alert_set_digest(alerts)
                 digest_token = f"{DIGEST_PREFIX}{digest}" if digest else ""
@@ -809,6 +1104,39 @@ class NotificationCoordinator:
                     }
                     for recipient, values in notification_state.get(
                         "media_started_at_by_recipient", {}
+                    ).items()
+                    if isinstance(recipient, str) and isinstance(values, dict)
+                }
+                appliance_digest_map = {
+                    recipient: {
+                        device_id: str(digest_value)
+                        for device_id, digest_value in values.items()
+                        if isinstance(device_id, str) and isinstance(digest_value, str)
+                    }
+                    for recipient, values in notification_state.get(
+                        "appliance_digest_by_recipient", {}
+                    ).items()
+                    if isinstance(recipient, str) and isinstance(values, dict)
+                }
+                appliance_tag_map = {
+                    recipient: {
+                        device_id: str(tag)
+                        for device_id, tag in values.items()
+                        if isinstance(device_id, str) and isinstance(tag, str) and tag
+                    }
+                    for recipient, values in notification_state.get(
+                        "appliance_tag_by_recipient", {}
+                    ).items()
+                    if isinstance(recipient, str) and isinstance(values, dict)
+                }
+                appliance_started_map = {
+                    recipient: {
+                        device_id: float(started_at)
+                        for device_id, started_at in values.items()
+                        if isinstance(device_id, str) and isinstance(started_at, (int, float))
+                    }
+                    for recipient, values in notification_state.get(
+                        "appliance_started_at_by_recipient", {}
                     ).items()
                     if isinstance(recipient, str) and isinstance(values, dict)
                 }
@@ -1194,6 +1522,16 @@ class NotificationCoordinator:
                     active_retry_keys,
                     now_epoch,
                 )
+                await self._sync_appliance_live_activities(
+                    appliance_entries,
+                    recipients,
+                    appliance_digest_map,
+                    appliance_tag_map,
+                    appliance_started_map,
+                    errors,
+                    active_retry_keys,
+                    now_epoch,
+                )
                 self._retry_after = {
                     key: value for key, value in self._retry_after.items()
                     if key in active_retry_keys
@@ -1211,6 +1549,7 @@ class NotificationCoordinator:
                         "persistent_notification_id": PERSISTENT_NOTIFICATION_ID,
                         "live_activities": sum(len(tags) for tags in live_tag_map.values()),
                         "media_live_activities": sum(len(tags) for tags in media_tag_map.values()),
+                        "appliance_live_activities": sum(len(tags) for tags in appliance_tag_map.values()),
                         "errors": errors[-10:],
                     },
                     {
@@ -1221,6 +1560,9 @@ class NotificationCoordinator:
                         "media_digest_by_recipient": media_digest_map,
                         "media_tag_by_recipient": media_tag_map,
                         "media_started_at_by_recipient": media_started_map,
+                        "appliance_digest_by_recipient": appliance_digest_map,
+                        "appliance_tag_by_recipient": appliance_tag_map,
+                        "appliance_started_at_by_recipient": appliance_started_map,
                         "snooze_until_by_recipient": snooze_until_map,
                         "muted_digest_by_recipient": muted_digest_map,
                     },
