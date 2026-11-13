@@ -590,6 +590,9 @@ assert.match(parcelSummary.filter.include[0].options.styles, /design\.progress \
 const parcelPopup = parcelDashboard.views[0].sections[0].cards.find((card) => card.hash === "#meldung-pakete");
 assert.equal(parcelPopup.name, "Pakete");
 assert.equal(parcelPopup.cards[0].type, "custom:button-card");
+const parcelTemplate = parcelPopup.cards[0].custom_fields.parcels.slice(3, -3);
+const parcelHtml = Function("hass", parcelTemplate)(parcelHass);
+assert.match(parcelHtml, /Shop/);
 assert.match(parcelPopup.cards[0].custom_fields.parcels, /out_for_delivery/);
 assert.match(parcelPopup.cards[0].custom_fields.parcels, /contentByBarcode/);
 assert.match(parcelPopup.cards[0].custom_fields.parcels, /raw\?\.items/);

@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.62";
+const STRATEGY_VERSION = "22.0.63";
 const CONFIG_VERSION = 26;
 
 const ACTIVE_ROOM_STYLES = `
@@ -1103,8 +1103,8 @@ function parcelOverviewCard(entityIds) {
         if (!parcels.length) return '<div class="parcel-empty">Aktuell sind keine Pakete unterwegs.</div>';
         return parcels.map((parcel) => {
           const cleanCarrier = cleanParcelText(parcel.carrier) || 'Paketdienst';
-          const content = contentLabel(parcel) || contentByBarcode.get(String(parcel.barcode || '').trim());
-          const sender = escape(content || cleanParcelText(parcel.sender) || cleanCarrier);
+          const itemLabel = contentLabel(parcel) || contentByBarcode.get(String(parcel.barcode || '').trim());
+          const sender = escape(itemLabel || cleanParcelText(parcel.sender) || cleanCarrier);
           const carrier = escape(cleanCarrier);
           const design = designs[parcel.status] || designs.unknown;
           const status = escape(design.label);
