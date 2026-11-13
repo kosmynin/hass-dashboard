@@ -101,8 +101,7 @@ getrennte Warnungs-Live-Activities mit kategoriespezifischen Icons und Farben.
 Messwertänderungen wie ein neuer CO₂-Wert aktualisieren dabei dieselbe Live
 Activity still und sofort; die stabile Meldungsidentität verhindert unnötige
 Neustarts. Der Kopf benennt die Kategorie kompakt, etwa
-**Homeassistant – CO₂**, **Homeassistant – Abfall** oder
-**Homeassistant – Paket**. Paket-Aktivitäten wechseln Symbol und Akzentfarbe
+**CO₂**, **Abfall** oder **Paket**. Paket-Aktivitäten wechseln Symbol und Akzentfarbe
 passend zu Unterwegs, In Zustellung, Abholbereit, Rücksendung oder Problem.
 Zusätzlich zeigen sie den vierstufigen Versandfortschritt als echten
 systemgerenderten Fortschrittsbalken. Derselbe Status erscheint im
@@ -127,7 +126,7 @@ erzeugten Test-Aktivitäten wieder. Die Gruppe **Alle Designs** sollte wegen des
 iOS-Push-to-start-Budgets nur gezielt zur visuellen Prüfung verwendet werden.
 
 Zusätzlich können aktive Media Player eigene stille Live Activities erhalten.
-Sie zeigen **Homeassistant – Playername** als Titel sowie Medientitel, Interpret
+Sie zeigen den **Playernamen** als Titel sowie Medientitel, Interpret
 und Album als Inhalt mit einem passenden Medien-Icon,
 aktualisieren Titelwechsel ohne zusätzliche Push-Mitteilung und verschwinden
 beim Pausieren oder Stoppen. Verwendet werden die sichtbaren bzw. im Bereich

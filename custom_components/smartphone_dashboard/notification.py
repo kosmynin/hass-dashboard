@@ -289,7 +289,7 @@ class NotificationCoordinator:
                     target,
                     service,
                     {
-                        "title": f"{NOTIFICATION_TITLE} – {live_activity_title(alert)}",
+                        "title": live_activity_title(alert),
                         "message": presentation["message"],
                         "data": mobile_live_activity_data(
                             [alert],
@@ -312,7 +312,7 @@ class NotificationCoordinator:
                     target,
                     service,
                     {
-                        "title": f"{NOTIFICATION_TITLE} – Wohnzimmer",
+                        "title": "Wohnzimmer",
                         "message": media_entry["message"],
                         "data": mobile_media_activity_data(
                             media_entry,
@@ -338,7 +338,7 @@ class NotificationCoordinator:
                         target,
                         service,
                         {
-                            "title": f"{NOTIFICATION_TITLE} – {name}",
+                            "title": name,
                             "message": entry["message"],
                             "data": mobile_appliance_activity_data(
                                 entry,
@@ -890,7 +890,7 @@ class NotificationCoordinator:
                 if self._retry_after.get(live_key, 0) > time.monotonic():
                     continue
                 payload = {
-                    "title": f"{NOTIFICATION_TITLE} – {entry['title']}",
+                    "title": entry["title"],
                     "message": entry["message"],
                     "data": mobile_media_activity_data(entry, tag=tag, silent=True),
                 }
@@ -996,7 +996,7 @@ class NotificationCoordinator:
                 if self._retry_after.get(live_key, 0) > time.monotonic():
                     continue
                 payload = {
-                    "title": f"{NOTIFICATION_TITLE} – {entry['title']}",
+                    "title": entry["title"],
                     "message": entry["message"],
                     "data": mobile_appliance_activity_data(entry, tag=tag, silent=True),
                 }
@@ -1285,10 +1285,7 @@ class NotificationCoordinator:
                                         urgent = entry["fingerprint"].startswith("nina:")
                                         presentation = live_activity_presentation(entry)
                                         live_payload = {
-                                            "title": (
-                                                f"{NOTIFICATION_TITLE} – "
-                                                f"{live_activity_title(entry)}"
-                                            ),
+                                            "title": live_activity_title(entry),
                                             "message": presentation["message"],
                                             "data": mobile_live_activity_data(
                                                 [entry],
