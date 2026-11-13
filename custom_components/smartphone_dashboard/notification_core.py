@@ -23,17 +23,6 @@ ALERT_POPUP_BY_CATEGORY = {
     "parcel": "meldung-pakete",
 }
 
-PARCEL_STATUS_LABELS = {
-    "registered": "Registriert",
-    "in_transit": "Unterwegs",
-    "out_for_delivery": "In Zustellung",
-    "at_pickup_point": "Abholbereit",
-    "delivered": "Zugestellt",
-    "returning": "Rücksendung",
-    "problem": "Problem",
-    "unknown": "Status unbekannt",
-}
-
 PARCEL_STATUS_PROGRESS = {
     "registered": 1,
     "in_transit": 2,
@@ -166,8 +155,10 @@ def parcel_alert(
     sender = str(parcel.get("sender") or "").strip()
     pickup_point = str(parcel.get("pickup_point") or "").strip()
     label = parcel_display_label(sender, carrier)
-    status_label = PARCEL_STATUS_LABELS.get(status, PARCEL_STATUS_LABELS["unknown"])
-    details = [status_label]
+    # The Live Activity already presents the normalized state prominently via
+    # ``critical_text`` (for example "Erfasst" or "Unterwegs"). Repeating the
+    # raw status in the message wastes the limited compact-view space.
+    details: list[str] = []
     if status == "at_pickup_point" and pickup_point:
         details.append(pickup_point)
 
@@ -209,7 +200,7 @@ def parcel_alert(
     progress = PARCEL_STATUS_PROGRESS.get(status, PARCEL_STATUS_PROGRESS["unknown"])
     return {
         "fingerprint": f"parcel:{carrier.casefold()}:{identity}",
-        "message": f"📦 {label}: {' · '.join(details)}",
+        "message": f"📦 {label}" + (f": {' · '.join(details)}" if details else ""),
         "critical_text": PARCEL_STATUS_CRITICAL_TEXT.get(
             status, PARCEL_STATUS_CRITICAL_TEXT["unknown"]
         ),
@@ -364,13 +355,15 @@ def live_activity_presentation(alert: Mapping[str, object]) -> dict[str, str]:
         "summary": ("mdi:bell-badge-outline", "#FF9F0A"),
     }
     if category == "parcel":
-        descriptor = message.casefold()
-        if "problem" in descriptor or "rücksendung" in descriptor:
+        descriptor = f"{message} {alert.get('critical_text') or ''}".casefold()
+        if any(term in descriptor for term in ("problem", "rücksendung", "rückweg")):
             icon, color = "mdi:package-variant-remove", "#FF453A"
-        elif "in zustellung" in descriptor:
+        elif "in zustellung" in descriptor or "heute" in descriptor:
             icon, color = "mdi:truck-delivery", "#30D158"
         elif "abholbereit" in descriptor:
             icon, color = "mdi:package-variant", "#FF9F0A"
+        elif "unterwegs" in descriptor:
+            icon, color = "mdi:truck-fast", "#0A84FF"
         else:
             icon, color = "mdi:package-variant-closed", "#0A84FF"
     elif category == "waste":

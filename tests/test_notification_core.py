@@ -135,7 +135,7 @@ def test_parcel_contract_becomes_stable_german_live_alert():
     }, datetime.fromisoformat("2026-11-12T10:00:00+01:00"))
     assert alert == {
         "fingerprint": "parcel:dhl:00340434161094000000",
-        "message": "📦 Beispielshop: In Zustellung · heute 14:00–16:00",
+        "message": "📦 Beispielshop: heute 14:00–16:00",
         "critical_text": "Heute",
         "progress": 3,
         "progress_max": 4,
@@ -143,7 +143,7 @@ def test_parcel_contract_becomes_stable_german_live_alert():
     }
     presentation = live_activity_presentation(alert)
     assert presentation == {
-        "message": "Beispielshop: In Zustellung · heute 14:00–16:00",
+        "message": "Beispielshop: heute 14:00–16:00",
         "icon": "mdi:truck-delivery",
         "color": "#30D158",
     }
@@ -170,7 +170,7 @@ def test_parcel_label_removes_broken_scraper_placeholders():
         "sender": "Gebrüder Weiss Express Ltd. (Not Sel Ths-",
         "status": "registered",
     })
-    assert alert["message"] == "📦 Gebrüder Weiss Express Ltd.: Registriert"
+    assert alert["message"] == "📦 Gebrüder Weiss Express Ltd."
 
 def test_iphone_actions_are_scoped_to_recipient_and_alert_set():
     recipient = "notify.mobile_app_boris_iphone"
