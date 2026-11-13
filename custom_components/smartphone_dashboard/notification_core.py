@@ -66,6 +66,29 @@ def parcel_display_label(sender: object, carrier: object = None) -> str:
     clean_carrier = clean(carrier)
     return clean_sender or clean_carrier or "Paket"
 
+def parcel_content_label(parcel: Mapping[str, object]) -> str:
+    """Return a compact item label, including Amazon's ``raw.items`` field."""
+    raw = parcel.get("raw")
+    raw_items = raw.get("items") if isinstance(raw, Mapping) else None
+    candidates = (
+        parcel.get("content_title"),
+        parcel.get("contents"),
+        parcel.get("items"),
+        raw_items,
+    )
+    items: list[str] = []
+    for candidate in candidates:
+        values = candidate if isinstance(candidate, (list, tuple)) else [candidate]
+        for value in values:
+            text = re.sub(r"\s+", " ", str(value or "").replace("\u200b", " ")).strip()
+            if text and text.casefold() not in {item.casefold() for item in items}:
+                items.append(text)
+        if items:
+            break
+    if not items:
+        return ""
+    return items[0] if len(items) == 1 else f"{items[0]} + {len(items) - 1} weitere"
+
 UPS_NORMAL_STATES = frozenset((
     "online", "on", "ok", "normal", "ol", "connected", "available", "mains", "line",
 ))
@@ -154,7 +177,7 @@ def parcel_alert(
     barcode = str(parcel.get("barcode") or "").strip()
     sender = str(parcel.get("sender") or "").strip()
     pickup_point = str(parcel.get("pickup_point") or "").strip()
-    label = parcel_display_label(sender, carrier)
+    label = parcel_content_label(parcel) or parcel_display_label(sender, carrier)
     # The Live Activity already presents the normalized state prominently via
     # ``critical_text`` (for example "Erfasst" or "Unterwegs"). Repeating the
     # raw status in the message wastes the limited compact-view space.
@@ -324,7 +347,13 @@ def live_activity_entries(
     alerts: list[Mapping[str, object]], limit: int = 4
 ) -> list[dict[str, object]]:
     """Split independent alerts into independently readable Live Activities."""
-    normalized = normalized_alerts(alerts)
+    normalized = [
+        alert for alert in normalized_alerts(alerts)
+        if not (
+            str(alert.get("fingerprint") or "").startswith("parcel:")
+            and str(alert.get("critical_text") or "").casefold() == "erfasst"
+        )
+    ]
     maximum = max(1, limit)
     if len(normalized) <= maximum:
         return normalized

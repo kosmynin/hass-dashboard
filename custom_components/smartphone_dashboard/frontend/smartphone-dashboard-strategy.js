@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.61";
+const STRATEGY_VERSION = "22.0.62";
 const CONFIG_VERSION = 26;
 
 const ACTIVE_ROOM_STYLES = `
@@ -305,7 +305,26 @@ const PARCEL_SUMMARY_STYLES = `\${(() => {
     text = text.replace(/^[\\s\\-–—·,:;()]+|[\\s\\-–—·,:;()]+$/g, '');
     return /^(?:none|null|unknown|unbekannt|not set|not selected|n\\/?a)$/i.test(text) ? '' : text;
   };
-  const parcelLabel = cleanParcelText(first.sender) || cleanParcelText(first.carrier);
+  const contentLabel = (parcel) => {
+    const candidates = [parcel?.content_title, parcel?.contents, parcel?.items, parcel?.raw?.items];
+    for (const candidate of candidates) {
+      const items = (Array.isArray(candidate) ? candidate : [candidate])
+        .map(cleanParcelText).filter(Boolean)
+        .filter((item, index, all) => all.findIndex((other) => other.toLowerCase() === item.toLowerCase()) === index);
+      if (items.length) return items[0] + (items.length > 1 ? ' + ' + (items.length - 1) + ' weitere' : '');
+    }
+    return '';
+  };
+  const contentByBarcode = new Map();
+  Object.values(hass.states).forEach((state) => {
+    (Array.isArray(state?.attributes?.parcels) ? state.attributes.parcels : []).forEach((parcel) => {
+      const barcode = String(parcel?.barcode || '').trim();
+      const content = contentLabel(parcel);
+      if (barcode && content) contentByBarcode.set(barcode, content);
+    });
+  });
+  const parcelLabel = contentLabel(first) || contentByBarcode.get(String(first.barcode || '').trim())
+    || cleanParcelText(first.sender) || cleanParcelText(first.carrier);
   const designs = {
     registered: { progress: 1, icon: 'mdi:package-variant-closed', color: '#0A84FF' },
     in_transit: { progress: 2, icon: 'mdi:truck-fast', color: '#0A84FF' },
@@ -1046,6 +1065,32 @@ function parcelOverviewCard(entityIds) {
         const escape = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({
           '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
         })[character]);
+        const cleanParcelText = (value) => {
+          let text = String(value || '').replaceAll(String.fromCharCode(8203), ' ').replace(/\\s+/g, ' ').trim();
+          const placeholder = text.match(/\\(\\s*(?:not\\s+sel(?:ected)?|not\\s+set|none|null|unknown|n\\/?a)\\b/i);
+          if (placeholder) text = text.slice(0, placeholder.index);
+          else if ((text.match(/\\(/g) || []).length > (text.match(/\\)/g) || []).length) text = text.slice(0, text.lastIndexOf('('));
+          text = text.replace(/^[\\s\\-–—·,:;()]+|[\\s\\-–—·,:;()]+$/g, '');
+          return /^(?:none|null|unknown|unbekannt|not set|not selected|n\\/?a)$/i.test(text) ? '' : text;
+        };
+        const contentLabel = (parcel) => {
+          const candidates = [parcel?.content_title, parcel?.contents, parcel?.items, parcel?.raw?.items];
+          for (const candidate of candidates) {
+            const items = (Array.isArray(candidate) ? candidate : [candidate])
+              .map(cleanParcelText).filter(Boolean)
+              .filter((item, index, all) => all.findIndex((other) => other.toLowerCase() === item.toLowerCase()) === index);
+            if (items.length) return items[0] + (items.length > 1 ? ' + ' + (items.length - 1) + ' weitere' : '');
+          }
+          return '';
+        };
+        const contentByBarcode = new Map();
+        Object.values(hass.states).forEach((state) => {
+          (Array.isArray(state?.attributes?.parcels) ? state.attributes.parcels : []).forEach((parcel) => {
+            const barcode = String(parcel?.barcode || '').trim();
+            const content = contentLabel(parcel);
+            if (barcode && content) contentByBarcode.set(barcode, content);
+          });
+        });
         const seen = new Set();
         const parcels = ids.flatMap((id) => hass.states[id]?.attributes?.parcels || [])
           .filter((parcel) => {
@@ -1056,17 +1101,10 @@ function parcelOverviewCard(entityIds) {
             return true;
           });
         if (!parcels.length) return '<div class="parcel-empty">Aktuell sind keine Pakete unterwegs.</div>';
-        const cleanParcelText = (value) => {
-          let text = String(value || '').replaceAll(String.fromCharCode(8203), ' ').replace(/\\s+/g, ' ').trim();
-          const placeholder = text.match(/\\(\\s*(?:not\\s+sel(?:ected)?|not\\s+set|none|null|unknown|n\\/?a)\\b/i);
-          if (placeholder) text = text.slice(0, placeholder.index);
-          else if ((text.match(/\\(/g) || []).length > (text.match(/\\)/g) || []).length) text = text.slice(0, text.lastIndexOf('('));
-          text = text.replace(/^[\\s\\-–—·,:;()]+|[\\s\\-–—·,:;()]+$/g, '');
-          return /^(?:none|null|unknown|unbekannt|not set|not selected|n\\/?a)$/i.test(text) ? '' : text;
-        };
         return parcels.map((parcel) => {
           const cleanCarrier = cleanParcelText(parcel.carrier) || 'Paketdienst';
-          const sender = escape(cleanParcelText(parcel.sender) || cleanCarrier);
+          const content = contentLabel(parcel) || contentByBarcode.get(String(parcel.barcode || '').trim());
+          const sender = escape(content || cleanParcelText(parcel.sender) || cleanCarrier);
           const carrier = escape(cleanCarrier);
           const design = designs[parcel.status] || designs.unknown;
           const status = escape(design.label);

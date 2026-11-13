@@ -10,7 +10,7 @@ def test_manifest_and_hacs():
     hacs = json.loads((ROOT / "hacs.json").read_text())
     assert manifest["domain"] == "smartphone_dashboard"
     assert manifest["config_flow"] is True
-    assert manifest["version"] == "22.0.61"
+    assert manifest["version"] == "22.0.62"
     assert hacs["name"] == "Smartphone Dashboard"
     assert hacs["zip_release"] is True
     assert hacs["filename"] == "smartphone_dashboard.zip"
@@ -78,7 +78,7 @@ def test_backend_notifications_are_active_and_legacy_yaml_is_not():
     ).read_text()
     assert "asyncio.Queue" in runtime and "blocking=True" in runtime
     assert "alert_set_digest" in runtime and "valid_nina_glob" in runtime
-    assert 'LIVE_ACTIVITY_PAYLOAD_VERSION = "8"' in runtime
+    assert 'LIVE_ACTIVITY_PAYLOAD_VERSION = "9"' in runtime
     assert "alert_content_digest(alerts)" in runtime
     assert "same_alert_set" in runtime and "reuse_existing" in runtime
     assert "same_payload_version" in runtime

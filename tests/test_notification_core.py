@@ -13,6 +13,7 @@ alert_set_digest = CORE["alert_set_digest"]
 alert_content_digest = CORE["alert_content_digest"]
 parcel_alert = CORE["parcel_alert"]
 parcel_display_label = CORE["parcel_display_label"]
+parcel_content_label = CORE["parcel_content_label"]
 aggregate_alert_message = CORE["aggregate_alert_message"]
 mobile_notification_data = CORE["mobile_notification_data"]
 mobile_clear_data = CORE["mobile_clear_data"]
@@ -171,6 +172,36 @@ def test_parcel_label_removes_broken_scraper_placeholders():
         "status": "registered",
     })
     assert alert["message"] == "📦 Gebrüder Weiss Express Ltd."
+
+def test_amazon_parcel_uses_compact_content_instead_of_generic_carrier():
+    parcel = {
+        "carrier": "Amazon",
+        "barcode": "amazon-order",
+        "sender": None,
+        "status": "in_transit",
+        "raw": {"items": ["USB-C Netzteil", "Ladekabel", "Schutzhülle"]},
+    }
+    assert parcel_content_label(parcel) == "USB-C Netzteil + 2 weitere"
+    alert = parcel_alert(parcel)
+    assert alert is not None
+    assert alert["message"] == "📦 USB-C Netzteil + 2 weitere"
+
+def test_registered_parcels_do_not_start_a_live_activity():
+    registered = parcel_alert({
+        "carrier": "DHL",
+        "barcode": "registered",
+        "sender": "Beispielshop",
+        "status": "registered",
+    })
+    in_transit = parcel_alert({
+        "carrier": "UPS",
+        "barcode": "transit",
+        "sender": "Technikshop",
+        "status": "in_transit",
+    })
+    assert registered is not None and in_transit is not None
+    assert live_activity_entries([registered]) == []
+    assert live_activity_entries([registered, in_transit]) == [in_transit]
 
 def test_iphone_actions_are_scoped_to_recipient_and_alert_set():
     recipient = "notify.mobile_app_boris_iphone"

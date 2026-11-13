@@ -36,6 +36,7 @@ from .notification_core import (
     notification_recipient_token,
     normalized_alerts,
     parcel_alert,
+    parcel_content_label,
     parse_mobile_action,
     ups_state_is_alert,
     valid_nina_glob,
@@ -50,7 +51,7 @@ CLEAR_DIGEST = "clear"
 MOBILE_ACTION_EVENT = "mobile_app_notification_action"
 LIVE_ACTIVITY_RENEW_AFTER = 7 * 60 * 60
 LIVE_ACTIVITY_CONTENT_UPDATE_INTERVAL = 30 * 60
-LIVE_ACTIVITY_PAYLOAD_VERSION = "8"
+LIVE_ACTIVITY_PAYLOAD_VERSION = "9"
 MOBILE_PUSH_DUPLICATE_INTERVAL = 10 * 60
 MOBILE_PUSH_HOURLY_LIMIT = 60
 MOBILE_PUSH_DAILY_LIMIT = 200
@@ -232,7 +233,6 @@ class NotificationCoordinator:
             )
             planned_to = planned_from.replace(hour=16)
             parcel_samples = (
-                ("parcel_registered", "registered", "Beispielshop"),
                 ("parcel_transit", "in_transit", "Technikshop"),
                 ("parcel_delivery", "out_for_delivery", "Versandhaus"),
                 ("parcel_pickup", "at_pickup_point", "Abholung"),
@@ -449,8 +449,21 @@ class NotificationCoordinator:
         strategy = self.manager.data.get("dashboards", {}).get("default", {}).get("config", {})
         if strategy.get("notification_parcels", True) is False:
             return []
+        sensor_states = self.hass.states.async_all("sensor")
+        content_by_barcode: dict[str, str] = {}
+        for state in sensor_states:
+            source_parcels = state.attributes.get("parcels")
+            if not isinstance(source_parcels, list):
+                continue
+            for parcel in source_parcels:
+                if not isinstance(parcel, dict):
+                    continue
+                barcode = str(parcel.get("barcode") or "").strip()
+                content = parcel_content_label(parcel)
+                if barcode and content:
+                    content_by_barcode[barcode] = content
         candidates = [
-            state for state in self.hass.states.async_all("sensor")
+            state for state in sensor_states
             if self._dashboard_entity_enabled(state.entity_id)
             and isinstance(state.attributes.get("parcels"), list)
             and not re.search(r"(?:^|_)outgoing|delivered", state.entity_id, re.IGNORECASE)
@@ -477,7 +490,11 @@ class NotificationCoordinator:
             for parcel in state.attributes.get("parcels", []):
                 if not isinstance(parcel, dict):
                     continue
-                alert = parcel_alert(parcel, now)
+                enriched = dict(parcel)
+                barcode = str(parcel.get("barcode") or "").strip()
+                if barcode and not parcel_content_label(enriched):
+                    enriched["content_title"] = content_by_barcode.get(barcode, "")
+                alert = parcel_alert(enriched, now)
                 if alert is None or alert["fingerprint"] in seen:
                     continue
                 seen.add(alert["fingerprint"])

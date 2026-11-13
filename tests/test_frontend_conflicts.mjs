@@ -550,6 +550,10 @@ const parcelHass = {
       state: "1",
       attributes: { parcels: [{ carrier: "DHL", barcode: "abc", status: "in_transit", delivered: false }] },
     },
+    "sensor.amazon_orders_incoming_parcels": {
+      state: "1",
+      attributes: { parcels: [{ carrier: "Amazon", barcode: "amz", sender: null, status: "in_transit", delivered: false, raw: { items: ["USB-C Netzteil", "Ladekabel"] } }] },
+    },
     "sensor.parcel_aggregator_delivered_parcels": {
       state: "1",
       attributes: { parcels: [{ carrier: "DHL", barcode: "old", status: "delivered", delivered: true }] },
@@ -559,6 +563,7 @@ const parcelHass = {
   entities: {
     aggregator: { entity_id: "sensor.parcel_aggregator_incoming_parcels", platform: "parcel_aggregator" },
     dhl: { entity_id: "sensor.dhl_incoming_parcels", platform: "dhl" },
+    amazon: { entity_id: "sensor.amazon_orders_incoming_parcels", platform: "amazon_orders" },
     delivered: { entity_id: "sensor.parcel_aggregator_delivered_parcels", platform: "parcel_aggregator" },
     calendar: { entity_id: "calendar.parcel_aggregator_deliveries", platform: "parcel_aggregator" },
   },
@@ -586,6 +591,9 @@ const parcelPopup = parcelDashboard.views[0].sections[0].cards.find((card) => ca
 assert.equal(parcelPopup.name, "Pakete");
 assert.equal(parcelPopup.cards[0].type, "custom:button-card");
 assert.match(parcelPopup.cards[0].custom_fields.parcels, /out_for_delivery/);
+assert.match(parcelPopup.cards[0].custom_fields.parcels, /contentByBarcode/);
+assert.match(parcelPopup.cards[0].custom_fields.parcels, /raw\?\.items/);
+assert.match(parcelPopup.cards[0].custom_fields.parcels, /weitere/);
 assert.match(parcelPopup.cards[0].custom_fields.parcels, /parcel-progress/);
 assert.match(parcelPopup.cards[0].custom_fields.parcels, /mdi:truck-delivery/);
 assert.match(parcelPopup.cards[0].extra_styles, /parcel-icon/);
