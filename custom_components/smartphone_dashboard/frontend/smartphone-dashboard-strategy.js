@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.59";
+const STRATEGY_VERSION = "22.0.60";
 const CONFIG_VERSION = 26;
 
 const ACTIVE_ROOM_STYLES = `
@@ -1093,7 +1093,7 @@ function parcelOverviewCard(entityIds) {
             '<span style="width:' + progress + '%;background:' + design.color + '"></span></div></div>';
           const url = /^https?:\\/\\//i.test(String(parcel.url || '')) ? String(parcel.url) : '';
           return url
-            ? '<a class="parcel-row" href="' + escape(url) + '" target="_blank" rel="noopener">' + content + '<span class="parcel-open" aria-hidden="true">↗</span></a>'
+            ? '<a class="parcel-row" href="' + escape(url) + '" target="_self" rel="external" onclick="event.stopPropagation()" onpointerdown="event.stopPropagation()" ontouchstart="event.stopPropagation()">' + content + '<span class="parcel-open" aria-hidden="true">↗</span></a>'
             : '<div class="parcel-row">' + content + '</div>';
         }).join('');
       ]]]`,
@@ -1107,7 +1107,7 @@ function parcelOverviewCard(entityIds) {
     },
     extra_styles: `
       .parcel-row { display:flex; align-items:center; gap:12px; width:100%; box-sizing:border-box; padding:12px 14px; margin-top:8px; border-radius:20px; background:var(--secondary-background-color); color:var(--primary-text-color); text-decoration:none; }
-      a.parcel-row { position:relative; z-index:3; pointer-events:auto !important; cursor:pointer; touch-action:manipulation; }
+      a.parcel-row { position:relative; z-index:3; pointer-events:auto !important; cursor:pointer; touch-action:manipulation; -webkit-tap-highlight-color:transparent; }
       a.parcel-row > * { pointer-events:none !important; }
       .parcel-icon { width:44px; height:44px; border-radius:50%; display:grid; place-items:center; flex:0 0 44px; color:var(--parcel-color); background:color-mix(in srgb, var(--parcel-color) 18%, var(--card-background-color)); }
       .parcel-icon ha-icon { width:25px; height:25px; color:inherit; }
