@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.66";
+const STRATEGY_VERSION = "22.0.67";
 const CONFIG_VERSION = 26;
 
 const ACTIVE_ROOM_STYLES = `
@@ -294,8 +294,19 @@ const PARCEL_SUMMARY_STYLES = `\${(() => {
     registered: 'Registriert', in_transit: 'Unterwegs', out_for_delivery: 'In Zustellung',
     at_pickup_point: 'Abholbereit', returning: 'Rücksendung', problem: 'Problem', unknown: 'Status unbekannt',
   };
+  const parcelRank = (parcel) => {
+    const immediate = { at_pickup_point: 0, out_for_delivery: 1, problem: 2 };
+    if (Object.hasOwn(immediate, parcel?.status)) return immediate[parcel.status];
+    if (parcel?.planned_from || parcel?.planned_to) return 3;
+    return ({ in_transit: 4, returning: 5, registered: 6, unknown: 7 })[parcel?.status] ?? 7;
+  };
+  const parcelTime = (parcel) => {
+    const timestamp = Date.parse(parcel?.planned_from || parcel?.planned_to || '');
+    return Number.isFinite(timestamp) ? timestamp : Number.MAX_SAFE_INTEGER;
+  };
   const parcels = (Array.isArray(source?.attributes?.parcels) ? source.attributes.parcels : [])
-    .filter((parcel) => parcel && parcel.delivered !== true && parcel.status !== 'delivered');
+    .filter((parcel) => parcel && parcel.delivered !== true && parcel.status !== 'delivered')
+    .sort((left, right) => parcelRank(left) - parcelRank(right) || parcelTime(left) - parcelTime(right));
   const first = parcels[0] || {};
   const cleanParcelText = (value) => {
     let text = String(value || '').replaceAll(String.fromCharCode(8203), ' ').replace(/\\s+/g, ' ').trim();
@@ -339,7 +350,7 @@ const PARCEL_SUMMARY_STYLES = `\${(() => {
   const state = card.querySelector('.bubble-state');
   const icon = card.querySelector('.bubble-icon');
   const background = card.querySelector('.bubble-button-background');
-  if (name) name.innerText = parcels.length === 1 ? '1 Paket unterwegs' : parcels.length + ' Pakete unterwegs';
+  if (name) name.innerText = 'Nächstes Paket';
   if (state) state.innerText = [parcelLabel, labels[first.status] || labels.unknown].filter(Boolean).join(' · ');
   if (icon) {
     icon.setAttribute('icon', design.icon);
@@ -1045,7 +1056,7 @@ function parcelOverviewCard(entityIds) {
   return {
     type: "custom:button-card",
     icon: "mdi:package-variant-closed",
-    name: "Aktive Pakete",
+    name: "Nächstes Paket",
     show_state: false,
     show_label: false,
     tap_action: { action: "none" },
@@ -1091,6 +1102,16 @@ function parcelOverviewCard(entityIds) {
             if (barcode && content) contentByBarcode.set(barcode, content);
           });
         });
+        const parcelRank = (parcel) => {
+          const immediate = { at_pickup_point: 0, out_for_delivery: 1, problem: 2 };
+          if (Object.hasOwn(immediate, parcel?.status)) return immediate[parcel.status];
+          if (parcel?.planned_from || parcel?.planned_to) return 3;
+          return ({ in_transit: 4, returning: 5, registered: 6, unknown: 7 })[parcel?.status] ?? 7;
+        };
+        const parcelTime = (parcel) => {
+          const timestamp = Date.parse(parcel?.planned_from || parcel?.planned_to || '');
+          return Number.isFinite(timestamp) ? timestamp : Number.MAX_SAFE_INTEGER;
+        };
         const seen = new Set();
         const parcels = ids.flatMap((id) => hass.states[id]?.attributes?.parcels || [])
           .filter((parcel) => {
@@ -1099,7 +1120,9 @@ function parcelOverviewCard(entityIds) {
             if (seen.has(key)) return false;
             seen.add(key);
             return true;
-          });
+          })
+          .sort((left, right) => parcelRank(left) - parcelRank(right) || parcelTime(left) - parcelTime(right))
+          .slice(0, 1);
         if (!parcels.length) return '<div class="parcel-empty">Aktuell sind keine Pakete unterwegs.</div>';
         return parcels.map((parcel) => {
           const cleanCarrier = cleanParcelText(parcel.carrier) || 'Paketdienst';

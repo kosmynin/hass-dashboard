@@ -13,6 +13,7 @@ normalized_alerts = CORE["normalized_alerts"]
 alert_set_digest = CORE["alert_set_digest"]
 alert_content_digest = CORE["alert_content_digest"]
 parcel_alert = CORE["parcel_alert"]
+parcel_sort_key = CORE["parcel_sort_key"]
 parcel_display_label = CORE["parcel_display_label"]
 parcel_content_label = CORE["parcel_content_label"]
 aggregate_alert_message = CORE["aggregate_alert_message"]
@@ -32,6 +33,7 @@ media_live_activity_tag = CORE["media_live_activity_tag"]
 mobile_media_activity_data = CORE["mobile_media_activity_data"]
 appliance_kind = CORE["appliance_kind"]
 appliance_phase = CORE["appliance_phase"]
+appliance_progress_percent = CORE["appliance_progress_percent"]
 appliance_activity_presentation = CORE["appliance_activity_presentation"]
 appliance_live_activity_tag = CORE["appliance_live_activity_tag"]
 mobile_appliance_activity_data = CORE["mobile_appliance_activity_data"]
@@ -209,6 +211,17 @@ def test_amazon_parcel_uses_compact_content_instead_of_generic_carrier():
     assert alert is not None
     assert alert["message"] == "📦 USB-C Netzteil + 2 weitere"
 
+def test_nearest_parcel_prefers_actionable_status_then_earliest_eta():
+    now = datetime.fromisoformat("2026-11-17T12:00:00+01:00")
+    parcels = [
+        {"status": "registered", "barcode": "registered"},
+        {"status": "in_transit", "barcode": "later", "planned_from": "2026-11-19T12:00:00+01:00"},
+        {"status": "in_transit", "barcode": "sooner", "planned_from": "2026-11-18T12:00:00+01:00"},
+        {"status": "out_for_delivery", "barcode": "today"},
+    ]
+    ordered = sorted(parcels, key=lambda parcel: parcel_sort_key(parcel, now))
+    assert [parcel["barcode"] for parcel in ordered] == ["today", "sooner", "later", "registered"]
+
 def test_registered_parcels_do_not_start_a_live_activity():
     registered = parcel_alert({
         "carrier": "DHL",
@@ -373,6 +386,10 @@ def test_appliance_live_activity_normalizes_integrations_and_throttles_progress(
     assert appliance_phase("Pause") == "paused"
     assert appliance_phase("Ready") == "inactive"
     assert appliance_phase("Finished") == "inactive"
+    assert appliance_progress_percent(0.42) == 42
+    assert appliance_progress_percent(None, remaining_minutes=45, duration_minutes=90) == 50
+    assert appliance_progress_percent(None, remaining_minutes=30, elapsed_minutes=60) == 200 / 3
+    assert appliance_progress_percent(None, remaining_minutes=75, observed_total_minutes=100) == 25
 
     entry = appliance_activity_presentation(
         "device-42", "Spülmaschine", "dishwasher", "Run",

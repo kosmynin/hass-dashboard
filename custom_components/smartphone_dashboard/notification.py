@@ -24,6 +24,7 @@ from .notification_core import (
     appliance_kind,
     appliance_live_activity_tag,
     appliance_phase,
+    appliance_progress_percent,
     area_entity_label,
     dashboard_popup_url,
     dashboard_entity_enabled,
@@ -43,6 +44,7 @@ from .notification_core import (
     normalized_alerts,
     parcel_alert,
     parcel_content_label,
+    parcel_sort_key,
     parse_mobile_action,
     ups_alert_conditions,
     valid_nina_glob,
@@ -111,6 +113,7 @@ class NotificationCoordinator:
         self._pending_actions: list[dict[str, str]] = []
         self._mobile_send_times: dict[str, list[float]] = {}
         self._mobile_payload_sent_at: dict[tuple[str, str], float] = {}
+        self._appliance_remaining_baselines: dict[str, float] = {}
 
     async def async_start(self) -> None:
         if self._worker: return
@@ -488,7 +491,7 @@ class NotificationCoordinator:
         alerts.extend(self._parcel_alerts(now))
         return alerts
 
-    def _parcel_alerts(self, now: datetime) -> list[dict[str, str]]:
+    def _parcel_alerts(self, now: datetime) -> list[dict[str, object]]:
         """Read the shared ha-parcel-integrations contract without carrier coupling."""
         strategy = self.manager.data.get("dashboards", {}).get("default", {}).get("config", {})
         if strategy.get("notification_parcels", True) is False:
@@ -528,7 +531,7 @@ class NotificationCoordinator:
             ]
             if incoming:
                 candidates = incoming
-        alerts: list[dict[str, str]] = []
+        ranked_alerts: list[tuple[tuple[int, float, str], dict[str, object]]] = []
         seen: set[str] = set()
         for state in candidates:
             for parcel in state.attributes.get("parcels", []):
@@ -542,8 +545,10 @@ class NotificationCoordinator:
                 if alert is None or alert["fingerprint"] in seen:
                     continue
                 seen.add(alert["fingerprint"])
-                alerts.append(alert)
-        return alerts
+                ranked_alerts.append((parcel_sort_key(enriched, now), alert))
+        if not ranked_alerts:
+            return []
+        return [min(ranked_alerts, key=lambda item: item[0])[1]]
 
     def _configured_alerts(self, now: datetime) -> list[dict[str, str]]:
         alerts = []
@@ -670,6 +675,16 @@ class NotificationCoordinator:
         if match:
             hours = int(match.group(1) or 0)
             return hours * 60 + int(match.group(2)) + (1 if int(match.group(3)) else 0)
+        iso_duration = re.fullmatch(
+            r"P(?:(\d+(?:\.\d+)?)D)?T(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?",
+            raw,
+            re.IGNORECASE,
+        )
+        if iso_duration:
+            days, hours, minutes, seconds = (
+                float(value or 0) for value in iso_duration.groups()
+            )
+            return max(0, int(math.ceil(days * 1440 + hours * 60 + minutes + seconds / 60)))
         try:
             numeric = float(raw.replace(",", "."))
         except ValueError:
@@ -707,6 +722,7 @@ class NotificationCoordinator:
 
         now = dt_util.now()
         entries: list[dict[str, object]] = []
+        active_device_ids: set[str] = set()
         for device_id, candidates in grouped.items():
             device = device_registry.async_get(device_id)
             if device is None:
@@ -745,6 +761,8 @@ class NotificationCoordinator:
 
             progress: float | None = None
             remaining: int | None = None
+            elapsed: int | None = None
+            duration: int | None = None
             program: object = ""
             for key in ("progress", "program_progress", "percentage"):
                 if key in status_state.attributes:
@@ -761,6 +779,20 @@ class NotificationCoordinator:
                     )
                     if remaining is not None:
                         break
+            for key in ("elapsed_time", "elapsed_program_time", "time_elapsed"):
+                if key in status_state.attributes:
+                    elapsed = self._appliance_remaining_minutes(
+                        status_state.attributes[key], key, now
+                    )
+                    if elapsed is not None:
+                        break
+            for key in ("duration", "program_duration", "total_time", "program_time"):
+                if key in status_state.attributes:
+                    duration = self._appliance_remaining_minutes(
+                        status_state.attributes[key], key, now
+                    )
+                    if duration is not None:
+                        break
             for key in ("current_program", "active_program", "program_name", "program"):
                 if status_state.attributes.get(key) not in (None, "", "unknown", "unavailable"):
                     program = status_state.attributes[key]
@@ -776,9 +808,26 @@ class NotificationCoordinator:
                         pass
                 if remaining is None and re.search(r"remaining.*time|time.*remaining|restzeit|program.*remaining|remaining.*program|finish.?time|end.?time", descriptor):
                     remaining = self._appliance_remaining_minutes(state, descriptor, now)
+                if elapsed is None and re.search(r"elapsed.*time|time.*elapsed|laufzeit|verstrichen", descriptor):
+                    elapsed = self._appliance_remaining_minutes(state, descriptor, now)
+                if duration is None and re.search(r"program.*duration|duration|total.*time|gesamtzeit|programmlaufzeit", descriptor) and not re.search(r"remaining|restzeit|elapsed", descriptor):
+                    duration = self._appliance_remaining_minutes(state, descriptor, now)
                 if not program and re.search(r"current.*program|active.*program|selected.*program|program.*name|gew[äa]hltes.*programm|aktuelles.*programm", descriptor) and not re.search(r"progress|state|status", descriptor):
                     if state.state not in ("unknown", "unavailable", "none", ""):
                         program = state.state
+
+            if remaining is not None and remaining > 0:
+                self._appliance_remaining_baselines[device_id] = max(
+                    float(remaining),
+                    self._appliance_remaining_baselines.get(device_id, 0.0),
+                )
+            progress = appliance_progress_percent(
+                progress,
+                remaining_minutes=remaining,
+                elapsed_minutes=elapsed,
+                duration_minutes=duration,
+                observed_total_minutes=self._appliance_remaining_baselines.get(device_id),
+            )
 
             area_id = dr.async_get_effective_area_id(self.hass, device)
             popup = f"raum-{area_id}" if area_id else ""
@@ -793,6 +842,12 @@ class NotificationCoordinator:
                 remaining_minutes=remaining,
                 url=url,
             ))
+            active_device_ids.add(device_id)
+        self._appliance_remaining_baselines = {
+            device_id: baseline
+            for device_id, baseline in self._appliance_remaining_baselines.items()
+            if device_id in active_device_ids
+        }
         return sorted(entries, key=lambda entry: str(entry["title"]).casefold())[:4]
 
     async def _sync_persistent_notification(self, alerts: list[dict[str, str]]) -> None:

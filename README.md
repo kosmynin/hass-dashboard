@@ -60,8 +60,11 @@ Sensoren der [Home Assistant Parcel Integrations](https://ha-parcel-integrations
 werden automatisch erkannt. Wenn der Parcel Aggregator installiert ist, nutzt
 das Dashboard bevorzugt `sensor.parcel_aggregator_incoming_parcels`; andernfalls
 werden die Carrier-Sensoren mit demselben `parcels`-Vertrag verwendet. Der
-Bereich **Pakete** zeigt aktive Sendungen mit Absender, Zusteller, deutschem
-Status, Lieferfenster und Tracking-Link. Ein vorhandener
+Bereich **Pakete** zeigt ausschließlich die nächste relevante Sendung mit
+Absender, Zusteller, deutschem Status, Lieferfenster und Tracking-Link. Dabei
+haben abholbereite, in Zustellung befindliche und problematische Sendungen
+Vorrang; danach entscheidet der früheste Liefertermin. Dashboard, Meldungen und
+Live Activity verwenden dieselbe Auswahl. Ein vorhandener
 `calendar.parcel_aggregator_deliveries` wird als Bubble-Card-Kalender ergänzt.
 Zugestellte Sendungen verschwinden automatisch.
 Bis zu vier unabhängige Meldungen erscheinen als getrennte, einzeln lesbare
@@ -147,8 +150,9 @@ wenn die Companion-App beim Kaltstart den Fragmentteil der URL verwirft.
 
 Laufende Programme von **Spülmaschine, Waschmaschine, Trockner und Backofen**
 werden automatisch über ihre Geräte- und Entitätszuordnung erkannt. Ihre stillen
-Live Activities zeigen Programm, Restzeit und – sofern die Integration ihn
-bereitstellt – einen Fortschrittsbalken. Versteckte technische Statushelfer
+Live Activities zeigen Programm, Restzeit und einen Fortschrittsbalken. Fehlt
+ein direkter Prozentwert, wird der Fortschritt aus Laufzeit, Programmdauer oder
+der während des aktuellen Programms beobachteten Restzeit abgeleitet. Versteckte technische Statushelfer
 dürfen dafür ausgewertet werden, deaktivierte Entitäten nicht. Fortschrittswerte
 werden in Zehnerschritten gebündelt, damit minütliche Sensorupdates das
 iPhone-Push-Limit nicht erneut ausschöpfen. Bei „Fertig“, „Bereit“ oder „Aus“

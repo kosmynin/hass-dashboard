@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import date, datetime
 import hashlib
+import math
 import re
 from urllib.parse import quote
 
@@ -250,6 +251,48 @@ def parcel_alert(
         "progress_max": 4,
         "progress_bar_direction": "increasing",
     }
+
+def parcel_sort_key(
+    parcel: Mapping[str, object],
+    now: datetime | None = None,
+) -> tuple[int, float, str]:
+    """Rank the most relevant/nearest active parcel deterministically."""
+    status = str(parcel.get("status") or "unknown").strip().casefold()
+    immediate_priority = {
+        "at_pickup_point": 0,
+        "out_for_delivery": 1,
+        "problem": 2,
+    }
+    if status in immediate_priority:
+        group = immediate_priority[status]
+    elif parcel.get("planned_from") or parcel.get("planned_to"):
+        group = 3
+    else:
+        group = {
+            "in_transit": 4,
+            "returning": 5,
+            "registered": 6,
+            "unknown": 7,
+        }.get(status, 7)
+    reference = now or datetime.now().astimezone()
+    timestamp = float("inf")
+    for value in (parcel.get("planned_from"), parcel.get("planned_to")):
+        if not value:
+            continue
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=reference.tzinfo)
+            timestamp = parsed.timestamp()
+            break
+        except (TypeError, ValueError):
+            continue
+    identity = "\0".join((
+        str(parcel.get("carrier") or ""),
+        str(parcel.get("barcode") or ""),
+        str(parcel.get("sender") or ""),
+    )).casefold()
+    return group, timestamp, identity
 
 def aggregate_alert_message(
     alerts: list[Mapping[str, object]],
@@ -649,6 +692,39 @@ def appliance_phase(value: object) -> str:
         return "active"
     return ""
 
+def appliance_progress_percent(
+    progress: object = None,
+    *,
+    remaining_minutes: object = None,
+    elapsed_minutes: object = None,
+    duration_minutes: object = None,
+    observed_total_minutes: object = None,
+) -> float | None:
+    """Derive appliance progress from percent, elapsed time or learned duration."""
+    def number(value: object) -> float | None:
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if math.isfinite(parsed) else None
+
+    explicit = number(progress)
+    if explicit is not None:
+        if 0 <= explicit <= 1:
+            explicit *= 100
+        return max(0.0, min(100.0, explicit))
+
+    remaining = number(remaining_minutes)
+    elapsed = number(elapsed_minutes)
+    duration = number(duration_minutes)
+    observed = number(observed_total_minutes)
+    if elapsed is not None and remaining is not None and elapsed + remaining > 0:
+        return max(0.0, min(100.0, elapsed * 100 / (elapsed + remaining)))
+    total = duration if duration is not None and duration > 0 else observed
+    if remaining is not None and total is not None and total > 0:
+        return max(0.0, min(100.0, (total - remaining) * 100 / total))
+    return None
+
 def appliance_live_activity_tag(device_id: str, generation: int = 0) -> str:
     """Return a short, stable tag for one household appliance."""
     token = hashlib.sha256(device_id.encode()).hexdigest()[:12]
@@ -680,10 +756,7 @@ def appliance_activity_presentation(
         program_label = program_label.rsplit(".", 1)[-1]
     program_label = re.sub(r"(?<=[a-zäöü])(?=[A-ZÄÖÜ0-9])", " ", program_label).strip()
 
-    try:
-        numeric_progress = max(0.0, min(100.0, float(progress)))
-    except (TypeError, ValueError):
-        numeric_progress = None
+    numeric_progress = appliance_progress_percent(progress)
     try:
         numeric_remaining = max(0, int(round(float(remaining_minutes))))
     except (TypeError, ValueError):
