@@ -96,6 +96,24 @@ UPS_NORMAL_STATES = frozenset((
 UPS_IGNORED_STATES = frozenset(("", "unknown", "unavailable", "none"))
 UPS_PROBLEM_DEVICE_CLASSES = frozenset(("problem", "safety", "smoke", "tamper", "moisture"))
 UPS_HISTORY_DEVICE_CLASSES = frozenset(("date", "timestamp"))
+UPS_STATUS_LABELS = {
+    "ONBATT": "Batteriebetrieb",
+    "LOWBATT": "Batteriestand kritisch",
+    "REPLACEBATT": "Batterie ersetzen",
+    "NOBATT": "Keine Batterie erkannt",
+    "OVERLOAD": "USV überlastet",
+    "COMMLOST": "Verbindung zur USV verloren",
+    "SHUTTINGDOWN": "USV wird heruntergefahren",
+    "SLAVEDOWN": "Untergeordnete USV nicht erreichbar",
+    "CAL": "Selbsttest läuft",
+    "TRIM": "Eingangsspannung wird abgesenkt",
+    "BOOST": "Eingangsspannung wird angehoben",
+    "CHARGING": "Batterie wird geladen",
+}
+UPS_NORMAL_STATUS_FLAGS = frozenset((
+    "ONLINE", "ON", "OK", "NORMAL", "OL", "CONNECTED", "AVAILABLE",
+    "MAINS", "LINE", "NOALARM", "SLAVE",
+))
 BATTERY_VOLTAGE_UNITS = frozenset(("v", "mv", "kv"))
 
 def dashboard_entity_enabled(
@@ -765,25 +783,75 @@ def area_entity_label(
 def valid_nina_glob(value: str) -> bool:
     return bool(re.fullmatch(r"binary_sensor\.[a-zA-Z0-9_]+\*[a-zA-Z0-9_]*", value))
 
-def ups_state_is_alert(entity_id: str, state: object, device_class: object = None, friendly_name: object = None) -> bool:
-    """Interpret common UPS status and binary sensor conventions consistently."""
+def ups_alert_conditions(
+    entity_id: str,
+    state: object,
+    device_class: object = None,
+    friendly_name: object = None,
+) -> list[dict[str, str]]:
+    """Split simultaneous UPS status flags into independent German alerts."""
     normalized = str(state).strip().lower()
     if normalized in UPS_IGNORED_STATES:
-        return False
+        return []
     normalized_device_class = str(device_class or "").strip().lower()
     if normalized_device_class in UPS_HISTORY_DEVICE_CLASSES:
-        return False
+        return []
     if re.match(r"^\d{4}-\d{2}-\d{2}(?:[T ]|$)", normalized):
-        return False
+        return []
     descriptor = f"{entity_id} {friendly_name or ''}".lower()
     if re.search(r"(?:umschaltung|letzte[rs]?|last).{0,32}(?:batter|netz|mains|switch)", descriptor):
-        return False
+        return []
     if entity_id.startswith("binary_sensor."):
         if normalized not in ("on", "off"):
-            return False
+            return []
         problem_sensor = normalized_device_class in UPS_PROBLEM_DEVICE_CLASSES
-        return normalized == ("on" if problem_sensor else "off")
-    return normalized not in UPS_NORMAL_STATES
+        if normalized != ("on" if problem_sensor else "off"):
+            return []
+        return [{
+            "code": f"binary-{normalized}",
+            "message": "Problem erkannt" if problem_sensor else "Verbindung unterbrochen",
+        }]
+
+    raw = re.sub(r"\s+", " ", str(state or "").strip()).upper()
+    replacements = {
+        "ON BATTERY": "ONBATT", "LOW BATTERY": "LOWBATT",
+        "REPLACE BATTERY": "REPLACEBATT", "NO BATTERY": "NOBATT",
+        "COMM LOST": "COMMLOST", "COMMUNICATION LOST": "COMMLOST",
+        "SHUTTING DOWN": "SHUTTINGDOWN", "SLAVE DOWN": "SLAVEDOWN",
+        "BATTERY LOW": "LOWBATT", "BATTERY MISSING": "NOBATT",
+        "BATTERY REPLACE": "REPLACEBATT",
+        "NO ALARM": "NOALARM", "BATTERY": "ONBATT",
+    }
+    for phrase, token in replacements.items():
+        raw = re.sub(rf"\b{re.escape(phrase)}\b", token, raw)
+    tokens = re.findall(r"[A-Z][A-Z0-9_]*", raw)
+    conditions: list[dict[str, str]] = []
+    unknown: list[str] = []
+    seen: set[str] = set()
+    for token in tokens:
+        if token in seen or token in UPS_NORMAL_STATUS_FLAGS:
+            continue
+        seen.add(token)
+        if token in UPS_STATUS_LABELS:
+            conditions.append({"code": token.casefold(), "message": UPS_STATUS_LABELS[token]})
+        else:
+            unknown.append(token)
+    if conditions:
+        conditions.extend(
+            {"code": token.casefold(), "message": token}
+            for token in unknown
+        )
+        return conditions
+    if not unknown or normalized in UPS_NORMAL_STATES:
+        return []
+    return [{
+        "code": hashlib.sha256(normalized.encode()).hexdigest()[:12],
+        "message": str(state).strip(),
+    }]
+
+def ups_state_is_alert(entity_id: str, state: object, device_class: object = None, friendly_name: object = None) -> bool:
+    """Interpret common UPS status and binary sensor conventions consistently."""
+    return bool(ups_alert_conditions(entity_id, state, device_class, friendly_name))
 
 def _waste_date(value: object) -> date | None:
     if isinstance(value, datetime):

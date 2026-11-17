@@ -7,6 +7,7 @@ retained_fingerprints = CORE["retained_fingerprints"]
 area_entity_label = CORE["area_entity_label"]
 valid_nina_glob = CORE["valid_nina_glob"]
 ups_state_is_alert = CORE["ups_state_is_alert"]
+ups_alert_conditions = CORE["ups_alert_conditions"]
 waste_collection_details = CORE["waste_collection_details"]
 normalized_alerts = CORE["normalized_alerts"]
 alert_set_digest = CORE["alert_set_digest"]
@@ -76,6 +77,23 @@ def test_ups_states_cover_text_and_binary_sensor_conventions():
     assert not ups_state_is_alert("sensor.ups_last_switch", "2026-09-01T20:00:00+02:00", "timestamp", "UPS Umschaltung von Batterie")
     assert not ups_state_is_alert("sensor.ups_umschaltung_von_batterie", "2026-09-01T20:00:00+02:00", None, "UPS Umschaltung von Batterie")
     assert not ups_state_is_alert("sensor.ups_umschaltung_von_batterie", "1. September 2026 um 20:00", None, "UPS Umschaltung von Batterie")
+
+def test_ups_status_splits_simultaneous_apcupsd_flags():
+    conditions = ups_alert_conditions(
+        "sensor.ups_status", "ONLINE REPLACEBATT NOBATT"
+    )
+    assert conditions == [
+        {"code": "replacebatt", "message": "Batterie ersetzen"},
+        {"code": "nobatt", "message": "Keine Batterie erkannt"},
+    ]
+    assert ups_alert_conditions("sensor.ups_status", "ONLINE") == []
+    assert ups_alert_conditions("sensor.ups_status", "ONBATT LOWBATT") == [
+        {"code": "onbatt", "message": "Batteriebetrieb"},
+        {"code": "lowbatt", "message": "Batteriestand kritisch"},
+    ]
+    assert ups_alert_conditions("sensor.ups_status", "ONLINE CHARGING") == [
+        {"code": "charging", "message": "Batterie wird geladen"},
+    ]
 
 def test_dedupe_and_successful_delivery_retention():
     assert pending_fingerprints(["a", "b", "b"], ["a"]) == ["b"]

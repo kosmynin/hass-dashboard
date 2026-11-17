@@ -87,6 +87,10 @@ Entitätsbezogene Meldungen verwenden, soweit Home Assistant eine Zuordnung
 kennt, das kompakte Format **Bereich · Entität: Wert**. Der Gerätename wird
 dabei nicht zusätzlich wiederholt; ohne Bereich bleibt der Entitätsname als
 Fallback erhalten.
+Mehrere gleichzeitig von `sensor.ups_status` gelieferte APC-Statusflags werden
+als getrennte Meldungen ausgewertet: `ONLINE` bleibt neutral, während etwa
+`REPLACEBATT`, `NOBATT`, `ONBATT` oder `LOWBATT` jeweils eine eigene deutsche
+USV-Meldung erzeugen.
 
 ## Migration und Benachrichtigungen
 
