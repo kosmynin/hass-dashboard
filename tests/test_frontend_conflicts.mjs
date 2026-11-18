@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 globalThis.HTMLElement = class { attachShadow() { this.shadowRoot = { activeElement: null, querySelector: () => null, querySelectorAll: () => [] }; return this.shadowRoot; } dispatchEvent() {} };
 globalThis.customElements = { registry: new Map(), get(name) { return this.registry.get(name); }, define(name, value) { this.registry.set(name, value); }, whenDefined() { return Promise.resolve(); } };
 globalThis.window = globalThis;
-const { SmartphoneDashboardStrategy, SmartphoneDashboardStrategyEditor, partitionConflictPatch, applyNotificationOptions, mergeBackendNotifications, detectedRooms, applyRoomOptions, configuredFeatures, parcelSensorEntities } = await import("../custom_components/smartphone_dashboard/frontend/smartphone-dashboard-strategy.js");
+const { SmartphoneDashboardStrategy, SmartphoneDashboardStrategyEditor, partitionConflictPatch, applyNotificationOptions, mergeBackendNotifications, detectedRooms, applyRoomOptions, configuredFeatures, parcelSensorEntities, popupContentCards } = await import("../custom_components/smartphone_dashboard/frontend/smartphone-dashboard-strategy.js");
 
 const roomHass = {
   states: {
@@ -54,12 +54,13 @@ assert.deepEqual(roomCard.tap_action, { action: "toggle" });
 assert.deepEqual(roomCard.button_action.tap_action, { action: "navigate", navigation_path: "#raum-kitchen" });
 assert.match(roomCard.styles, /primary-text-color/);
 const roomPopup = roomDashboard.views[0].sections[0].cards.find((card) => card.hash === "#raum-kitchen");
-assert.equal(roomPopup.cards.find((card) => card.entity === "light.kitchen").button_type, "slider");
-const onOffLightCard = roomPopup.cards.find((card) => card.entity === "light.kitchen_onoff");
+const roomPopupCards = popupContentCards(roomPopup);
+assert.equal(roomPopupCards.find((card) => card.entity === "light.kitchen").button_type, "slider");
+const onOffLightCard = roomPopupCards.find((card) => card.entity === "light.kitchen_onoff");
 assert.equal(onOffLightCard.button_type, "switch");
 assert.equal("attribute" in onOffLightCard, false);
-assert.equal(roomPopup.cards.find((card) => card.entity === "switch.kitchen_socket").button_type, "switch");
-const sensorGrid = roomPopup.cards.find((card) => card.type === "grid");
+assert.equal(roomPopupCards.find((card) => card.entity === "switch.kitchen_socket").button_type, "switch");
+const sensorGrid = roomPopupCards.find((card) => card.type === "grid");
 const sensorCard = sensorGrid.cards.find((card) => card.entity === "sensor.kitchen_temperature");
 assert.deepEqual(sensorGrid.cards.map((card) => card.entity), [
   "sensor.kitchen_temperature",
@@ -149,7 +150,10 @@ assert.deepEqual(visibilityPersons.cards.map((card) => card.entity), ["person.vi
 assert.equal(visibilityCards.some((card) => card.entity === "script.visible"), true);
 assert.equal(visibilityCards.some((card) => card.entity === "script.hidden"), false);
 const mediaPopup = visibilityCards.find((card) => card.hash === "#medien");
-assert.deepEqual(mediaPopup.cards.map((card) => card.entity), ["media_player.visible"]);
+assert.equal(mediaPopup.cards.length, 1);
+assert.equal(mediaPopup.cards[0].type, "custom:smartphone-dashboard-deferred-cards");
+assert.equal(mediaPopup.cards[0].popup_hash, "#medien");
+assert.deepEqual(popupContentCards(mediaPopup).map((card) => card.entity), ["media_player.visible"]);
 assert.equal(visibilityCards.some((card) => card.hash === "#system"), false);
 const visibilityAuto = visibilityCards.find((card) => card.type === "custom:auto-entities");
 assert.equal(visibilityAuto.filter.include.some((item) => item.entity_id === "sensor.hidden_battery"), true);
@@ -159,10 +163,11 @@ assert.equal(visibilityAuto.filter.include.some((item) => item.entity_id === "se
 assert.equal(visibilityAuto.filter.exclude.some((item) => item.entity_id === "sensor.hidden_co2"), true);
 assert.equal(visibilityAuto.filter.exclude.some((item) => item.entity_id === "binary_sensor.hidden_contact"), true);
 const batteryPopup = visibilityCards.find((card) => card.hash === "#meldung-batterien");
-assert.equal(batteryPopup.cards[0].filter.include.some((item) => item.entity_id === "sensor.hidden_battery"), true);
-assert.equal(batteryPopup.cards[0].filter.exclude.some((item) => item.entity_id === "sensor.hidden_battery"), false);
-assert.equal(batteryPopup.cards[0].filter.include.some((item) => item.entity_id === "sensor.remote_battery_voltage"), false);
-assert.equal(batteryPopup.cards[0].filter.include.some((item) => item.entity_id === "sensor.batteriespannung"), false);
+const batteryPopupCards = popupContentCards(batteryPopup);
+assert.equal(batteryPopupCards[0].filter.include.some((item) => item.entity_id === "sensor.hidden_battery"), true);
+assert.equal(batteryPopupCards[0].filter.exclude.some((item) => item.entity_id === "sensor.hidden_battery"), false);
+assert.equal(batteryPopupCards[0].filter.include.some((item) => item.entity_id === "sensor.remote_battery_voltage"), false);
+assert.equal(batteryPopupCards[0].filter.include.some((item) => item.entity_id === "sensor.batteriespannung"), false);
 
 const excludedHiddenBatteryDashboard = await SmartphoneDashboardStrategy.generate({
   battery_exclusions: "sensor.hidden_battery",
@@ -221,12 +226,13 @@ const mediaRemoteDashboard = await SmartphoneDashboardStrategy.generate({}, {
 });
 const mediaRemotePopup = mediaRemoteDashboard.views[0].sections[0].cards
   .find((card) => card.hash === "#medien");
-assert.deepEqual(mediaRemotePopup.cards.map((card) => card.entity), [
+const mediaRemotePopupCards = popupContentCards(mediaRemotePopup);
+assert.deepEqual(mediaRemotePopupCards.map((card) => card.entity), [
   "media_player.kueche",
   "media_player.wohnzimmer",
 ]);
-assert.equal(mediaRemotePopup.cards[0].type, "custom:bubble-card");
-assert.equal(mediaRemotePopup.cards[0].card_type, "media-player");
+assert.equal(mediaRemotePopupCards[0].type, "custom:bubble-card");
+assert.equal(mediaRemotePopupCards[0].card_type, "media-player");
 delete globalThis.location;
 
 const securityHass = {
@@ -266,10 +272,11 @@ assert.equal(securityPopup.entity, "alarm_control_panel.master");
 assert.equal(securityPopup.button_type, "state");
 assert.equal(securityPopup.show_state, true);
 assert.deepEqual(securityPopup.tap_action, { action: "more-info" });
-assert.deepEqual(securityPopup.cards.map((card) => card.type), [
+const securityPopupCards = popupContentCards(securityPopup);
+assert.deepEqual(securityPopupCards.map((card) => card.type), [
   "alarm-panel", "alarm-panel", "picture-entity", "custom:bubble-card",
 ]);
-assert.equal(securityPopup.cards[0].entity, "alarm_control_panel.master");
+assert.equal(securityPopupCards[0].entity, "alarm_control_panel.master");
 
 const singleAlarmHass = {
   ...securityHass,
@@ -280,8 +287,9 @@ const singleAlarmDashboard = await SmartphoneDashboardStrategy.generate(security
 const singleAlarmPopup = singleAlarmDashboard.views[0].sections[0].cards
   .find((card) => card.hash === "#sicherheit");
 assert.equal(singleAlarmPopup.entity, "alarm_control_panel.master");
-assert.equal(singleAlarmPopup.cards.some((card) => card.type === "alarm-panel"), false);
-assert.deepEqual(singleAlarmPopup.cards.map((card) => card.type), [
+const singleAlarmPopupCards = popupContentCards(singleAlarmPopup);
+assert.equal(singleAlarmPopupCards.some((card) => card.type === "alarm-panel"), false);
+assert.deepEqual(singleAlarmPopupCards.map((card) => card.type), [
   "picture-entity", "custom:bubble-card",
 ]);
 
@@ -311,11 +319,12 @@ assert.equal(locationFilter.options.show_state, true);
 const aggregateNotificationPopup = locationDashboard.views[0].sections[0].cards
   .find((card) => card.hash === "#meldungen");
 assert.equal(aggregateNotificationPopup.name, "Meldungen");
+const aggregateNotificationPopupCards = popupContentCards(aggregateNotificationPopup);
 assert.equal(
-  aggregateNotificationPopup.cards[0].type,
+  aggregateNotificationPopupCards[0].type,
   "custom:smartphone-dashboard-notification-controls",
 );
-assert.equal(aggregateNotificationPopup.cards[1].type, "custom:auto-entities");
+assert.equal(aggregateNotificationPopupCards[1].type, "custom:auto-entities");
 
 const first = partitionConflictPatch({ A: "local", B: 2 }, { A: "remote", B: 1 }, { A: "base", B: 1 });
 assert.deepEqual(first.overlap, ["A"]);
@@ -356,9 +365,10 @@ assert.match(ninaFilter.options.styles, /headline/);
 assert.match(ninaFilter.options.styles, /var\(--error-color\)/);
 assert.equal(ninaFilter.options.tap_action.navigation_path, "#meldung-nina");
 const ninaPopup = ninaDashboard.views[0].sections[0].cards.find((card) => card.hash === "#meldung-nina");
-assert.equal(ninaPopup.cards[0].filter.include[0].options.type, "custom:button-card");
-assert.match(ninaPopup.cards[0].filter.include[0].options.custom_fields.instruction, /instruction/);
-assert.deepEqual(ninaPopup.cards[0].filter.include[0].options.styles.icon, [{ color: "var(--error-color)" }]);
+const ninaPopupCards = popupContentCards(ninaPopup);
+assert.equal(ninaPopupCards[0].filter.include[0].options.type, "custom:button-card");
+assert.match(ninaPopupCards[0].filter.include[0].options.custom_fields.instruction, /instruction/);
+assert.deepEqual(ninaPopupCards[0].filter.include[0].options.styles.icon, [{ color: "var(--error-color)" }]);
 
 assert.deepEqual(mergeBackendNotifications({ notification_batteries: true, title: "Explizit" }, { notification_batteries: false, notification_contacts: false, title: "Backend" }), { notification_batteries: true, notification_contacts: false, title: "Explizit" });
 const generated = await SmartphoneDashboardStrategy.generate({ backend_key: "default" }, {
@@ -456,7 +466,7 @@ const upsHistorySummary = upsHistoryDashboard.views[0].sections[0].cards.find((c
 assert.equal(upsHistorySummary.filter.exclude.some((item) => item.name?.includes("[Uu]mschaltung")), true);
 assert.equal(upsHistorySummary.filter.exclude.some((item) => item.entity_id === "sensor.ups_status" && item.attributes?.device_class === "timestamp"), true);
 const upsHistoryPopup = upsHistoryDashboard.views[0].sections[0].cards.find((card) => card.hash === "#meldung-usv");
-assert.equal(upsHistoryPopup.cards[0].filter.exclude.some((item) => item.name?.includes("[Uu]mschaltung")), true);
+assert.equal(popupContentCards(upsHistoryPopup)[0].filter.exclude.some((item) => item.name?.includes("[Uu]mschaltung")), true);
 
 const wasteDashboard = { views: [{ sections: [{ cards: [
   { type: "heading", heading: "Meldungen" },
@@ -479,9 +489,10 @@ applyNotificationOptions(wasteDashboard, {
   },
 });
 const wastePopup = wasteDashboard.views[0].sections[0].cards.find((card) => card.hash === "#meldung-abfall");
-assert.equal(wastePopup.cards[0].type, "custom:auto-entities");
-assert.equal(wastePopup.cards[0].filter.include[0].options.show_state, true);
-const wasteStyles = wastePopup.cards[0].filter.include[0].options.styles;
+const wastePopupCards = popupContentCards(wastePopup);
+assert.equal(wastePopupCards[0].type, "custom:auto-entities");
+assert.equal(wastePopupCards[0].filter.include[0].options.show_state, true);
+const wasteStyles = wastePopupCards[0].filter.include[0].options.styles;
 const wasteElements = {
   ".bubble-name": { innerText: "Abfall" },
   ".bubble-state": { innerText: "" },
@@ -498,19 +509,19 @@ assert.doesNotThrow(() => evaluateWasteStyles({
 }, "sensor.abfall", { querySelector: (selector) => wasteElements[selector] }));
 assert.equal(wasteElements[".bubble-name"].innerText, "Restmüll und Biomüll");
 assert.equal(wasteElements[".bubble-state"].innerText, "Nächster Termin: morgen");
-assert.match(wastePopup.cards[0].filter.include[0].options.styles, /attributes\.upcoming/);
-assert.match(wastePopup.cards[0].filter.include[0].options.styles, /#FFD700/);
-assert.match(wastePopup.cards[0].filter.include[0].options.styles, /#4A4A4A/);
-assert.match(wastePopup.cards[0].filter.include[0].options.styles, /#4169E1/);
-assert.match(wastePopup.cards[0].filter.include[0].options.styles, /#8B4513/);
-assert.equal(wastePopup.cards[1].type, "custom:bubble-card");
-assert.equal(wastePopup.cards[1].card_type, "calendar");
-assert.deepEqual(wastePopup.cards[1].entities, [{ entity: "calendar.hausplan", color: "var(--success-color)" }]);
-assert.equal(wastePopup.cards[1].limit, 6);
-assert.equal(wastePopup.cards[1].days, 45);
-assert.equal(wastePopup.cards[1].rows, 4);
-assert.match(wastePopup.cards[0].filter.include[0].options.styles, /abgeholt/);
-assert.match(wastePopup.cards[0].filter.include[0].options.styles, /this\?\.config\?\.entity/);
+assert.match(wastePopupCards[0].filter.include[0].options.styles, /attributes\.upcoming/);
+assert.match(wastePopupCards[0].filter.include[0].options.styles, /#FFD700/);
+assert.match(wastePopupCards[0].filter.include[0].options.styles, /#4A4A4A/);
+assert.match(wastePopupCards[0].filter.include[0].options.styles, /#4169E1/);
+assert.match(wastePopupCards[0].filter.include[0].options.styles, /#8B4513/);
+assert.equal(wastePopupCards[1].type, "custom:bubble-card");
+assert.equal(wastePopupCards[1].card_type, "calendar");
+assert.deepEqual(wastePopupCards[1].entities, [{ entity: "calendar.hausplan", color: "var(--success-color)" }]);
+assert.equal(wastePopupCards[1].limit, 6);
+assert.equal(wastePopupCards[1].days, 45);
+assert.equal(wastePopupCards[1].rows, 4);
+assert.match(wastePopupCards[0].filter.include[0].options.styles, /abgeholt/);
+assert.match(wastePopupCards[0].filter.include[0].options.styles, /this\?\.config\?\.entity/);
 
 const wasteCalendarWithoutSensorRegistry = { views: [{ sections: [{ cards: [
   { type: "heading", heading: "Meldungen" },
@@ -533,7 +544,7 @@ applyNotificationOptions(wasteCalendarWithoutSensorRegistry, {
 });
 const wasteCalendarFallbackPopup = wasteCalendarWithoutSensorRegistry.views[0].sections[0].cards
   .find((card) => card.hash === "#meldung-abfall");
-assert.deepEqual(wasteCalendarFallbackPopup.cards[1].entities, [
+assert.deepEqual(popupContentCards(wasteCalendarFallbackPopup)[1].entities, [
   { entity: "calendar.hausplan", color: "var(--success-color)" },
 ]);
 
@@ -589,28 +600,29 @@ assert.match(parcelSummary.filter.include[0].options.styles, /mdi:truck-delivery
 assert.match(parcelSummary.filter.include[0].options.styles, /design\.progress \* 25/);
 const parcelPopup = parcelDashboard.views[0].sections[0].cards.find((card) => card.hash === "#meldung-pakete");
 assert.equal(parcelPopup.name, "Pakete");
-assert.equal(parcelPopup.cards[0].type, "custom:button-card");
-const parcelTemplate = parcelPopup.cards[0].custom_fields.parcels.slice(3, -3);
+const parcelPopupCards = popupContentCards(parcelPopup);
+assert.equal(parcelPopupCards[0].type, "custom:button-card");
+const parcelTemplate = parcelPopupCards[0].custom_fields.parcels.slice(3, -3);
 const parcelHtml = Function("hass", parcelTemplate)(parcelHass);
 assert.match(parcelHtml, /Apple/);
 assert.doesNotMatch(parcelHtml, /Shop/);
-assert.match(parcelPopup.cards[0].custom_fields.parcels, /slice\(0, 1\)/);
-assert.match(parcelPopup.cards[0].custom_fields.parcels, /out_for_delivery/);
-assert.match(parcelPopup.cards[0].custom_fields.parcels, /contentByBarcode/);
-assert.match(parcelPopup.cards[0].custom_fields.parcels, /raw\?\.items/);
-assert.match(parcelPopup.cards[0].custom_fields.parcels, /weitere/);
-assert.match(parcelPopup.cards[0].custom_fields.parcels, /parcel-progress/);
-assert.match(parcelPopup.cards[0].custom_fields.parcels, /mdi:truck-delivery/);
-assert.match(parcelPopup.cards[0].extra_styles, /parcel-icon/);
-assert.match(parcelPopup.cards[0].custom_fields.parcels, /span class="parcel-open"/);
-assert.doesNotMatch(parcelPopup.cards[0].custom_fields.parcels, /ha-icon class="parcel-open"/);
-assert.match(parcelPopup.cards[0].extra_styles, /flex:0 0 22px/);
-assert.match(parcelPopup.cards[0].extra_styles, /a\.parcel-row > \* \{ pointer-events:none/);
-assert.match(parcelPopup.cards[0].custom_fields.parcels, /target="_self" rel="external" onclick="event\.stopPropagation\(\)"/);
-assert.match(parcelPopup.cards[0].custom_fields.parcels, /onpointerdown="event\.stopPropagation\(\)" ontouchstart="event\.stopPropagation\(\)"/);
-assert.doesNotMatch(parcelPopup.cards[0].custom_fields.parcels, /target="_blank"/);
-assert.equal(parcelPopup.cards[0].styles.custom_fields.parcels.some((style) => style["pointer-events"] === "auto"), true);
-assert.deepEqual(parcelPopup.cards[1].entities, [
+assert.match(parcelPopupCards[0].custom_fields.parcels, /slice\(0, 1\)/);
+assert.match(parcelPopupCards[0].custom_fields.parcels, /out_for_delivery/);
+assert.match(parcelPopupCards[0].custom_fields.parcels, /contentByBarcode/);
+assert.match(parcelPopupCards[0].custom_fields.parcels, /raw\?\.items/);
+assert.match(parcelPopupCards[0].custom_fields.parcels, /weitere/);
+assert.match(parcelPopupCards[0].custom_fields.parcels, /parcel-progress/);
+assert.match(parcelPopupCards[0].custom_fields.parcels, /mdi:truck-delivery/);
+assert.match(parcelPopupCards[0].extra_styles, /parcel-icon/);
+assert.match(parcelPopupCards[0].custom_fields.parcels, /span class="parcel-open"/);
+assert.doesNotMatch(parcelPopupCards[0].custom_fields.parcels, /ha-icon class="parcel-open"/);
+assert.match(parcelPopupCards[0].extra_styles, /flex:0 0 22px/);
+assert.match(parcelPopupCards[0].extra_styles, /a\.parcel-row > \* \{ pointer-events:none/);
+assert.match(parcelPopupCards[0].custom_fields.parcels, /target="_self" rel="external" onclick="event\.stopPropagation\(\)"/);
+assert.match(parcelPopupCards[0].custom_fields.parcels, /onpointerdown="event\.stopPropagation\(\)" ontouchstart="event\.stopPropagation\(\)"/);
+assert.doesNotMatch(parcelPopupCards[0].custom_fields.parcels, /target="_blank"/);
+assert.equal(parcelPopupCards[0].styles.custom_fields.parcels.some((style) => style["pointer-events"] === "auto"), true);
+assert.deepEqual(parcelPopupCards[1].entities, [
   { entity: "calendar.parcel_aggregator_deliveries", color: "#0A84FF" },
 ]);
 const editor = new SmartphoneDashboardStrategyEditor();

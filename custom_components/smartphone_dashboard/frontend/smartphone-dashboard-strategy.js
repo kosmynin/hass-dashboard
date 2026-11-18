@@ -7,7 +7,7 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.67";
+const STRATEGY_VERSION = "22.0.68";
 const CONFIG_VERSION = 26;
 
 const ACTIVE_ROOM_STYLES = `
@@ -43,7 +43,9 @@ const BATTERY_VOLTAGE_EXCLUDE_FILTERS = [
   { entity_id: "sensor.*spannung*batterie*" },
   { entity_id: "sensor.*akku*spannung*" },
 ];
-let cachedDisplayNotificationConfig;
+const cachedDisplayNotificationConfigs = new Map();
+let cachedEntityIndex;
+const DISPLAY_CONFIG_CACHE_PREFIX = `smartphone-dashboard:display-config:${STRATEGY_VERSION}`;
 const NOTIFICATION_POPUPS = {
   batteries: ["#meldung-batterien", "Batterien", "mdi:battery-alert"],
   contacts: ["#meldung-kontakte", "Offene Kontakte", "mdi:door-open"],
@@ -54,6 +56,87 @@ const NOTIFICATION_POPUPS = {
   nina: ["#meldung-nina", "NINA-Warnungen", "mdi:alert-outline"],
   parcels: ["#meldung-pakete", "Pakete", "mdi:package-variant-closed"],
 };
+
+class SmartphoneDashboardDeferredCards extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+    this._cards = [];
+    this._mounted = false;
+    this._mounting = false;
+    this._onLocationChange = () => this._activateIfNeeded();
+  }
+
+  setConfig(config) {
+    if (!config || !Array.isArray(config.cards)) throw new Error("Pop-up-Karten fehlen");
+    this._config = config;
+    this._activateIfNeeded();
+  }
+
+  set hass(value) {
+    this._hass = value;
+    for (const card of this._cards) card.hass = value;
+    this._activateIfNeeded();
+  }
+
+  connectedCallback() {
+    window.addEventListener("hashchange", this._onLocationChange);
+    window.addEventListener("popstate", this._onLocationChange);
+    this._activateIfNeeded();
+  }
+
+  disconnectedCallback() {
+    window.removeEventListener("hashchange", this._onLocationChange);
+    window.removeEventListener("popstate", this._onLocationChange);
+  }
+
+  getCardSize() {
+    return this._cards.reduce((size, card) => size + (card.getCardSize?.() || 1), 1);
+  }
+
+  _isRequested() {
+    const hash = String(this._config?.popup_hash || "");
+    if (!hash) return true;
+    if (globalThis.location?.hash === hash) return true;
+    const requested = new URLSearchParams(globalThis.location?.search || "").get("sd_popup");
+    return requested && `#${requested}` === hash;
+  }
+
+  _activateIfNeeded() {
+    if (!this.isConnected || this._mounted || this._mounting || !this._config || !this._isRequested()) return;
+    this._mounting = true;
+    const helpersReady = typeof window.loadCardHelpers === "function"
+      ? window.loadCardHelpers()
+      : Promise.reject(new Error("Home-Assistant-Kartenhelfer sind nicht verfügbar"));
+    void helpersReady.then((helpers) => {
+      if (!this.isConnected || this._mounted) return;
+      const container = document.createElement("div");
+      container.className = "cards";
+      this._cards = this._config.cards.map((config) => {
+        const card = helpers.createCardElement(config);
+        if (this._hass) card.hass = this._hass;
+        container.append(card);
+        return card;
+      });
+      this.shadowRoot.replaceChildren();
+      const style = document.createElement("style");
+      style.textContent = `
+        :host { display: block; }
+        .cards { display: grid; gap: var(--vertical-stack-card-gap, 8px); }
+      `;
+      this.shadowRoot.append(style, container);
+      this._mounted = true;
+      this.dispatchEvent(new Event("iron-resize", { bubbles: true, composed: true }));
+    }).catch((error) => {
+      console.error("Smartphone-Dashboard: Pop-up-Inhalt konnte nicht geladen werden", error);
+      this.shadowRoot.innerHTML = `<ha-card>Pop-up-Inhalt konnte nicht geladen werden.</ha-card>`;
+    }).finally(() => { this._mounting = false; });
+  }
+}
+
+if (!customElements.get("smartphone-dashboard-deferred-cards")) {
+  customElements.define("smartphone-dashboard-deferred-cards", SmartphoneDashboardDeferredCards);
+}
 
 class SmartphoneDashboardNotificationControls extends HTMLElement {
   constructor() {
@@ -326,14 +409,20 @@ const PARCEL_SUMMARY_STYLES = `\${(() => {
     }
     return '';
   };
-  const contentByBarcode = new Map();
-  Object.values(hass.states).forEach((state) => {
-    (Array.isArray(state?.attributes?.parcels) ? state.attributes.parcels : []).forEach((parcel) => {
-      const barcode = String(parcel?.barcode || '').trim();
-      const content = contentLabel(parcel);
-      if (barcode && content) contentByBarcode.set(barcode, content);
+  const parcelCache = globalThis.__smartphoneDashboardParcelContentCache ||
+    (globalThis.__smartphoneDashboardParcelContentCache = { updated: 0, values: new Map() });
+  if (Date.now() - parcelCache.updated > 300000) {
+    parcelCache.values = new Map();
+    Object.values(hass.states).forEach((state) => {
+      (Array.isArray(state?.attributes?.parcels) ? state.attributes.parcels : []).forEach((parcel) => {
+        const barcode = String(parcel?.barcode || '').trim();
+        const content = contentLabel(parcel);
+        if (barcode && content) parcelCache.values.set(barcode, content);
+      });
     });
-  });
+    parcelCache.updated = Date.now();
+  }
+  const contentByBarcode = parcelCache.values;
   const parcelLabel = contentLabel(first) || contentByBarcode.get(String(first.barcode || '').trim())
     || cleanParcelText(first.sender) || cleanParcelText(first.carrier);
   const designs = {
@@ -433,18 +522,35 @@ class SmartphoneDashboardStrategy extends HTMLElement {
     const explicitConfig = config && typeof config === "object" ? config : {};
     if (typeof hass?.callWS === "function") {
       const dashboardKey = "default";
-      let timeoutId;
-      try {
-        const backend = await Promise.race([
-          hass.callWS({ type: "smartphone_dashboard/config/display", dashboard_key: dashboardKey }),
-          new Promise((_, reject) => { timeoutId = setTimeout(() => reject(new Error("Backend-Zeitlimit")), 1500); }),
-        ]);
-        cachedDisplayNotificationConfig = backend?.config || {};
-        config = mergeBackendNotifications(explicitConfig, backend?.config);
-      } catch (_error) {
-        config = mergeBackendNotifications(explicitConfig, cachedDisplayNotificationConfig);
-      } finally {
-        clearTimeout(timeoutId);
+      const displayCacheKey = displayConfigCacheKey(hass);
+      const storedConfig = readDisplayConfigCache(hass);
+      if (storedConfig) cachedDisplayNotificationConfigs.set(displayCacheKey, storedConfig);
+      const backendRequest = hass.callWS({
+        type: "smartphone_dashboard/config/display",
+        dashboard_key: dashboardKey,
+      }).then((backend) => {
+        const backendConfig = backend?.config || {};
+        cachedDisplayNotificationConfigs.set(displayCacheKey, backendConfig);
+        writeDisplayConfigCache(hass, backendConfig);
+        return backendConfig;
+      });
+      const cachedDisplayConfig = cachedDisplayNotificationConfigs.get(displayCacheKey);
+      if (cachedDisplayConfig) {
+        config = mergeBackendNotifications(explicitConfig, cachedDisplayConfig);
+        void backendRequest.catch(() => undefined);
+      } else {
+        let timeoutId;
+        try {
+          const backendConfig = await Promise.race([
+            backendRequest,
+            new Promise((_, reject) => { timeoutId = setTimeout(() => reject(new Error("Backend-Zeitlimit")), 1500); }),
+          ]);
+          config = mergeBackendNotifications(explicitConfig, backendConfig);
+        } catch (_error) {
+          config = mergeBackendNotifications(explicitConfig, undefined);
+        } finally {
+          clearTimeout(timeoutId);
+        }
       }
     }
     config = migrateConfig(config, hass);
@@ -465,6 +571,7 @@ class SmartphoneDashboardStrategy extends HTMLElement {
     generated = applyDashboardOptions(generated, config);
     generated = applyDynamicFeatures(generated, config, hass);
     generated = applyHomeSectionOrder(generated, config);
+    generated = applyDeferredPopupContents(generated);
     return applyEntityOverrides(
       generated,
       config.entity_overrides && typeof config.entity_overrides === "object"
@@ -484,6 +591,30 @@ function mergeBackendNotifications(explicitConfig, backendConfig) {
     if (!Object.prototype.hasOwnProperty.call(merged, key) && Object.prototype.hasOwnProperty.call(backendConfig || {}, key)) merged[key] = backendConfig[key];
   }
   return merged;
+}
+
+function displayConfigCacheKey(hass) {
+  const userId = String(hass?.user?.id || "anonymous").replace(/[^a-zA-Z0-9_-]/g, "_");
+  return `${DISPLAY_CONFIG_CACHE_PREFIX}:${userId}`;
+}
+
+function readDisplayConfigCache(hass) {
+  try {
+    const raw = globalThis.sessionStorage?.getItem(displayConfigCacheKey(hass));
+    if (!raw) return undefined;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : undefined;
+  } catch (_error) {
+    return undefined;
+  }
+}
+
+function writeDisplayConfigCache(hass, config) {
+  try {
+    globalThis.sessionStorage?.setItem(displayConfigCacheKey(hass), JSON.stringify(config || {}));
+  } catch (_error) {
+    // Private Browser und restriktive WebViews können Session Storage sperren.
+  }
 }
 
 function isBatteryLevelEntity(entityId, state) {
@@ -583,30 +714,86 @@ function applyEntityOverrides(value, overrides) {
   return value;
 }
 
+function popupContentCards(popup) {
+  const cards = Array.isArray(popup?.cards) ? popup.cards : [];
+  if (
+    cards.length === 1 &&
+    cards[0]?.type === "custom:smartphone-dashboard-deferred-cards" &&
+    Array.isArray(cards[0].cards)
+  ) return cards[0].cards;
+  return cards;
+}
+
+function applyDeferredPopupContents(dashboard) {
+  const cards = dashboard?.views?.[0]?.sections?.[0]?.cards;
+  if (!Array.isArray(cards)) return dashboard;
+  for (const popup of cards) {
+    if (popup?.card_type !== "pop-up" || !popup.hash) continue;
+    const content = popupContentCards(popup);
+    if (!content.length || popup.cards?.[0]?.type === "custom:smartphone-dashboard-deferred-cards") continue;
+    popup.cards = [{
+      type: "custom:smartphone-dashboard-deferred-cards",
+      popup_hash: popup.hash,
+      cards: content,
+    }];
+  }
+  return dashboard;
+}
+
 function valuesOf(value) {
   if (Array.isArray(value)) return value;
   if (value && typeof value === "object") return Object.values(value);
   return [];
 }
 
-function entityRegistryEntries(hass) {
+function dashboardEntityIndex(hass) {
+  const states = hass?.states || {};
   const entities = hass?.entities;
-  if (Array.isArray(entities)) return entities.filter((entry) => entry?.entity_id);
-  if (!entities || typeof entities !== "object") return [];
-  return Object.entries(entities)
-    .filter(([, entry]) => entry && typeof entry === "object")
-    .map(([entityId, entry]) => ({
-      ...entry,
-      entity_id: entry.entity_id || entityId,
-    }))
-    .filter((entry) => entry.entity_id);
+  const devicesSource = hass?.devices;
+  const areasSource = hass?.areas;
+  if (
+    cachedEntityIndex?.states === states &&
+    cachedEntityIndex?.entities === entities &&
+    cachedEntityIndex?.devicesSource === devicesSource &&
+    cachedEntityIndex?.areasSource === areasSource
+  ) return cachedEntityIndex;
+
+  const stateEntries = Object.entries(states);
+  const stateIds = stateEntries.map(([entityId]) => entityId);
+  const registryEntries = (() => {
+    if (Array.isArray(entities)) return entities.filter((entry) => entry?.entity_id);
+    if (!entities || typeof entities !== "object") return [];
+    return Object.entries(entities)
+      .filter(([, entry]) => entry && typeof entry === "object")
+      .map(([entityId, entry]) => ({ ...entry, entity_id: entry.entity_id || entityId }))
+      .filter((entry) => entry.entity_id);
+  })();
+  const registry = new Map(registryEntries.map((entry) => [entry.entity_id, entry]));
+  const devices = valuesOf(devicesSource);
+  const areas = valuesOf(areasSource);
+  cachedEntityIndex = {
+    states,
+    entities,
+    devicesSource,
+    areasSource,
+    stateEntries,
+    stateIds,
+    registryEntries,
+    registry,
+    devices,
+    deviceById: new Map(devices.map((device) => [device.id, device])),
+    areas,
+    areaById: new Map(areas.map((area) => [area.area_id || area.id, area])),
+  };
+  return cachedEntityIndex;
+}
+
+function entityRegistryEntries(hass) {
+  return dashboardEntityIndex(hass).registryEntries;
 }
 
 function entityRegistryMap(hass) {
-  return new Map(
-    entityRegistryEntries(hass)
-      .map((entry) => [entry.entity_id, entry]),
-  );
+  return dashboardEntityIndex(hass).registry;
 }
 
 function isEntityVisible(hass, entityId, registry = entityRegistryMap(hass)) {
@@ -618,10 +805,11 @@ function isEntityVisible(hass, entityId, registry = entityRegistryMap(hass)) {
 }
 
 function entityDisplayName(hass, entityId) {
-  const entry = entityRegistryMap(hass).get(entityId);
-  const device = valuesOf(hass?.devices).find((item) => item?.id === entry?.device_id);
+  const index = dashboardEntityIndex(hass);
+  const entry = index.registry.get(entityId);
+  const device = index.deviceById.get(entry?.device_id);
   const areaId = entry?.area_id || device?.area_id;
-  const area = valuesOf(hass?.areas).find((item) => (item?.area_id || item?.id) === areaId);
+  const area = index.areaById.get(areaId);
   const areaName = String(area?.name || "").trim();
   const deviceName = String(device?.name_by_user || device?.name || "").trim();
   const friendlyName = String(hass?.states?.[entityId]?.attributes?.friendly_name || "").trim();
@@ -635,10 +823,11 @@ function entityDisplayName(hass, entityId) {
 }
 
 function entityLocationLabel(hass, entityId) {
-  const entry = entityRegistryMap(hass).get(entityId);
-  const device = valuesOf(hass?.devices).find((item) => item?.id === entry?.device_id);
+  const index = dashboardEntityIndex(hass);
+  const entry = index.registry.get(entityId);
+  const device = index.deviceById.get(entry?.device_id);
   const areaId = entry?.area_id || device?.area_id;
-  const area = valuesOf(hass?.areas).find((item) => (item?.area_id || item?.id) === areaId);
+  const area = index.areaById.get(areaId);
   const areaName = String(area?.name || "").trim();
   const entityName = entityDisplayName(hass, entityId);
   return areaName && entityName.toLocaleLowerCase("de-DE") !== areaName.toLocaleLowerCase("de-DE")
@@ -648,7 +837,7 @@ function entityLocationLabel(hass, entityId) {
 
 function hiddenDashboardEntityIds(hass) {
   const registry = entityRegistryMap(hass);
-  return Object.keys(hass?.states || {}).filter(
+  return dashboardEntityIndex(hass).stateIds.filter(
     (entityId) => !isEntityVisible(hass, entityId, registry),
   );
 }
@@ -662,14 +851,13 @@ function normalizeRoomKey(value) {
 }
 
 function entitiesForArea(hass, areaId) {
-  const devices = new Map(valuesOf(hass?.devices).map((device) => [device.id, device]));
-  const registry = entityRegistryMap(hass);
-  return entityRegistryEntries(hass)
+  const index = dashboardEntityIndex(hass);
+  return index.registryEntries
     .filter((entry) => {
-      const deviceArea = devices.get(entry.device_id)?.area_id;
+      const deviceArea = index.deviceById.get(entry.device_id)?.area_id;
       return (
         (entry.area_id || deviceArea) === areaId &&
-        isEntityVisible(hass, entry.entity_id, registry)
+        isEntityVisible(hass, entry.entity_id, index.registry)
       );
     })
     .map((entry) => entry.entity_id)
@@ -680,7 +868,7 @@ function detectedRooms(hass, configuredRooms) {
   const configured = Array.isArray(configuredRooms) ? configuredRooms : [];
   const existing = new Map(configured.map((room) => [room.area_id, room]));
 
-  const areas = valuesOf(hass?.areas).sort((a, b) =>
+  const areas = [...dashboardEntityIndex(hass).areas].sort((a, b) =>
     String(a.name).localeCompare(String(b.name), "de"),
   );
 
@@ -724,7 +912,7 @@ function detectedPersons(hass, configuredPersons) {
   const configured = Array.isArray(configuredPersons) ? configuredPersons : [];
   const existing = new Map(configured.map((person) => [person.entity, person]));
   const registry = entityRegistryMap(hass);
-  const allPersonEntities = Object.keys(hass?.states || {})
+  const allPersonEntities = dashboardEntityIndex(hass).stateIds
     .filter((entityId) => entityId.startsWith("person."));
   const personEntities = allPersonEntities
     .filter((entityId) => isEntityVisible(hass, entityId, registry))
@@ -883,7 +1071,7 @@ function packageEntity(hass, { domain, uniqueId, entityId, alias, attributeId })
     return [entityId, exact];
   }
 
-  return Object.entries(hass?.states || {}).find(
+  return dashboardEntityIndex(hass).stateEntries.find(
     ([candidateId, state]) =>
       candidateId.startsWith(`${domain}.`) &&
       (
@@ -922,7 +1110,7 @@ function withNotificationPopup(entry, category) {
 
 function parcelSensorEntities(hass) {
   const registry = entityRegistryMap(hass);
-  const candidates = Object.entries(hass?.states || {})
+  const candidates = dashboardEntityIndex(hass).stateEntries
     .filter(([entityId, state]) =>
       entityId.startsWith("sensor.") &&
       isEntityVisible(hass, entityId, registry) &&
@@ -939,7 +1127,7 @@ function parcelSensorEntities(hass) {
 
 function parcelCalendarEntities(hass) {
   const registry = entityRegistryMap(hass);
-  return Object.entries(hass?.states || {})
+  return dashboardEntityIndex(hass).stateEntries
     .filter(([entityId, state]) =>
       entityId.startsWith("calendar.") &&
       isEntityVisible(hass, entityId, registry) &&
@@ -951,7 +1139,7 @@ function parcelCalendarEntities(hass) {
 
 function notificationCalendarEntities(hass, wasteEntityIds = []) {
   const registry = entityRegistryMap(hass);
-  const candidates = Object.entries(hass?.states || {})
+  const candidates = dashboardEntityIndex(hass).stateEntries
     .filter(([entityId, state]) =>
       entityId.startsWith("calendar.") &&
       isEntityVisible(hass, entityId, registry),
@@ -1094,14 +1282,20 @@ function parcelOverviewCard(entityIds) {
           }
           return '';
         };
-        const contentByBarcode = new Map();
-        Object.values(hass.states).forEach((state) => {
-          (Array.isArray(state?.attributes?.parcels) ? state.attributes.parcels : []).forEach((parcel) => {
-            const barcode = String(parcel?.barcode || '').trim();
-            const content = contentLabel(parcel);
-            if (barcode && content) contentByBarcode.set(barcode, content);
+        const parcelCache = globalThis.__smartphoneDashboardParcelContentCache ||
+          (globalThis.__smartphoneDashboardParcelContentCache = { updated: 0, values: new Map() });
+        if (Date.now() - parcelCache.updated > 300000) {
+          parcelCache.values = new Map();
+          Object.values(hass.states).forEach((state) => {
+            (Array.isArray(state?.attributes?.parcels) ? state.attributes.parcels : []).forEach((parcel) => {
+              const barcode = String(parcel?.barcode || '').trim();
+              const content = contentLabel(parcel);
+              if (barcode && content) parcelCache.values.set(barcode, content);
+            });
           });
-        });
+          parcelCache.updated = Date.now();
+        }
+        const contentByBarcode = parcelCache.values;
         const parcelRank = (parcel) => {
           const immediate = { at_pickup_point: 0, out_for_delivery: 1, problem: 2 };
           if (Object.hasOwn(immediate, parcel?.status)) return immediate[parcel.status];
@@ -1281,9 +1475,10 @@ function applyNotificationOptions(dashboard, config, hass) {
     .filter(Boolean);
   const hiddenEntityIds = hiddenDashboardEntityIds(hass);
   const registry = entityRegistryMap(hass);
-  const visibleStates = Object.entries(hass?.states || {}).filter(([entityId]) =>
+  const stateEntries = dashboardEntityIndex(hass).stateEntries;
+  const visibleStates = stateEntries.filter(([entityId]) =>
     isEntityVisible(hass, entityId));
-  const batteryEntityIds = Object.entries(hass?.states || {}).filter(([entityId, state]) =>
+  const batteryEntityIds = stateEntries.filter(([entityId, state]) =>
     entityId.startsWith("sensor.") &&
     !registry.get(entityId)?.disabled_by &&
     !batteryExclusions.includes(entityId) &&
@@ -1923,7 +2118,7 @@ function csv(value) {
 
 function entityIds(hass, domain, pattern) {
   const registry = entityRegistryMap(hass);
-  return Object.keys(hass?.states || {}).filter((id) =>
+  return dashboardEntityIndex(hass).stateIds.filter((id) =>
     isEntityVisible(hass, id, registry) &&
     (!domain || id.startsWith(`${domain}.`)) && (!pattern || pattern.test(id)),
   );
@@ -2007,12 +2202,12 @@ function autoFeatureEntities(hass, key, systemGroups = []) {
     ];
   }
   const registry = entityRegistryMap(hass);
-  if (key === "printer") return Object.keys(hass?.states || {}).filter((id) =>
+  if (key === "printer") return dashboardEntityIndex(hass).stateIds.filter((id) =>
     isEntityVisible(hass, id, registry) &&
     /^(sensor|binary_sensor|switch|button|number|select)\./.test(id) &&
     /printer|druck|bambu|octoprint|klipper|moonraker/i.test(id),
   );
-  return Object.keys(hass?.states || {}).filter((id) =>
+  return dashboardEntityIndex(hass).stateIds.filter((id) =>
     isEntityVisible(hass, id, registry) &&
     /^(sensor|binary_sensor)\./.test(id) &&
     (/system|server|processor|memory|disk|cpu|ram|power|last|home_assistant_core|uptime|ups|opnsense|truenas|zima|influxdb_(internet|truenas|zima)|gateway.*status|net_(in|out)|inbytes|outbytes|pool/i.test(id) ||
@@ -2030,8 +2225,9 @@ function autoBambuPrinterIds(hass) {
     const text = parts.filter(Boolean).join(" ").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
     return /\bbambu(?:\s*lab)?\b/.test(text) || /\b(?:a\s*1(?:\s*mini)?|p\s*1\s*[sp]|p\s*2\s*s|h\s*2\s*[ds]|x\s*1\s*c|x\s*1\s*carbon)\b/.test(text);
   };
-  const devices = valuesOf(hass?.devices);
-  const deviceById = new Map(devices.map((device) => [device.id, device]));
+  const index = dashboardEntityIndex(hass);
+  const devices = index.devices;
+  const deviceById = index.deviceById;
   const registry = entityRegistryMap(hass);
   const visibleDeviceIds = new Set(
     [...registry.values()]
@@ -2062,7 +2258,7 @@ function isPrinterCameraEntity(hass, entityId, knownPrinterDeviceIds = new Set(a
   const registry = entityRegistryMap(hass);
   const entry = registry.get(entityId);
   if (entry?.device_id && knownPrinterDeviceIds.has(entry.device_id)) return true;
-  const device = valuesOf(hass?.devices).find((item) => item?.id === entry?.device_id);
+  const device = dashboardEntityIndex(hass).deviceById.get(entry?.device_id);
   const descriptor = [
     entityId,
     hass?.states?.[entityId]?.attributes?.friendly_name,
@@ -2160,10 +2356,11 @@ function securityMasterAlarm(configuredEntity, entities, hass) {
 function configuredFeatures(config, hass) {
   const configured = config.features && typeof config.features === "object" ? config.features : {};
   const registry = entityRegistryMap(hass);
+  const index = dashboardEntityIndex(hass);
   const existingEntities = new Set(
-    Object.keys(hass?.states || {}).filter((entityId) => isEntityVisible(hass, entityId, registry)),
+    index.stateIds.filter((entityId) => isEntityVisible(hass, entityId, registry)),
   );
-  const existingDevices = new Set(valuesOf(hass?.devices).map((device) => device.id));
+  const existingDevices = new Set(index.devices.map((device) => device.id));
   const requestedHashes = Object.fromEntries(Object.entries(FEATURE_META).map(([key, meta]) => [
     key,
     normalizedNavigationHash(configured[key]?.hash, meta[2]),
@@ -2316,7 +2513,7 @@ function systemFeatureCards(item, hass) {
 }
 
 function printerFeatureCards(item, hass) {
-  const devices = new Map(valuesOf(hass?.devices).map((device) => [device.id, device]));
+  const devices = dashboardEntityIndex(hass).deviceById;
   const cards = item.printer_ids.flatMap((printerId) => {
     const device = devices.get(printerId);
     const name =
@@ -2647,15 +2844,23 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
 
   set hass(hass) {
     const previousHass = this._hass;
-    const registrySignature = JSON.stringify([
-      valuesOf(hass?.areas).map((x) => [x.area_id, x.name]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
-      valuesOf(hass?.devices).map((x) => [x.id, x.area_id, x.manufacturer, x.model, x.name, x.name_by_user]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
-      entityRegistryEntries(hass).map((x) => [x.entity_id, x.area_id, x.device_id, x.disabled_by, x.hidden_by, x.hidden, x.name, x.original_name, x.platform, x.unique_id]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
-      Object.entries(hass?.states || {}).map(([id, state]) => [id, state?.attributes?.friendly_name, state?.attributes?.device_class, state?.attributes?.unit_of_measurement, state?.attributes?.icon]).sort((a, b) => a[0].localeCompare(b[0])),
-      Object.keys(hass?.services?.notify || {}).sort(),
-    ]);
-    const registryChanged = Boolean(previousHass && this._registrySignature && this._registrySignature !== registrySignature);
-    this._registrySignature = registrySignature;
+    const registrySources = [hass?.areas, hass?.devices, hass?.entities, hass?.services?.notify];
+    const registrySourcesChanged = !this._registrySources || registrySources.some(
+      (source, index) => source !== this._registrySources[index],
+    );
+    let registryChanged = false;
+    if (registrySourcesChanged) {
+      const index = dashboardEntityIndex(hass);
+      const registrySignature = JSON.stringify([
+        index.areas.map((x) => [x.area_id, x.name]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+        index.devices.map((x) => [x.id, x.area_id, x.manufacturer, x.model, x.name, x.name_by_user]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+        index.registryEntries.map((x) => [x.entity_id, x.area_id, x.device_id, x.disabled_by, x.hidden_by, x.hidden, x.name, x.original_name, x.platform, x.unique_id]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+        Object.keys(hass?.services?.notify || {}).sort(),
+      ]);
+      registryChanged = Boolean(previousHass && this._registrySignature && this._registrySignature !== registrySignature);
+      this._registrySignature = registrySignature;
+      this._registrySources = registrySources;
+    }
     this._hass = hass;
     if (!previousHass) {
       this._config = migrateConfig(this._sourceConfig || this._config, hass);
@@ -2719,6 +2924,12 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
       }),
     );
     if (this._blockedBackendConflicts) delete this._blockedBackendConflicts[key];
+    if (BACKEND_NOTIFICATION_KEYS.includes(key)) {
+      const cacheKey = displayConfigCacheKey(this._hass);
+      const displayConfig = { ...(cachedDisplayNotificationConfigs.get(cacheKey) || {}), [key]: value };
+      cachedDisplayNotificationConfigs.set(cacheKey, displayConfig);
+      writeDisplayConfigCache(this._hass, displayConfig);
+    }
     this._scheduleBackendSave({ [key]: value });
   }
 
@@ -4034,4 +4245,5 @@ export {
   detectedRooms,
   applyRoomOptions,
   parcelSensorEntities,
+  popupContentCards,
 };
