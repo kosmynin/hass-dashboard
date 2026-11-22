@@ -7,10 +7,22 @@
 const STRATEGY_TYPE = "smartphone-dashboard";
 const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
 const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.68";
+const STRATEGY_VERSION = "22.0.69";
 const CONFIG_VERSION = 26;
 
 const ACTIVE_ROOM_STYLES = `
+  ha-card {
+    --sd-control-radius: 20px;
+  }
+  .bubble-button-card-container {
+    min-height: 64px !important;
+    border: 1px solid color-mix(in srgb, var(--divider-color) 72%, transparent) !important;
+    border-radius: var(--sd-control-radius) !important;
+    box-shadow: none !important;
+  }
+  .bubble-main-icon-container, .bubble-icon-container {
+    border: 1px solid color-mix(in srgb, var(--divider-color) 72%, transparent) !important;
+  }
   ha-card, .bubble-button-card-container, .bubble-name-container,
   .bubble-main-icon-container, .bubble-icon-container {
     opacity: 1 !important;
@@ -181,8 +193,8 @@ class SmartphoneDashboardNotificationControls extends HTMLElement {
         recipient_token: token,
       });
       status = action === "snooze"
-        ? "Live Activity ist für 30 Minuten stumm."
-        : "Live Activity bleibt bis zur nächsten Änderung stumm.";
+        ? "Mitteilungen sind für 30 Minuten pausiert."
+        : "Mitteilungen bleiben bis zur nächsten Änderung pausiert.";
     } catch (error) {
       status = `Aktion fehlgeschlagen: ${error?.message || error}`;
     } finally {
@@ -196,29 +208,46 @@ class SmartphoneDashboardNotificationControls extends HTMLElement {
     const token = this._recipientToken();
     this.shadowRoot.innerHTML = `
       <style>
-        ha-card { padding: 16px; border-radius: 24px; }
-        .title { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
-        .description, .status { color: var(--secondary-text-color); line-height: 1.4; }
-        .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
-        button {
-          min-height: 46px; border: 0; border-radius: 18px; padding: 10px 12px;
-          color: var(--primary-text-color); background: var(--secondary-background-color);
-          font: inherit; font-weight: 650; cursor: pointer;
+        ha-card {
+          padding: 16px;
+          border: 1px solid var(--divider-color);
+          border-radius: 20px;
+          box-shadow: none;
         }
+        .heading { display: grid; grid-template-columns: 40px 1fr; gap: 12px; align-items: center; }
+        .icon {
+          width: 40px; height: 40px; display: grid; place-items: center;
+          border-radius: 12px; color: var(--warning-color, #ff9f0a);
+          background: color-mix(in srgb, var(--warning-color, #ff9f0a) 14%, transparent);
+        }
+        .title { font-size: 15px; font-weight: 700; line-height: 1.2; }
+        .description, .status { color: var(--secondary-text-color); line-height: 1.35; }
+        .description { margin-top: 2px; font-size: 13px; }
+        .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
+        button {
+          min-height: 44px; border: 1px solid var(--divider-color); border-radius: 12px;
+          padding: 9px 11px; color: var(--primary-text-color);
+          background: var(--card-background-color); font: inherit; font-size: 13px;
+          font-weight: 650; cursor: pointer;
+        }
+        button:first-child { background: var(--secondary-background-color); }
         button:disabled { opacity: .55; cursor: default; }
-        .status { margin-top: 10px; min-height: 20px; font-size: 13px; }
+        .status { margin-top: 10px; min-height: 18px; font-size: 12px; }
       </style>
       <ha-card>
-        <div class="title">Live Activity</div>
-        <div class="description">Diese Aktionen gelten nur für dieses Smartphone.</div>
+        <div class="heading">
+          <div class="icon"><ha-icon icon="mdi:bell-off-outline"></ha-icon></div>
+          <div><div class="title">Mitteilungen auf diesem iPhone</div>
+          <div class="description">Updates bleiben leise. Diese Pause gilt nur für dieses Gerät.</div></div>
+        </div>
         ${token ? `<div class="actions">
-          <button data-action="snooze" ${this._busy ? "disabled" : ""}>30 Min. stumm</button>
-          <button data-action="mute" ${this._busy ? "disabled" : ""}>Bis Änderung stumm</button>
+          <button data-action="snooze" ${this._busy ? "disabled" : ""}>30 Minuten pausieren</button>
+          <button data-action="mute" ${this._busy ? "disabled" : ""}>Bis zur Änderung pausieren</button>
         </div>` : ""}
         <div class="status"></div>
       </ha-card>`;
     this.shadowRoot.querySelector(".status").textContent = status || (
-      token ? "" : "Öffne diesen Dialog über die Live Activity, um sie stummzuschalten."
+      token ? "" : "Öffne diesen Dialog über eine Live Activity, um sie zu pausieren."
     );
     for (const button of this.shadowRoot.querySelectorAll("button[data-action]")) {
       button.addEventListener("click", () => void this._apply(button.dataset.action));
@@ -242,11 +271,17 @@ const NINA_SUMMARY_STYLES = `\${(() => {
   const icon = card.querySelector('.bubble-icon');
   if (name) name.innerText = headline;
   if (state) state.innerText = description;
+  card?.style?.setProperty('--sd-alert-accent', 'var(--error-color)');
   if (icon) icon.style.setProperty('color', 'var(--error-color)', 'important');
 })()}`;
 const ENTITY_NOTIFICATION_STYLES = `
+  ha-card { --sd-alert-accent: var(--warning-color, #ff9f0a); }
   .bubble-button-card-container {
-    background: var(--bubble-button-main-background-color, var(--secondary-background-color)) !important;
+    min-height: 68px !important;
+    background: var(--card-background-color) !important;
+    border: 1px solid color-mix(in srgb, var(--sd-alert-accent) 22%, var(--divider-color)) !important;
+    border-radius: 20px !important;
+    box-shadow: none !important;
   }
   .bubble-button-background {
     opacity: 0 !important;
@@ -254,11 +289,23 @@ const ENTITY_NOTIFICATION_STYLES = `
   }
   .bubble-name {
     color: var(--primary-text-color) !important;
+    font-size: 15px !important;
+    font-weight: 650 !important;
   }
   .bubble-state {
     display: flex !important;
     color: var(--secondary-text-color) !important;
     opacity: 1 !important;
+    font-size: 13px !important;
+    line-height: 1.3 !important;
+    white-space: normal !important;
+  }
+  .bubble-main-icon-container, .bubble-icon-container {
+    background: color-mix(in srgb, var(--sd-alert-accent) 14%, var(--card-background-color)) !important;
+    border: 1px solid color-mix(in srgb, var(--sd-alert-accent) 24%, transparent) !important;
+  }
+  .bubble-icon {
+    color: var(--sd-alert-accent) !important;
   }
 `;
 const WASTE_SUMMARY_STYLES = `\${(() => {
@@ -363,6 +410,7 @@ const WASTE_SUMMARY_STYLES = `\${(() => {
         : /bio|braun|organisch/.test(normalizedTypes)
           ? '#8B4513'
           : 'var(--primary-text-color)';
+  card?.style?.setProperty('--sd-alert-accent', iconColor);
   if (name) name.innerText = types;
   if (state) state.innerText = dateLabel ? 'Nächster Termin: ' + dateLabel : 'Kein Termin verfügbar';
   if (icon) icon.style.setProperty('color', iconColor, 'important');
@@ -439,6 +487,7 @@ const PARCEL_SUMMARY_STYLES = `\${(() => {
   const state = card.querySelector('.bubble-state');
   const icon = card.querySelector('.bubble-icon');
   const background = card.querySelector('.bubble-button-background');
+  card?.style?.setProperty('--sd-alert-accent', design.color);
   if (name) name.innerText = 'Nächstes Paket';
   if (state) state.innerText = [parcelLabel, labels[first.status] || labels.unknown].filter(Boolean).join(' · ');
   if (icon) {
@@ -460,24 +509,17 @@ function batterySummaryStyles(threshold) {
     const iconColor = Number.isFinite(value) && value <= criticalLimit
       ? 'var(--error-color)'
       : 'var(--warning-color, #ff9800)';
-    card.style.setProperty('--smartphone-battery-icon-color', iconColor);
+    card?.style?.setProperty('--smartphone-battery-icon-color', iconColor);
+    card?.style?.setProperty('--sd-alert-accent', iconColor);
   })()}
-  .bubble-button-card-container {
-    background: var(--bubble-button-main-background-color, var(--secondary-background-color)) !important;
-  }
-  .bubble-button-background {
-    opacity: 0 !important;
-    background-color: transparent !important;
-  }
   .bubble-icon {
     color: var(--smartphone-battery-icon-color, var(--warning-color, #ff9800)) !important;
   }
-  .bubble-name {
-    color: var(--primary-text-color) !important;
-  }
-  .bubble-state {
-    color: var(--secondary-text-color) !important;
-  }`;
+  `;
+}
+
+function notificationAccentStyles(color) {
+  return `ha-card { --sd-alert-accent: ${color}; }`;
 }
 const NOTIFICATION_HELPERS = {
   notification_batteries: "input_boolean.smartphone_meldung_batterien",
@@ -667,7 +709,7 @@ const BASE_DASHBOARD = {
         { entity_id: "binary_sensor.nina_warning_*", state: "on", options: {
           type: "custom:bubble-card", card_type: "button", button_type: "state",
           icon: "mdi:alert-outline", show_state: false, show_attribute: true,
-          styles: NINA_SUMMARY_STYLES,
+          styles: [ENTITY_NOTIFICATION_STYLES, NINA_SUMMARY_STYLES].join("\n"),
         } }
       ], exclude: [] },
       else: {
@@ -676,6 +718,7 @@ const BASE_DASHBOARD = {
         button_type: "name",
         name: "Keine Meldungen",
         icon: "mdi:bell-off-outline",
+        styles: ACTIVE_ROOM_STYLES,
       } },
       { type: "heading", heading: "Aktionen", icon: "mdi:gesture-tap" },
       { type: "grid", columns: 2, square: false, cards: [] },
@@ -945,7 +988,7 @@ function createPersonCard(person) {
     show_state: true,
     state_color: true,
     card_layout: "large",
-    styles: `\${(() => {
+    styles: `${ACTIVE_ROOM_STYLES}\n\${(() => {
       const personState = hass.states[${personId}]?.state;
       const travelEntity = ${travelId};
       const travel = travelEntity ? Number(hass.states[travelEntity]?.state) : NaN;
@@ -1348,30 +1391,31 @@ function parcelOverviewCard(entityIds) {
             '<span style="width:' + progress + '%;background:' + design.color + '"></span></div></div>';
           const url = /^https?:\\/\\//i.test(String(parcel.url || '')) ? String(parcel.url) : '';
           return url
-            ? '<a class="parcel-row" href="' + escape(url) + '" target="_self" rel="external" onclick="event.stopPropagation()" onpointerdown="event.stopPropagation()" ontouchstart="event.stopPropagation()">' + content + '<span class="parcel-open" aria-hidden="true">↗</span></a>'
+            ? '<a class="parcel-row" href="' + escape(url) + '" target="_self" rel="external" onclick="event.stopPropagation()" onpointerdown="event.stopPropagation()" ontouchstart="event.stopPropagation()">' + content + '<span class="parcel-open" aria-hidden="true"><ha-icon icon="mdi:open-in-new"></ha-icon></span></a>'
             : '<div class="parcel-row">' + content + '</div>';
         }).join('');
       ]]]`,
     },
     styles: {
-      card: [{ padding: "18px" }, { "border-radius": "28px" }, { "text-align": "left" }],
+      card: [{ padding: "16px" }, { "border-radius": "20px" }, { "text-align": "left" }, { "box-shadow": "none" }],
       grid: [{ "grid-template-areas": "'i n' 'parcels parcels'" }, { "grid-template-columns": "44px 1fr" }],
       icon: [{ color: "#0A84FF" }, { width: "30px" }],
       name: [{ "font-size": "18px" }, { "font-weight": "700" }, { "justify-self": "start" }],
       custom_fields: { parcels: [{ "margin-top": "14px" }, { width: "100%" }, { "pointer-events": "auto" }, { "z-index": "3" }] },
     },
     extra_styles: `
-      .parcel-row { display:flex; align-items:center; gap:12px; width:100%; box-sizing:border-box; padding:12px 14px; margin-top:8px; border-radius:20px; background:var(--secondary-background-color); color:var(--primary-text-color); text-decoration:none; }
+      .parcel-row { display:flex; align-items:center; gap:12px; width:100%; box-sizing:border-box; padding:12px; margin-top:8px; border:1px solid var(--divider-color); border-radius:16px; background:var(--secondary-background-color); color:var(--primary-text-color); text-decoration:none; }
       a.parcel-row { position:relative; z-index:3; pointer-events:auto !important; cursor:pointer; touch-action:manipulation; -webkit-tap-highlight-color:transparent; }
       a.parcel-row > * { pointer-events:none !important; }
-      .parcel-icon { width:44px; height:44px; border-radius:50%; display:grid; place-items:center; flex:0 0 44px; color:var(--parcel-color); background:color-mix(in srgb, var(--parcel-color) 18%, var(--card-background-color)); }
+      .parcel-icon { width:44px; height:44px; border-radius:12px; display:grid; place-items:center; flex:0 0 44px; color:var(--parcel-color); background:color-mix(in srgb, var(--parcel-color) 14%, var(--card-background-color)); }
       .parcel-icon ha-icon { width:25px; height:25px; color:inherit; }
       .parcel-copy { flex:1; min-width:0; }
       .parcel-name { font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
       .parcel-meta, .parcel-time, .parcel-empty { margin-top:3px; color:var(--secondary-text-color); font-size:13px; line-height:1.35; }
       .parcel-progress { height:5px; margin-top:9px; overflow:hidden; border-radius:999px; background:color-mix(in srgb, var(--secondary-text-color) 18%, transparent); }
       .parcel-progress span { display:block; height:100%; border-radius:inherit; }
-      .parcel-row .parcel-open { width:22px; height:22px; display:grid; place-items:center; align-self:center; color:#0A84FF; flex:0 0 22px; font-size:20px; font-weight:700; line-height:1; }
+      .parcel-row .parcel-open { width:24px; height:24px; display:grid; place-items:center; align-self:center; color:#0A84FF; flex:0 0 24px; }
+      .parcel-row .parcel-open ha-icon { width:20px; height:20px; }
       .parcel-empty { padding:10px 2px; }
     `,
   };
@@ -1422,6 +1466,7 @@ function notificationDetailPopups(filtersByCategory, hass, hiddenEntityIds = [],
       icon,
       show_header: true,
       scrolling_effect: true,
+      styles: ACTIVE_ROOM_STYLES,
       cards,
     }];
   });
@@ -1539,7 +1584,11 @@ function applyNotificationOptions(dashboard, config, hass) {
         entity_id: entity_id || entityId,
         state: "on",
         last_changed: `> ${contactMinutes}`,
-        options: locationOptions(entry.options, entity_id || undefined),
+        options: locationOptions(
+          entry.options,
+          entity_id || undefined,
+          notificationAccentStyles("var(--warning-color, #ff9f0a)"),
+        ),
       }));
       return settings.contacts ? emit("contacts", entries) : [];
     }
@@ -1551,7 +1600,11 @@ function applyNotificationOptions(dashboard, config, hass) {
         ...entry,
         entity_id: entity_id || entityId,
         state: `>= ${co2Threshold}`,
-        options: locationOptions(entry.options, entity_id || undefined),
+        options: locationOptions(
+          entry.options,
+          entity_id || undefined,
+          notificationAccentStyles("#A2AA52"),
+        ),
       }));
       return settings.co2 ? emit("co2", entries) : [];
     }
@@ -1574,7 +1627,7 @@ function applyNotificationOptions(dashboard, config, hass) {
           button_type: "state",
           show_state: true,
           icon: "mdi:trash-can-outline",
-          styles: WASTE_SUMMARY_STYLES,
+          styles: [ENTITY_NOTIFICATION_STYLES, WASTE_SUMMARY_STYLES].join("\n"),
         },
       }));
       return settings.waste ? emit("waste", entries) : [];
@@ -1589,12 +1642,25 @@ function applyNotificationOptions(dashboard, config, hass) {
           const problemSensor = UPS_PROBLEM_DEVICE_CLASSES.has(
             String(state?.attributes?.device_class || "").toLowerCase(),
           );
-          return { ...entry, entity_id, state: problemSensor ? "on" : "off", options: locationOptions(entry.options, entity_id) };
+          return {
+            ...entry,
+            entity_id,
+            state: problemSensor ? "on" : "off",
+            options: locationOptions(
+              entry.options,
+              entity_id,
+              notificationAccentStyles("var(--warning-color, #ff9f0a)"),
+            ),
+          };
         }
         return {
           ...entry,
           entity_id,
-          options: locationOptions(entry.options, entity_id),
+          options: locationOptions(
+            entry.options,
+            entity_id,
+            notificationAccentStyles("var(--warning-color, #ff9f0a)"),
+          ),
           // Diese Regeln werden von Auto-Entities bei jeder Zustandsänderung
           // erneut ausgewertet. So bleiben historische Umschalt-Sensoren auch
           // dann verborgen, wenn ihre Attribute beim HA-Start noch fehlen.
@@ -1622,7 +1688,11 @@ function applyNotificationOptions(dashboard, config, hass) {
     if (entityId === "sensor.*temperature") {
       entry.entity_id = frostEntity;
       entry.state = `<= ${frostThreshold}`;
-      entry.options = locationOptions(entry.options, frostEntity);
+      entry.options = locationOptions(
+        entry.options,
+        frostEntity,
+        notificationAccentStyles("#64D2FF"),
+      );
       return settings.frost && Boolean(frostEntity) ? emit("frost", [entry]) : [];
     }
     if (entityId.startsWith("binary_sensor.nina_warning_")) {
@@ -1635,7 +1705,7 @@ function applyNotificationOptions(dashboard, config, hass) {
           options: {
             ...(entry.options || {}),
             icon: "mdi:alert-outline",
-            styles: NINA_SUMMARY_STYLES,
+            styles: [ENTITY_NOTIFICATION_STYLES, NINA_SUMMARY_STYLES].join("\n"),
           },
         }])
         : [];
@@ -1668,6 +1738,7 @@ function applyNotificationOptions(dashboard, config, hass) {
       icon: "mdi:bell-badge-outline",
       show_header: true,
       scrolling_effect: true,
+      styles: ACTIVE_ROOM_STYLES,
       cards: [
         { type: "custom:smartphone-dashboard-notification-controls" },
         structuredClone(autoEntities),
@@ -1708,6 +1779,7 @@ function applyQuickActionOptions(dashboard, config, hass) {
     button_type: "name",
     entity,
     icon: hass.states[entity]?.attributes?.icon || "mdi:gesture-tap-button",
+    styles: ACTIVE_ROOM_STYLES,
     tap_action: { action: "perform-action", perform_action: "script.turn_on", target: { entity_id: entity } },
     button_action: {
       tap_action: { action: "perform-action", perform_action: "script.turn_on", target: { entity_id: entity } },
@@ -2639,6 +2711,7 @@ function applyDynamicFeatures(dashboard, config, hass) {
   }
   const navigation = { type: "grid", columns: 2, square: false, cards: features.map((item) => ({
     type: "custom:bubble-card", card_type: "button", button_type: "name", name: item.name, icon: item.icon,
+    styles: ACTIVE_ROOM_STYLES,
     tap_action: { action: "navigate", navigation_path: item.hash },
     button_action: { tap_action: { action: "navigate", navigation_path: item.hash } },
   })) };
@@ -2653,7 +2726,7 @@ function applyDynamicFeatures(dashboard, config, hass) {
       : { button_type: "name", name: item.name, icon: item.icon };
     return {
       type: "custom:bubble-card", card_type: "pop-up", popup_mode: "adaptive-dialog", hash: item.hash,
-      ...securityHeader, show_header: true, scrolling_effect: true,
+      ...securityHeader, show_header: true, scrolling_effect: true, styles: ACTIVE_ROOM_STYLES,
       cards: item.popup_cards,
     };
   });

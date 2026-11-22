@@ -103,11 +103,15 @@ zusammengefasste Persistent Notification, solange Meldungen aktiv sind. Sie wird
 bei Änderungen aktualisiert und nach vollständiger Entwarnung entfernt.
 
 Optionale nicht mobile Notify-Dienste erhalten ebenfalls nur eine
-Sammelmeldung. Für `notify.mobile_app_*` pflegt die Integration bis zu vier
+Sammelmeldung. Für `notify.mobile_app_*` pflegt die Integration bis zu drei
 getrennte Warnungs-Live-Activities mit kategoriespezifischen Icons und Farben.
 Messwertänderungen wie ein neuer CO₂-Wert aktualisieren dabei dieselbe Live
-Activity still und sofort; die stabile Meldungsidentität verhindert unnötige
-Neustarts. Der Kopf benennt die Kategorie kompakt, etwa
+Activity still und gebündelt; die stabile Meldungsidentität verhindert unnötige
+Neustarts. Auch der erstmalige Start normaler Warnungs-, Medien-, Paket- und
+Geräteaktivitäten setzt explizit keinen Systemton. Nur eine neu auftretende
+NINA- oder USV-Lage darf einmal hörbar und zeitkritisch auf sich aufmerksam
+machen; weitere Meldungen derselben Auswertung bleiben leise. Der Kopf benennt
+die Kategorie kompakt, etwa
 **CO₂**, **Abfall** oder **Paket**. Paket-Aktivitäten wechseln Symbol und Akzentfarbe
 passend zu Unterwegs, In Zustellung, Abholbereit, Rücksendung oder Problem.
 Zusätzlich zeigen sie den vierstufigen Versandfortschritt als echten
@@ -131,6 +135,8 @@ expliziten Empfänger werden die Dashboard-Empfänger verwendet.
 `smartphone_dashboard.clear_test_designs` beendet anschließend alle so
 erzeugten Test-Aktivitäten wieder. Die Gruppe **Alle Designs** sollte wegen des
 iOS-Push-to-start-Budgets nur gezielt zur visuellen Prüfung verwendet werden.
+Die Vorschau ist vollständig lautlos und pro Empfänger auf einen Start alle zwei
+Minuten begrenzt.
 
 Zusätzlich können aktive Media Player eigene stille Live Activities erhalten.
 Sie zeigen den **Playernamen** als Titel sowie Medientitel, Interpret
@@ -138,7 +144,7 @@ und Album als Inhalt mit einem passenden Medien-Icon,
 aktualisieren Titelwechsel ohne zusätzliche Push-Mitteilung und verschwinden
 beim Pausieren oder Stoppen. Verwendet werden die sichtbaren bzw. im Bereich
 „Medien“ ausgewählten Entitäten; gruppierte Player werden zusammengefasst und
-maximal drei gleichzeitig angezeigt. Die Funktion lässt sich unter
+der erste aktive Player als eine Fernbedienung angezeigt. Die Funktion lässt sich unter
 **Meldungen → Aktive Medien** deaktivieren. Ein Antippen öffnet das Medien-Pop-up
 und stellt den zugehörigen Player als Bubble-Card-Fernbedienung an die erste
 Position. Dort stehen die vom Player unterstützten Funktionen wie Wiedergabe,
@@ -155,7 +161,8 @@ ein direkter Prozentwert, wird der Fortschritt aus Laufzeit, Programmdauer oder
 der während des aktuellen Programms beobachteten Restzeit abgeleitet. Versteckte technische Statushelfer
 dürfen dafür ausgewertet werden, deaktivierte Entitäten nicht. Fortschrittswerte
 werden in Zehnerschritten gebündelt, damit minütliche Sensorupdates das
-iPhone-Push-Limit nicht erneut ausschöpfen. Bei „Fertig“, „Bereit“ oder „Aus“
+iPhone-Push-Limit nicht erneut ausschöpfen. Gleichzeitig werden höchstens zwei
+laufende Geräte auf dem Sperrbildschirm gezeigt. Bei „Fertig“, „Bereit“ oder „Aus“
 endet die Activity automatisch. Die Funktion lässt sich unter
 **Meldungen → Laufende Haushaltsgeräte** deaktivieren; ein Antippen öffnet den
 zugehörigen Raumbereich.

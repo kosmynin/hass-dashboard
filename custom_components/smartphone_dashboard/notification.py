@@ -19,6 +19,7 @@ from .config_manager import ConfigManager
 from .notification_core import (
     aggregate_alert_message,
     alert_content_digest,
+    alert_is_urgent,
     alert_set_digest,
     appliance_activity_presentation,
     appliance_kind,
@@ -30,7 +31,9 @@ from .notification_core import (
     dashboard_entity_enabled,
     is_battery_level_sensor,
     live_activity_entries,
+    live_activity_critical_text,
     live_activity_presentation,
+    live_activity_relevance,
     live_activity_title,
     media_activity_presentation,
     media_dashboard_url,
@@ -59,10 +62,10 @@ CLEAR_DIGEST = "clear"
 MOBILE_ACTION_EVENT = "mobile_app_notification_action"
 LIVE_ACTIVITY_RENEW_AFTER = 7 * 60 * 60
 LIVE_ACTIVITY_CONTENT_UPDATE_INTERVAL = 30 * 60
-LIVE_ACTIVITY_PAYLOAD_VERSION = "9"
+LIVE_ACTIVITY_PAYLOAD_VERSION = "10"
 MOBILE_PUSH_DUPLICATE_INTERVAL = 10 * 60
-MOBILE_PUSH_HOURLY_LIMIT = 60
-MOBILE_PUSH_DAILY_LIMIT = 200
+MOBILE_PUSH_HOURLY_LIMIT = 40
+MOBILE_PUSH_DAILY_LIMIT = 120
 SNOOZE_SECONDS = 30 * 60
 _LOGGER = logging.getLogger(__name__)
 TEST_ACTIVITY_TAGS = (
@@ -114,6 +117,7 @@ class NotificationCoordinator:
         self._mobile_send_times: dict[str, list[float]] = {}
         self._mobile_payload_sent_at: dict[tuple[str, str], float] = {}
         self._appliance_remaining_baselines: dict[str, float] = {}
+        self._test_design_sent_at: dict[str, float] = {}
 
     async def async_start(self) -> None:
         if self._worker: return
@@ -285,6 +289,12 @@ class NotificationCoordinator:
             raise ValueError("Kein Mobile-App-Benachrichtigungsdienst konfiguriert")
         sent = 0
         for target in recipients:
+            now = time.monotonic()
+            if now - self._test_design_sent_at.get(target, 0) < 120:
+                raise ValueError(
+                    "Designvorschau wurde gerade gesendet. Bitte zwei Minuten warten."
+                )
+            self._test_design_sent_at[target] = now
             service = target.removeprefix("notify.")
             for slug, alert in self._test_alert_designs(group):
                 presentation = live_activity_presentation(alert)
@@ -297,6 +307,7 @@ class NotificationCoordinator:
                         "data": mobile_live_activity_data(
                             [alert],
                             tag=f"smartphone_dashboard_test_{slug}",
+                            silent=True,
                             recipient=target,
                             relevance_score=0.2,
                         ),
@@ -320,6 +331,7 @@ class NotificationCoordinator:
                         "data": mobile_media_activity_data(
                             media_entry,
                             tag="smartphone_dashboard_test_media",
+                            silent=True,
                         ),
                     },
                 )
@@ -346,6 +358,7 @@ class NotificationCoordinator:
                             "data": mobile_appliance_activity_data(
                                 entry,
                                 tag=f"smartphone_dashboard_test_{kind}",
+                                silent=True,
                             ),
                         },
                     )
@@ -654,7 +667,9 @@ class NotificationCoordinator:
             )
             entry["url"] = media_dashboard_url(entity_id, media_hash)
             entries.append(entry)
-        return entries[:3]
+        # One remote in the Dynamic Island is useful; several simultaneous
+        # player remotes make the Lock Screen noisy and multiply push traffic.
+        return entries[:1]
 
     @staticmethod
     def _appliance_remaining_minutes(state, descriptor: str, now: datetime) -> int | None:
@@ -848,7 +863,7 @@ class NotificationCoordinator:
             for device_id, baseline in self._appliance_remaining_baselines.items()
             if device_id in active_device_ids
         }
-        return sorted(entries, key=lambda entry: str(entry["title"]).casefold())[:4]
+        return sorted(entries, key=lambda entry: str(entry["title"]).casefold())[:2]
 
     async def _sync_persistent_notification(self, alerts: list[dict[str, str]]) -> None:
         message = aggregate_alert_message(alerts, bullet="- ") if alerts else ""
@@ -1140,6 +1155,13 @@ class NotificationCoordinator:
                     ).items()
                     if isinstance(key, str) and isinstance(value, (int, float))
                 }
+                alert_fingerprint_map = {
+                    key: [item for item in value if isinstance(item, str)]
+                    for key, value in notification_state.get(
+                        "alert_fingerprints_by_recipient", {}
+                    ).items()
+                    if isinstance(key, str) and isinstance(value, list)
+                }
                 media_digest_map = {
                     recipient: {
                         entity_id: str(digest_value)
@@ -1262,6 +1284,18 @@ class NotificationCoordinator:
                         muted_digest_map.pop(recipient, None)
                     muted = bool(digest) and muted_digest_map.get(recipient) == digest
                     if alerts:
+                        previous_fingerprints = set(
+                            alert_fingerprint_map.get(recipient, [])
+                        )
+                        audible_fingerprint = next(
+                            (
+                                alert["fingerprint"]
+                                for alert in alerts
+                                if alert_is_urgent(alert)
+                                and alert["fingerprint"] not in previous_fingerprints
+                            ),
+                            "",
+                        )
                         if mobile_app and not snoozed and not muted:
                             content_digest = alert_content_digest(alerts)
                             live_payload_digest = (
@@ -1348,21 +1382,21 @@ class NotificationCoordinator:
                                             f"live:{live_tag}:{live_payload_digest}",
                                         )
                                         active_retry_keys.add(live_key)
-                                        urgent = entry["fingerprint"].startswith("nina:")
                                         presentation = live_activity_presentation(entry)
+                                        audible = (
+                                            entry["fingerprint"]
+                                            == audible_fingerprint
+                                        )
                                         live_payload = {
                                             "title": live_activity_title(entry),
                                             "message": presentation["message"],
                                             "data": mobile_live_activity_data(
                                                 [entry],
                                                 tag=live_tag,
-                                                silent=bool(live_started or previous_live_tags),
+                                                silent=not audible,
                                                 recipient=recipient,
-                                                critical_text=f"{index}/{len(entries)}",
-                                                relevance_score=(
-                                                    1.0 if urgent
-                                                    else max(0.55, 0.9 - ((index - 1) * 0.05))
-                                                ),
+                                                critical_text=live_activity_critical_text(entry),
+                                                relevance_score=live_activity_relevance(entry),
                                             ),
                                         }
                                         if self._retry_after.get(live_key, 0) > time.monotonic():
@@ -1392,6 +1426,11 @@ class NotificationCoordinator:
                                             else now_epoch
                                         )
                                         live_updated_map[recipient] = now_epoch
+
+                        # Remember which situations have already requested
+                        # attention, even while the user has temporarily muted
+                        # their phone. Reopening the same alert stays quiet.
+                        alert_fingerprint_map[recipient] = fingerprints
 
                         if mobile_app and (snoozed or muted):
                             live_tags = live_tag_map.get(recipient, [])
@@ -1465,6 +1504,7 @@ class NotificationCoordinator:
                                     self._retry_after[retry_key] = time.monotonic() + min(3600, 30 * (2 ** (count - 1)))
                                     errors.append(f"{recipient}: {err}")
                     else:
+                        alert_fingerprint_map.pop(recipient, None)
                         snooze_until_map.pop(recipient, None)
                         muted_digest_map.pop(recipient, None)
                         if not mobile_app:
@@ -1520,9 +1560,12 @@ class NotificationCoordinator:
                                 live_updated_map.pop(recipient, None)
 
                 removed_recipients = (
-                    set(stored_deliveries) | set(live_tag_map)
+                    set(stored_deliveries)
+                    | set(live_tag_map)
+                    | set(alert_fingerprint_map)
                 ) - set(recipients)
                 for recipient in removed_recipients:
+                    alert_fingerprint_map.pop(recipient, None)
                     if not recipient.startswith("notify.mobile_app_"):
                         live_digest_map.pop(recipient, None)
                         live_tag_map.pop(recipient, None)
@@ -1620,6 +1663,7 @@ class NotificationCoordinator:
                         "live_tag_by_recipient": live_tag_map,
                         "live_started_at_by_recipient": live_started_map,
                         "live_updated_at_by_recipient": live_updated_map,
+                        "alert_fingerprints_by_recipient": alert_fingerprint_map,
                         "media_digest_by_recipient": media_digest_map,
                         "media_tag_by_recipient": media_tag_map,
                         "media_started_at_by_recipient": media_started_map,

@@ -26,6 +26,9 @@ mobile_live_clear_data = CORE["mobile_live_clear_data"]
 live_activity_message = CORE["live_activity_message"]
 live_activity_entries = CORE["live_activity_entries"]
 live_activity_presentation = CORE["live_activity_presentation"]
+live_activity_critical_text = CORE["live_activity_critical_text"]
+live_activity_relevance = CORE["live_activity_relevance"]
+alert_is_urgent = CORE["alert_is_urgent"]
 live_activity_title = CORE["live_activity_title"]
 media_activity_presentation = CORE["media_activity_presentation"]
 media_dashboard_url = CORE["media_dashboard_url"]
@@ -146,7 +149,11 @@ def test_aggregate_message_and_iphone_replacement_payloads():
     assert active["group"] == passive["group"] == mobile_clear_data()["group"]
     assert active["subtitle"] == "2 aktive Meldungen"
     assert active["push"] == {"interruption-level": "active", "badge": 2}
-    assert passive["push"] == {"interruption-level": "passive", "badge": 1}
+    assert passive["push"] == {
+        "interruption-level": "passive",
+        "badge": 1,
+        "sound": "none",
+    }
     assert mobile_clear_data()["push"] == {"badge": 0}
 
 def test_parcel_contract_becomes_stable_german_live_alert():
@@ -276,8 +283,7 @@ def test_live_activity_is_compact_quiet_on_updates_and_red_for_nina():
     assert [entry["message"] for entry in entries] == [
         "Wohnzimmer · CO₂: 1.420 ppm",
         "Küche · Fenster seit 18 Minuten offen",
-        "Amtliche Warnung",
-        "+2 weitere Meldungen – für Details öffnen",
+        "+3 weitere Meldungen – für Details öffnen",
     ]
     recipient = "notify.mobile_app_boris_iphone"
     data = mobile_live_activity_data(
@@ -295,6 +301,10 @@ def test_live_activity_is_compact_quiet_on_updates_and_red_for_nina():
     assert data["notification_icon_color"] == "#FF453A"
     assert data["notification_icon"] == "mdi:alert-outline"
     assert data["silent"] is True
+    assert data["push"] == {
+        "sound": "none",
+        "interruption-level": "passive",
+    }
     assert data["url"] == alert_dashboard_url({"fingerprint": "nina:c"}, recipient)
     assert data["clickAction"] == data["url"]
     assert "sd_popup=meldung-nina" in data["url"]
@@ -343,6 +353,24 @@ def test_live_activity_uses_category_icons_colors_and_plain_text():
         assert f"sd_popup={popup}" in url
         assert url.endswith(f"#{popup}")
 
+def test_live_activity_compact_text_and_attention_priority_are_semantic():
+    assert live_activity_critical_text({
+        "fingerprint": "co2:living",
+        "message": "Wohnzimmer · Kohlendioxid: 1118 ppm",
+    }) == "1118 ppm"
+    assert live_activity_critical_text({
+        "fingerprint": "contact:kitchen",
+        "message": "Küche · Fenster seit 18 Minuten offen",
+    }) == "18 Min."
+    assert live_activity_critical_text({
+        "fingerprint": "waste:yellow",
+        "message": "Gelbe Tonne: morgen · 04.11.",
+    }) == "Morgen"
+    assert alert_is_urgent({"fingerprint": "nina:storm"})
+    assert alert_is_urgent({"fingerprint": "ups:on-battery"})
+    assert not alert_is_urgent({"fingerprint": "battery:remote"})
+    assert live_activity_relevance({"fingerprint": "nina:storm"}) > live_activity_relevance({"fingerprint": "waste:yellow"})
+
 def test_media_live_activity_contains_player_track_and_media_icon():
     entry = media_activity_presentation(
         "media_player.wohnzimmer",
@@ -368,6 +396,7 @@ def test_media_live_activity_contains_player_track_and_media_icon():
     assert data["critical_text"] == "▶"
     assert data["url"].endswith("#medien")
     assert data["silent"] is True
+    assert data["push"]["sound"] == "none"
     remote_url = media_dashboard_url(entry["entity_id"])
     assert remote_url == "/handy/handy?sd_popup=medien&sd_media=media_player.wohnzimmer#medien"
     entry["url"] = remote_url
@@ -416,6 +445,7 @@ def test_appliance_live_activity_normalizes_integrations_and_throttles_progress(
     assert data["critical_text"] == "47 Min."
     assert data["url"].endswith("#raum-kueche")
     assert data["silent"] is True
+    assert data["push"]["sound"] == "none"
 
 def test_waste_collection_details_support_default_and_dated_attributes():
     details = waste_collection_details(

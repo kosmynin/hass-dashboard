@@ -185,6 +185,53 @@ def alert_content_digest(alerts: list[Mapping[str, object]]) -> str:
     )
     return hashlib.sha256(content.encode()).hexdigest()[:32] if content else ""
 
+def alert_category(alert: Mapping[str, object]) -> str:
+    """Return the stable category prefix used across dashboard and phone UI."""
+    return str(alert.get("fingerprint") or "").partition(":")[0].casefold()
+
+def alert_is_urgent(alert: Mapping[str, object]) -> bool:
+    """Only safety and power-failure states may request audible attention."""
+    return alert_category(alert) in {"nina", "ups"}
+
+def live_activity_critical_text(alert: Mapping[str, object]) -> str:
+    """Create useful compact-island text instead of an unexplained fraction."""
+    explicit = str(alert.get("critical_text") or "").strip()
+    if explicit:
+        return explicit
+    message = str(alert.get("message") or "").strip()
+    category = alert_category(alert)
+    patterns = {
+        "battery": r"(-?\d+(?:[.,]\d+)?\s*%)",
+        "co2": r"(-?\d[\d. ]*\s*ppm)",
+        "contact": r"(\d+\s*(?:Min\.|Minuten|Std\.))",
+        "frost": r"(-?\d+(?:[.,]\d+)?\s*°C)",
+        "waste": r"\b(heute|morgen|in\s+\d+\s+Tagen)\b",
+    }
+    match = re.search(patterns.get(category, r"$^"), message, re.IGNORECASE)
+    if match:
+        value = match.group(1).replace("Minuten", "Min.")
+        return value.capitalize() if category == "waste" else value
+    return {
+        "nina": "Warnung",
+        "ups": "Prüfen",
+        "parcel": "Paket",
+        "summary": "Mehr",
+    }.get(category, "Aktiv")
+
+def live_activity_relevance(alert: Mapping[str, object]) -> float:
+    """Order concurrent activities by what needs attention now."""
+    return {
+        "nina": 1.0,
+        "ups": 0.95,
+        "contact": 0.82,
+        "co2": 0.78,
+        "frost": 0.70,
+        "battery": 0.62,
+        "parcel": 0.58,
+        "waste": 0.42,
+        "summary": 0.35,
+    }.get(alert_category(alert), 0.5)
+
 def parcel_alert(
     parcel: Mapping[str, object],
     now: datetime | None = None,
@@ -372,6 +419,7 @@ def mobile_notification_data(
         "push": {
             "interruption-level": "passive" if passive else "active",
             "badge": count,
+            **({"sound": "none"} if passive else {}),
         },
     }
     if recipient:
@@ -406,7 +454,7 @@ def live_activity_message(alerts: list[Mapping[str, object]], limit: int = 4) ->
     return "\n".join(visible)
 
 def live_activity_entries(
-    alerts: list[Mapping[str, object]], limit: int = 4
+    alerts: list[Mapping[str, object]], limit: int = 3
 ) -> list[dict[str, object]]:
     """Split independent alerts into independently readable Live Activities."""
     normalized = [
@@ -502,7 +550,7 @@ def mobile_live_activity_data(
     """Build a Home Assistant Companion Live Activity / Live Update payload."""
     normalized = normalized_alerts(alerts)
     count = len(normalized)
-    urgent = any(alert["fingerprint"].startswith("nina:") for alert in normalized)
+    urgent = any(alert_is_urgent(alert) for alert in normalized)
     presentation_alert = next(
         (alert for alert in normalized if alert["fingerprint"].startswith("nina:")),
         normalized[0] if normalized else {},
@@ -512,7 +560,10 @@ def mobile_live_activity_data(
     color = presentation["color"]
     fingerprint = str(presentation_alert.get("fingerprint") or "")
     critical = str(
-        presentation_alert.get("critical_text") or critical_text or count
+        presentation_alert.get("critical_text")
+        or critical_text
+        or live_activity_critical_text(presentation_alert)
+        or count
     )
     data: dict[str, object] = {
         "tag": tag,
@@ -545,6 +596,14 @@ def mobile_live_activity_data(
         })
     if silent:
         data["silent"] = True
+        # ``silent`` lowers update priority, but does not silence the initial
+        # start on iOS. Explicitly suppress the system sound as well.
+        data["push"] = {"sound": "none", "interruption-level": "passive"}
+    elif urgent:
+        data["push"] = {
+            "sound": "default",
+            "interruption-level": "time-sensitive",
+        }
     return data
 
 def mobile_clear_data() -> dict[str, object]:
@@ -655,6 +714,7 @@ def mobile_media_activity_data(
     }
     if silent:
         data["silent"] = True
+        data["push"] = {"sound": "none", "interruption-level": "passive"}
     return data
 
 APPLIANCE_PRESENTATIONS = {
@@ -831,6 +891,7 @@ def mobile_appliance_activity_data(
         data["progress_bar_color"] = color
     if silent:
         data["silent"] = True
+        data["push"] = {"sound": "none", "interruption-level": "passive"}
     return data
 
 def area_entity_label(
