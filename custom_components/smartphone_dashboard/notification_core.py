@@ -82,7 +82,11 @@ def parcel_content_label(parcel: Mapping[str, object]) -> str:
     for candidate in candidates:
         values = candidate if isinstance(candidate, (list, tuple)) else [candidate]
         for value in values:
-            text = re.sub(r"\s+", " ", str(value or "").replace("\u200b", " ")).strip()
+            if isinstance(value, Mapping):
+                value = value.get("title") or value.get("name")
+            if not isinstance(value, str):
+                continue
+            text = re.sub(r"\s+", " ", value.replace("\u200b", " ")).strip()
             if text and text.casefold() not in {item.casefold() for item in items}:
                 items.append(text)
         if items:
@@ -162,6 +166,12 @@ def normalized_alerts(alerts: list[Mapping[str, object]]) -> list[dict[str, obje
             "message": message,
         }
         for key in (
+            "entity_id",
+            "related_entity_id",
+            "title",
+            "detail",
+            "instruction",
+            "critical",
             "critical_text",
             "progress",
             "progress_max",
@@ -290,6 +300,12 @@ def parcel_alert(
     progress = PARCEL_STATUS_PROGRESS.get(status, PARCEL_STATUS_PROGRESS["unknown"])
     return {
         "fingerprint": f"parcel:{carrier.casefold()}:{identity}",
+        "title": "Nächstes Paket",
+        "detail": " · ".join(
+            [label, {"registered": "Registriert", "out_for_delivery": "In Zustellung"}.get(
+                status, PARCEL_STATUS_CRITICAL_TEXT.get(status, "Status unbekannt")
+            ), *details]
+        ),
         "message": f"📦 {label}" + (f": {' · '.join(details)}" if details else ""),
         "critical_text": PARCEL_STATUS_CRITICAL_TEXT.get(
             status, PARCEL_STATUS_CRITICAL_TEXT["unknown"]
@@ -464,6 +480,8 @@ def live_activity_entries(
             and str(alert.get("critical_text") or "").casefold() == "erfasst"
         )
     ]
+    # Keep safety alerts visible when the lock-screen slots are full.
+    normalized.sort(key=lambda alert: not alert_is_urgent(alert))
     maximum = max(1, limit)
     if len(normalized) <= maximum:
         return normalized
@@ -472,10 +490,16 @@ def live_activity_entries(
     return [
         *visible,
         {
-            "fingerprint": f"summary:{remaining}",
+            "fingerprint": "summary:more",
             "message": f"+{remaining} weitere Meldungen – für Details öffnen",
         },
     ]
+
+def alert_live_activity_tag(alert: Mapping[str, object], generation: int) -> str:
+    """Keep one tag per condition and rotate it only for an activity renewal."""
+    identity = f"{alert['fingerprint']}\0{live_activity_title(alert)}"
+    digest = hashlib.sha256(identity.encode()).hexdigest()[:16]
+    return f"{MOBILE_LIVE_ACTIVITY_TAG_PREFIX}_{generation}_{digest}"
 
 def live_activity_presentation(alert: Mapping[str, object]) -> dict[str, str]:
     """Return Bubble-Card-like icon, color and text for one Live Activity."""
@@ -522,6 +546,33 @@ def live_activity_presentation(alert: Mapping[str, object]) -> dict[str, str]:
             category, ("mdi:bell-badge-outline", "#FF9F0A")
         )
     return {"message": message, "icon": icon, "color": color}
+
+def dashboard_alert_rows(alerts, can_read) -> list[dict[str, str]] | None:
+    """Expose display data only if every source of the message is readable."""
+    if alerts is None:
+        return None
+    rows = []
+    for alert in alerts:
+        entity_id = alert.get("entity_id")
+        related = alert.get("related_entity_id")
+        if not isinstance(entity_id, str) or not can_read(entity_id):
+            continue
+        if related and (not isinstance(related, str) or not can_read(related)):
+            continue
+        category = alert_category(alert)
+        if category not in ALERT_POPUP_BY_CATEGORY:
+            continue
+        presentation = live_activity_presentation(alert)
+        rows.append({
+            "id": hashlib.sha256(str(alert["fingerprint"]).encode()).hexdigest()[:24],
+            "category": category,
+            "title": str(alert.get("title") or presentation["message"]),
+            "detail": str(alert.get("detail") or ""),
+            "instruction": str(alert.get("instruction") or ""),
+            "icon": presentation["icon"],
+            "color": "#FF453A" if alert.get("critical") else presentation["color"],
+        })
+    return rows
 
 def live_activity_title(alert: Mapping[str, object]) -> str:
     """Return a short German category title for the Live Activity header."""

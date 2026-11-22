@@ -31,16 +31,14 @@ keinem automatisch erzeugten Bereich, Pop-up, Schnellzugriff oder Meldefilter
 angezeigt. Änderungen dieser Einstellung werden ohne Dashboard-Neukonfiguration
 übernommen.
 
-Home Assistant lädt Custom-Ressourcen derzeit parallel und wartet nur fünf
-Sekunden auf eine Strategy. Der kleine Sofort-Loader registriert sich vor dem
-eigentlichen Dashboard-Code und erneut, falls Home Assistants Registry-Polyfill
-eine sehr frühe Registrierung ersetzt. Trifft der bekannte Frontend-Timeout
-trotzdem ein, sind höchstens zwei automatische Wiederholungen erlaubt; eine
-Reload-Schleife ist ausgeschlossen.
+Der Loader registriert die Strategy sofort und lädt den Dashboard-Code parallel.
+Wird Home Assistants Custom-Element-Registry beim Start ausgetauscht, trägt der
+Loader Strategy und zugehörige Komponenten in der aktiven Registry ein. Die
+Integration hält genau eine eigene Lovelace-Ressource auf dem aktuellen Pfad.
 
-Der berechtigungsgefilterte Backend-Lesezugriff für die erste Strategy-Erzeugung
-hat ein Zeitlimit von 1,5 Sekunden. Bei Timeout werden ausschließlich explizite
-Lovelace-Werte oder der letzte erfolgreich bereinigte Browserwert verwendet.
+Der berechtigungsgefilterte Backend-Lesezugriff hat ein Zeitlimit von 1,5 Sekunden,
+mit vorhandener Browserkopie 300 Millisekunden. Bei Timeout verwendet die
+Strategy die Browserkopie und explizite Lovelace-Werte.
 
 Aktive Meldungen öffnen kategoriebasierte Detail-Popups. NINA zeigt dort die
 vollständige Beschreibung und Handlungsempfehlung. Abfallmeldungen zeigen einen bereinigten,
@@ -57,19 +55,19 @@ Mehrzeilige Sensorzustände wie „Restmüll und Biomüll werden morgen abgeholt
 werden sowohl auf der Dashboard-Karte als auch in Persistent Notification und
 Live Activity als gemeinsame Abholung dargestellt.
 Sensoren der [Home Assistant Parcel Integrations](https://ha-parcel-integrations.github.io/)
-werden automatisch erkannt. Wenn der Parcel Aggregator installiert ist, nutzt
-das Dashboard bevorzugt `sensor.parcel_aggregator_incoming_parcels`; andernfalls
-werden die Carrier-Sensoren mit demselben `parcels`-Vertrag verwendet. Der
-Bereich **Pakete** zeigt ausschließlich die nächste relevante Sendung mit
-Absender, Zusteller, deutschem Status, Lieferfenster und Tracking-Link. Dabei
-haben abholbereite, in Zustellung befindliche und problematische Sendungen
-Vorrang; danach entscheidet der früheste Liefertermin. Dashboard, Meldungen und
-Live Activity verwenden dieselbe Auswahl. Ein vorhandener
+werden automatisch erkannt. Carrier-Sensoren und Parcel Aggregator können
+gemeinsam verwendet werden. Unter **Meldungen** und in der Live Activity steht
+höchstens die nächste relevante Sendung. Abholbereite, in Zustellung befindliche
+und problematische Sendungen haben Vorrang. Danach entscheidet der früheste
+Liefertermin. Das **Paket-Pop-up** zeigt alle aktiven Sendungen mit Inhalt oder
+Absender, Zusteller, Status, Lieferfenster und Tracking-Link. Mehrfach erfasste
+Trackingnummern werden zusammengeführt. Der
+Fortschrittsbalken sitzt im Paket-Pop-up und in der Live Activity. Ein vorhandener
 `calendar.parcel_aggregator_deliveries` wird als Bubble-Card-Kalender ergänzt.
 Zugestellte Sendungen verschwinden automatisch.
-Bis zu vier unabhängige Meldungen erscheinen als getrennte, einzeln lesbare
-Live Activities; weitere Meldungen werden kompakt gezählt und bleiben im
-gemeinsamen Meldungsdialog vollständig sichtbar.
+Auf dem Sperrbildschirm ist Platz für bis zu drei Meldungs-Aktivitäten. NINA
+und USV werden zuerst berücksichtigt. Sind mehr Meldungen aktiv, führt die
+letzte Aktivität als Sammelhinweis zum gemeinsamen Meldungsdialog.
 Batteriemeldungen bleiben neutral; ausschließlich ihr Symbol wird unterhalb des
 Grenzwerts orange und bei höchstens dessen Hälfte rot dargestellt.
 Batteriespannungen in Volt oder Millivolt werden grundsätzlich nicht als
@@ -116,7 +114,7 @@ die Kategorie kompakt, etwa
 passend zu Unterwegs, In Zustellung, Abholbereit, Rücksendung oder Problem.
 Zusätzlich zeigen sie den vierstufigen Versandfortschritt als echten
 systemgerenderten Fortschrittsbalken. Derselbe Status erscheint im
-Paket-Pop-up als farbiger Bubble-Card-Balken.
+Paket-Pop-up als Fortschrittsbalken unterhalb des Status.
 Sie öffnen beim Antippen direkt das passende Detail-Pop-up für Batterien,
 Kontakte, CO₂, Abfall, Pakete, USV, Frost oder NINA; zusammengefasste Restmeldungen
 öffnen den gemeinsamen Meldungsdialog. Der `sd_popup`-Fallback stellt den
@@ -167,13 +165,12 @@ endet die Activity automatisch. Die Funktion lässt sich unter
 **Meldungen → Laufende Haushaltsgeräte** deaktivieren; ein Antippen öffnet den
 zugehörigen Raumbereich.
 
-Der Meldungsdialog bietet die Aktionen **30 Min. stumm** und **Bis Änderung
-stumm**. Die erste blendet die Live Activity dieses Smartphones für 30 Minuten
-aus und stellt den dann aktuellen Stand anschließend erneut dar, die zweite
-unterdrückt ausschließlich den aktuellen Meldungssatz. Neue oder geänderte
-Meldungen durchbrechen diese letzte Stummschaltung. Dashboard, Persistent
-Notification und Live Activity verwenden dieselbe vom Backend ausgewertete
-Meldungsliste.
+Wer einen Meldungsdialog über die Live Activity öffnet, kann die Aktivitäten
+dieses Geräts **30 Minuten pausieren** oder **Bis zur Änderung pausieren**.
+Die zweite Aktion gilt für die aktuelle Kombination von Meldungen. Dashboard,
+Persistent Notification und Live Activities verwenden dieselbe
+Backend-Auswertung. Die Dashboard-Verbindung erhält nur Meldungen aus
+Entitäten, für die der angemeldete Benutzer Leserechte besitzt.
 
 Die alte Paketautomation muss deaktiviert werden, um
 Doppelversand zu vermeiden; die mitgelieferte YAML dient nur noch der
@@ -191,7 +188,7 @@ Das Dashboard mit den globalen Benachrichtigungseinstellungen verwendet
 `backend_key: default`; dort wird auch der einmalige, nicht destruktive Import
 der 17 bisherigen Helfer abgelegt.
 
-Siehe [INSTALLATION.md](INSTALLATION.md).
+Siehe [INSTALLATION.md](INSTALLATION.md) und [Versionshinweise und Audit](CHANGELOG.md).
 
 > Das öffentliche Quell- und HACS-Repository liegt unter
 > `https://github.com/kosmynin/hass-dashboard`.

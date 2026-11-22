@@ -1,6 +1,8 @@
+import ast
 import runpy
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 CORE = runpy.run_path(str(Path(__file__).parents[1] / "custom_components/smartphone_dashboard/notification_core.py"))
 pending_fingerprints = CORE["pending_fingerprints"]
 retained_fingerprints = CORE["retained_fingerprints"]
@@ -10,6 +12,7 @@ ups_state_is_alert = CORE["ups_state_is_alert"]
 ups_alert_conditions = CORE["ups_alert_conditions"]
 waste_collection_details = CORE["waste_collection_details"]
 normalized_alerts = CORE["normalized_alerts"]
+dashboard_alert_rows = CORE["dashboard_alert_rows"]
 alert_set_digest = CORE["alert_set_digest"]
 alert_content_digest = CORE["alert_content_digest"]
 parcel_alert = CORE["parcel_alert"]
@@ -25,6 +28,7 @@ mobile_live_activity_data = CORE["mobile_live_activity_data"]
 mobile_live_clear_data = CORE["mobile_live_clear_data"]
 live_activity_message = CORE["live_activity_message"]
 live_activity_entries = CORE["live_activity_entries"]
+alert_live_activity_tag = CORE["alert_live_activity_tag"]
 live_activity_presentation = CORE["live_activity_presentation"]
 live_activity_critical_text = CORE["live_activity_critical_text"]
 live_activity_relevance = CORE["live_activity_relevance"]
@@ -169,6 +173,8 @@ def test_parcel_contract_becomes_stable_german_live_alert():
     assert alert == {
         "fingerprint": "parcel:dhl:00340434161094000000",
         "message": "📦 Beispielshop: heute 14:00–16:00",
+        "title": "Nächstes Paket",
+        "detail": "Beispielshop · In Zustellung · heute 14:00–16:00",
         "critical_text": "Heute",
         "progress": 3,
         "progress_max": 4,
@@ -190,6 +196,69 @@ def test_parcel_contract_becomes_stable_german_live_alert():
     assert live_data["background_color"] == "#101820"
     assert parcel_alert({"status": "delivered", "delivered": True}) is None
     assert "sd_popup=meldung-pakete" in alert_dashboard_url(alert)
+
+def test_dashboard_and_push_share_combined_ups_and_waste_alerts():
+    path = Path(__file__).parents[1] / "custom_components/smartphone_dashboard/notification.py"
+    tree = ast.parse(path.read_text())
+    coordinator = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "NotificationCoordinator")
+    methods = [
+        node for node in coordinator.body
+        if isinstance(node, ast.FunctionDef) and node.name in {"_configured_alerts", "_parcel_alerts"}
+    ]
+    namespace = {**CORE, "DEFAULTS": {"waste_days": 1, "nina": "binary_sensor.nina_warning_*"}}
+    exec(compile(ast.Module(body=methods, type_ignores=[]), str(path), "exec"), namespace)
+    now = datetime(2026, 11, 22, 12, tzinfo=timezone.utc)
+    states = {
+        "sensor.waste": SimpleNamespace(state="Restmüll und Biomüll werden morgen abgeholt.", attributes={"daysTo": 1}),
+        "sensor.ups": SimpleNamespace(state="ONLINE REPLACEBATT NOBATT", attributes={}),
+    }
+    values = {
+        "input_text.smartphone_abfall_sensoren": "sensor.waste",
+        "input_text.smartphone_usv_sensoren": "sensor.ups",
+        "input_text.smartphone_frost_sensor": "",
+        "input_text.smartphone_nina_muster": "",
+    }
+    fake = SimpleNamespace(
+        manager=SimpleNamespace(data={}),
+        hass=SimpleNamespace(states=states),
+        _state=lambda key, default="": values.get(key, default),
+        _enabled=lambda option: option in {"abfall", "usv"},
+        _dashboard_entity_enabled=lambda _entity_id: True,
+        _entity_label=lambda _entity_id, _attrs: "Server · Status",
+    )
+    alerts = normalized_alerts(namespace["_configured_alerts"](fake, now))
+    rows = dashboard_alert_rows(alerts, lambda _entity_id: True)
+    assert [(row["category"], row["detail"]) for row in rows] == [
+        ("waste", "Nächster Termin: morgen"),
+        ("ups", "Batterie ersetzen"),
+        ("ups", "Keine Batterie erkannt"),
+    ]
+    assert [entry["fingerprint"] for entry in live_activity_entries(alerts)] == [
+        alert["fingerprint"] for alert in [alerts[1], alerts[2], alerts[0]]
+    ]
+    assert all(row["detail"] in aggregate_alert_message(alerts) for row in rows[1:])
+    assert dashboard_alert_rows(alerts, lambda entity: entity == "sensor.waste") == rows[:1]
+    assert dashboard_alert_rows(None, lambda _entity_id: True) is None
+
+    fake.hass.states = SimpleNamespace(async_all=lambda domain: [
+        SimpleNamespace(entity_id="sensor.first_incoming_parcels", state="1", attributes={"parcels": [
+            {"barcode": "first", "carrier": "DHL", "status": "in_transit"},
+        ]}),
+        SimpleNamespace(entity_id="sensor.second_incoming_parcels", state="1", attributes={"parcels": [
+            {"barcode": "second", "carrier": "UPS", "status": "at_pickup_point"},
+        ]}),
+        SimpleNamespace(entity_id="sensor.other_incoming_parcels", state="unavailable", attributes={"parcels": [
+            {"barcode": "third", "carrier": "DHL", "status": "at_pickup_point"},
+        ]}),
+    ])
+    parcel_alerts = normalized_alerts(namespace["_parcel_alerts"](fake, now))
+    assert len(parcel_alerts) == 1
+    assert parcel_alerts[0]["fingerprint"] == "parcel:ups:second"
+    assert dashboard_alert_rows(parcel_alerts, lambda _entity: True)[0]["detail"] == "UPS · Abholbereit"
+    assert dashboard_alert_rows(
+        [{**parcel_alerts[0], "related_entity_id": "sensor.private_content"}],
+        lambda entity: entity != "sensor.private_content",
+    ) == []
 
 def test_parcel_label_removes_broken_scraper_placeholders():
     assert parcel_display_label(
@@ -264,6 +333,16 @@ def test_iphone_actions_are_scoped_to_recipient_and_alert_set():
     assert parsed_mute["digest"] == digest
     assert parse_mobile_action("UNRELATED_ACTION") is None
 
+def test_live_activity_tags_survive_reordering_and_renew_by_generation():
+    co2 = {"fingerprint": "co2:room", "message": "1050 ppm"}
+    ups = {"fingerprint": "ups:unit:ONBATT", "message": "Batteriebetrieb"}
+    tags = [alert_live_activity_tag(entry, 1000) for entry in live_activity_entries([co2])]
+    extended = live_activity_entries([{**co2, "message": "1190 ppm"}, ups])
+    assert [entry["fingerprint"] for entry in extended] == ["ups:unit:ONBATT", "co2:room"]
+    assert alert_live_activity_tag(extended[1], 1000) == tags[0]
+    assert alert_live_activity_tag(extended[0], 1000) != tags[0]
+    assert alert_live_activity_tag(co2, 2000) != tags[0]
+
 def test_live_activity_is_compact_quiet_on_updates_and_red_for_nina():
     alerts = [
         {"fingerprint": "co2:a", "message": "Wohnzimmer · CO₂: 1.420 ppm"},
@@ -281,8 +360,8 @@ def test_live_activity_is_compact_quiet_on_updates_and_red_for_nina():
     )
     entries = live_activity_entries(alerts)
     assert [entry["message"] for entry in entries] == [
+        "Amtliche Warnung",
         "Wohnzimmer · CO₂: 1.420 ppm",
-        "Küche · Fenster seit 18 Minuten offen",
         "+3 weitere Meldungen – für Details öffnen",
     ]
     recipient = "notify.mobile_app_boris_iphone"

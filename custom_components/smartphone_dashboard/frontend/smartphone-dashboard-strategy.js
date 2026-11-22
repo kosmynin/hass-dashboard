@@ -4,25 +4,44 @@
  * Wird vom Integrations-Loader aus demselben versionsabhängigen Pfad geladen.
  */
 
-const STRATEGY_TYPE = "smartphone-dashboard";
-const STRATEGY_ELEMENT = `ll-strategy-dashboard-${STRATEGY_TYPE}`;
-const LEGACY_STRATEGY_ELEMENT = `ll-strategy-${STRATEGY_TYPE}`;
-const STRATEGY_VERSION = "22.0.69";
+import { ALERT_POPUPS, SmartphoneDashboardAlerts } from "./notification-cards.js";
+
+const STRATEGY_VERSION = "23.0.0";
 const CONFIG_VERSION = 26;
 
+const HOME_SECTION_LABELS = {
+  persons: "Personen",
+  notifications: "Meldungen",
+  quick_actions: "Schnellaktionen",
+  rooms: "Räume",
+  navigation: "Weitere Bereiche",
+};
+
+function homeSectionKey(card) {
+  if (card?.card_type === "pop-up") return undefined;
+  const title = card?.heading || card?.name;
+  if (title === "Aktionen") return "quick_actions";
+  return Object.keys(HOME_SECTION_LABELS).find((key) => HOME_SECTION_LABELS[key] === title);
+}
+
+function sectionHeading(key, icon) {
+  return { type: "custom:bubble-card", card_type: "separator", name: HOME_SECTION_LABELS[key], icon };
+}
+
+function bubblePopup(hash, header, cards) {
+  return {
+    type: "custom:bubble-card",
+    card_type: "pop-up",
+    popup_mode: "adaptive-dialog",
+    performance_mode: "performance",
+    hash,
+    show_header: true,
+    ...header,
+    cards,
+  };
+}
+
 const ACTIVE_ROOM_STYLES = `
-  ha-card {
-    --sd-control-radius: 20px;
-  }
-  .bubble-button-card-container {
-    min-height: 64px !important;
-    border: 1px solid color-mix(in srgb, var(--divider-color) 72%, transparent) !important;
-    border-radius: var(--sd-control-radius) !important;
-    box-shadow: none !important;
-  }
-  .bubble-main-icon-container, .bubble-icon-container {
-    border: 1px solid color-mix(in srgb, var(--divider-color) 72%, transparent) !important;
-  }
   ha-card, .bubble-button-card-container, .bubble-name-container,
   .bubble-main-icon-container, .bubble-icon-container {
     opacity: 1 !important;
@@ -34,40 +53,10 @@ const ACTIVE_ROOM_STYLES = `
   }
 `;
 
-const UPS_NON_ALERT_STATES = [
-  "ONLINE", "Online", "online", "ON", "On", "on", "OK", "Ok", "ok",
-  "NORMAL", "Normal", "normal", "OL", "ol", "Connected", "connected",
-  "AVAILABLE", "Available", "available", "MAINS", "Mains", "mains",
-  "LINE", "Line", "line", "UNKNOWN", "Unknown", "unknown",
-  "UNAVAILABLE", "Unavailable", "unavailable", "NONE", "None", "none", "",
-];
-const UPS_PROBLEM_DEVICE_CLASSES = new Set([
-  "problem", "safety", "smoke", "tamper", "moisture",
-]);
-const UPS_HISTORY_DEVICE_CLASSES = new Set(["date", "timestamp"]);
-const BATTERY_VOLTAGE_EXCLUDE_FILTERS = [
-  { attributes: { device_class: "voltage" } },
-  { attributes: { unit_of_measurement: "V" } },
-  { attributes: { unit_of_measurement: "mV" } },
-  { entity_id: "sensor.*battery*voltage*" },
-  { entity_id: "sensor.*voltage*battery*" },
-  { entity_id: "sensor.*batterie*spannung*" },
-  { entity_id: "sensor.*spannung*batterie*" },
-  { entity_id: "sensor.*akku*spannung*" },
-];
 const cachedDisplayNotificationConfigs = new Map();
 let cachedEntityIndex;
 const DISPLAY_CONFIG_CACHE_PREFIX = `smartphone-dashboard:display-config:${STRATEGY_VERSION}`;
-const NOTIFICATION_POPUPS = {
-  batteries: ["#meldung-batterien", "Batterien", "mdi:battery-alert"],
-  contacts: ["#meldung-kontakte", "Offene Kontakte", "mdi:door-open"],
-  co2: ["#meldung-co2", "CO₂", "mdi:molecule-co2"],
-  waste: ["#meldung-abfall", "Abfall", "mdi:trash-can-outline"],
-  ups: ["#meldung-usv", "USV", "mdi:power-plug-battery"],
-  frost: ["#meldung-frost", "Frost", "mdi:snowflake-alert"],
-  nina: ["#meldung-nina", "NINA-Warnungen", "mdi:alert-outline"],
-  parcels: ["#meldung-pakete", "Pakete", "mdi:package-variant-closed"],
-};
+const POPUP_NAVIGATION_EVENTS = ["hashchange", "location-changed", "popstate"];
 
 class SmartphoneDashboardDeferredCards extends HTMLElement {
   constructor() {
@@ -81,25 +70,26 @@ class SmartphoneDashboardDeferredCards extends HTMLElement {
 
   setConfig(config) {
     if (!config || !Array.isArray(config.cards)) throw new Error("Pop-up-Karten fehlen");
+    if (this._config === config) return;
     this._config = config;
+    this._cards = [];
+    this._mounted = false;
+    this.shadowRoot.replaceChildren();
     this._activateIfNeeded();
   }
 
   set hass(value) {
     this._hass = value;
-    for (const card of this._cards) card.hass = value;
     this._activateIfNeeded();
   }
 
   connectedCallback() {
-    window.addEventListener("hashchange", this._onLocationChange);
-    window.addEventListener("popstate", this._onLocationChange);
+    for (const event of POPUP_NAVIGATION_EVENTS) window.addEventListener(event, this._onLocationChange);
     this._activateIfNeeded();
   }
 
   disconnectedCallback() {
-    window.removeEventListener("hashchange", this._onLocationChange);
-    window.removeEventListener("popstate", this._onLocationChange);
+    for (const event of POPUP_NAVIGATION_EVENTS) window.removeEventListener(event, this._onLocationChange);
   }
 
   getCardSize() {
@@ -108,24 +98,26 @@ class SmartphoneDashboardDeferredCards extends HTMLElement {
 
   _isRequested() {
     const hash = String(this._config?.popup_hash || "");
-    if (!hash) return true;
-    if (globalThis.location?.hash === hash) return true;
-    const requested = new URLSearchParams(globalThis.location?.search || "").get("sd_popup");
-    return requested && `#${requested}` === hash;
+    return !hash || globalThis.location?.hash === hash;
   }
 
   _activateIfNeeded() {
-    if (!this.isConnected || this._mounted || this._mounting || !this._config || !this._isRequested()) return;
+    if (!this.isConnected || this._mounting || !this._config || !this._isRequested()) return;
+    if (this._mounted) {
+      for (const card of this._cards) card.hass = this._hass;
+      return;
+    }
     this._mounting = true;
+    const config = this._config;
     const helpersReady = typeof window.loadCardHelpers === "function"
       ? window.loadCardHelpers()
       : Promise.reject(new Error("Home-Assistant-Kartenhelfer sind nicht verfügbar"));
     void helpersReady.then((helpers) => {
-      if (!this.isConnected || this._mounted) return;
+      if (!this.isConnected || this._config !== config || !this._isRequested()) return;
       const container = document.createElement("div");
       container.className = "cards";
-      this._cards = this._config.cards.map((config) => {
-        const card = helpers.createCardElement(config);
+      this._cards = config.cards.map((cardConfig) => {
+        const card = helpers.createCardElement(cardConfig);
         if (this._hass) card.hass = this._hass;
         container.append(card);
         return card;
@@ -140,14 +132,15 @@ class SmartphoneDashboardDeferredCards extends HTMLElement {
       this._mounted = true;
       this.dispatchEvent(new Event("iron-resize", { bubbles: true, composed: true }));
     }).catch((error) => {
+      if (this._config !== config || !this._isRequested()) return;
       console.error("Smartphone-Dashboard: Pop-up-Inhalt konnte nicht geladen werden", error);
       this.shadowRoot.innerHTML = `<ha-card>Pop-up-Inhalt konnte nicht geladen werden.</ha-card>`;
-    }).finally(() => { this._mounting = false; });
+      this._mounted = true;
+    }).finally(() => {
+      this._mounting = false;
+      if (this._config !== config) this._activateIfNeeded();
+    });
   }
-}
-
-if (!customElements.get("smartphone-dashboard-deferred-cards")) {
-  customElements.define("smartphone-dashboard-deferred-cards", SmartphoneDashboardDeferredCards);
 }
 
 class SmartphoneDashboardNotificationControls extends HTMLElement {
@@ -184,7 +177,8 @@ class SmartphoneDashboardNotificationControls extends HTMLElement {
     const token = this._recipientToken();
     if (!this._hass || !token || this._busy) return;
     this._busy = true;
-    this._render("Wird angewendet …");
+    this._status = "Wird angewendet …";
+    this._render();
     let status;
     try {
       await this._hass.callWS({
@@ -199,31 +193,31 @@ class SmartphoneDashboardNotificationControls extends HTMLElement {
       status = `Aktion fehlgeschlagen: ${error?.message || error}`;
     } finally {
       this._busy = false;
-      this._render(status);
+      this._status = status;
+      this._render();
     }
   }
 
-  _render(status = "") {
+  _render() {
     if (!this.shadowRoot) return;
     const token = this._recipientToken();
+    this.hidden = !token;
+    if (!token) return;
+    if (this._renderedToken !== token) {
+      this._renderedToken = token;
     this.shadowRoot.innerHTML = `
       <style>
+        :host([hidden]) { display: none; }
         ha-card {
           padding: 16px;
-          border: 1px solid var(--divider-color);
-          border-radius: 20px;
           box-shadow: none;
         }
-        .heading { display: grid; grid-template-columns: 40px 1fr; gap: 12px; align-items: center; }
-        .icon {
-          width: 40px; height: 40px; display: grid; place-items: center;
-          border-radius: 12px; color: var(--warning-color, #ff9f0a);
-          background: color-mix(in srgb, var(--warning-color, #ff9f0a) 14%, transparent);
-        }
-        .title { font-size: 15px; font-weight: 700; line-height: 1.2; }
+        .heading { display: flex; gap: 12px; align-items: center; }
+        .heading ha-icon { color: var(--secondary-text-color); }
+        .title { font-size: 15px; font-weight: 600; line-height: 1.2; }
         .description, .status { color: var(--secondary-text-color); line-height: 1.35; }
         .description { margin-top: 2px; font-size: 13px; }
-        .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
+        .actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr)); gap: 8px; margin-top: 12px; }
         button {
           min-height: 44px; border: 1px solid var(--divider-color); border-radius: 12px;
           padding: 9px 11px; color: var(--primary-text-color);
@@ -232,295 +226,130 @@ class SmartphoneDashboardNotificationControls extends HTMLElement {
         }
         button:first-child { background: var(--secondary-background-color); }
         button:disabled { opacity: .55; cursor: default; }
-        .status { margin-top: 10px; min-height: 18px; font-size: 12px; }
+        button:focus-visible { outline: 2px solid var(--primary-color); }
+        .status { margin-top: 8px; font-size: 13px; }
+        .status:empty { margin-top: 0; }
       </style>
       <ha-card>
         <div class="heading">
-          <div class="icon"><ha-icon icon="mdi:bell-off-outline"></ha-icon></div>
-          <div><div class="title">Mitteilungen auf diesem iPhone</div>
-          <div class="description">Updates bleiben leise. Diese Pause gilt nur für dieses Gerät.</div></div>
+          <ha-icon icon="mdi:bell-off-outline" aria-hidden="true"></ha-icon>
+          <div><div class="title">Live Activities pausieren</div>
+          <div class="description">Die Pause gilt für Meldungen auf diesem Gerät.</div></div>
         </div>
-        ${token ? `<div class="actions">
-          <button data-action="snooze" ${this._busy ? "disabled" : ""}>30 Minuten pausieren</button>
-          <button data-action="mute" ${this._busy ? "disabled" : ""}>Bis zur Änderung pausieren</button>
-        </div>` : ""}
-        <div class="status"></div>
+        <div class="actions">
+          <button type="button" data-action="snooze">30 Minuten pausieren</button>
+          <button type="button" data-action="mute">Bis zur Änderung pausieren</button>
+        </div>
+        <div class="status" role="status"></div>
       </ha-card>`;
-    this.shadowRoot.querySelector(".status").textContent = status || (
-      token ? "" : "Öffne diesen Dialog über eine Live Activity, um sie zu pausieren."
-    );
-    for (const button of this.shadowRoot.querySelectorAll("button[data-action]")) {
-      button.addEventListener("click", () => void this._apply(button.dataset.action));
-    }
-  }
-}
-
-if (!customElements.get("smartphone-dashboard-notification-controls")) {
-  customElements.define(
-    "smartphone-dashboard-notification-controls",
-    SmartphoneDashboardNotificationControls,
-  );
-}
-const NINA_SUMMARY_STYLES = `\${(() => {
-  const entityId = typeof entity === 'string' ? entity : entity?.entity_id;
-  const warning = hass.states[entityId];
-  const headline = warning?.attributes?.headline || warning?.attributes?.friendly_name || 'NINA-Warnung';
-  const description = warning?.attributes?.description || warning?.attributes?.instruction || 'Amtliche Warnung aktiv';
-  const name = card.querySelector('.bubble-name');
-  const state = card.querySelector('.bubble-state');
-  const icon = card.querySelector('.bubble-icon');
-  if (name) name.innerText = headline;
-  if (state) state.innerText = description;
-  card?.style?.setProperty('--sd-alert-accent', 'var(--error-color)');
-  if (icon) icon.style.setProperty('color', 'var(--error-color)', 'important');
-})()}`;
-const ENTITY_NOTIFICATION_STYLES = `
-  ha-card { --sd-alert-accent: var(--warning-color, #ff9f0a); }
-  .bubble-button-card-container {
-    min-height: 68px !important;
-    background: var(--card-background-color) !important;
-    border: 1px solid color-mix(in srgb, var(--sd-alert-accent) 22%, var(--divider-color)) !important;
-    border-radius: 20px !important;
-    box-shadow: none !important;
-  }
-  .bubble-button-background {
-    opacity: 0 !important;
-    background-color: transparent !important;
-  }
-  .bubble-name {
-    color: var(--primary-text-color) !important;
-    font-size: 15px !important;
-    font-weight: 650 !important;
-  }
-  .bubble-state {
-    display: flex !important;
-    color: var(--secondary-text-color) !important;
-    opacity: 1 !important;
-    font-size: 13px !important;
-    line-height: 1.3 !important;
-    white-space: normal !important;
-  }
-  .bubble-main-icon-container, .bubble-icon-container {
-    background: color-mix(in srgb, var(--sd-alert-accent) 14%, var(--card-background-color)) !important;
-    border: 1px solid color-mix(in srgb, var(--sd-alert-accent) 24%, transparent) !important;
-  }
-  .bubble-icon {
-    color: var(--sd-alert-accent) !important;
-  }
-`;
-const WASTE_SUMMARY_STYLES = `\${(() => {
-  const runtimeEntity = typeof entity === 'undefined' ? null : entity;
-  const entityId = (typeof runtimeEntity === 'string' ? runtimeEntity : runtimeEntity?.entity_id)
-    || this?.config?.entity
-    || this?._config?.entity;
-  const waste = hass.states[entityId];
-  const attributes = waste?.attributes || {};
-  const stateText = String(waste?.state || '').trim();
-  const parseDate = (value) => {
-    if (!value) return null;
-    if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
-    const text = String(value).trim();
-    let match = text.match(/^(\\d{4})-(\\d{2})-(\\d{2})/);
-    if (match) return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-    match = text.match(/(?:^|\\D)(\\d{1,2})\\.(\\d{1,2})\\.(\\d{4})(?:\\D|$)/);
-    if (match) return new Date(Number(match[3]), Number(match[2]) - 1, Number(match[1]));
-    const parsed = new Date(text);
-    return Number.isNaN(parsed.getTime()) ? null : parsed;
-  };
-  const cleanType = (value) => {
-    let cleaned = String(value)
-      .replace(/\\s*[-–—]?\\s*(?:alle\\s*)?(?:(?:2|4|zwei|vier)\\s*[- ]?\\s*)?w(?:ö|oe|o)chentlich\\b.*$/i, '')
-      .replace(/^\\s*(?:(?:heute|morgen|today|tomorrow)\\s+)?(?:wird|werden)\\s+/i, '')
-      .replace(/\\s+(?:(?:wird|werden)\\s+)?(?:(?:heute|morgen|today|tomorrow|in\\s+\\d+\\s+(?:days?|tag(?:e|en)?))\\s+)?(?:abgeholt|geleert|gesammelt|collected|emptied)\\s*[.!?]*$/i, '')
-      .replace(/^\\s*(?:abholung|leerung)\\s*(?:von\\s+)?[:\\-–—]?\\s*/i, '')
-      .replace(/\\s*[-–—]?\\s*(?:abholung|leerung)\\s*[.!?]*$/i, '')
-      .replace(/^\\s+|[\\s\\-–—\\/.,!?:;]+$/g, '')
-      .split(/\\s*\\/\\s*/, 1)[0]
-      .trim();
-    if (/gelb/i.test(cleaned) && /tonne|container|wertstoff|verpack/i.test(cleaned)) cleaned = 'Gelbe Tonne';
-    return cleaned;
-  };
-  const typeText = (value) => {
-    const values = Array.isArray(value) ? value : value == null ? [] : [value];
-    const names = [];
-    const seen = new Set();
-    for (const item of values.flatMap((entry) => String(entry).split(/\\s*[,;]\\s*/))) {
-      const name = cleanType(item);
-      const key = name.toLocaleLowerCase('de-DE');
-      if (name && !seen.has(key)) {
-        seen.add(key);
-        names.push(name);
+      this._statusNode = this.shadowRoot.querySelector(".status");
+      this._buttons = this.shadowRoot.querySelectorAll("button[data-action]");
+      for (const button of this._buttons) {
+        button.addEventListener("click", () => void this._apply(button.dataset.action));
       }
     }
-    return names.join(', ');
-  };
-  const dated = Object.entries(attributes).flatMap(([key, value]) => {
-    if (['attribution', 'last_update', 'daysTo', 'days_to', 'icon', 'upcoming', 'date', 'next_date', 'start', 'start_time', 'type', 'waste_type', 'summary', 'subject', 'types', 'friendly_name'].includes(key)) return [];
-    const keyDate = parseDate(key);
-    if (keyDate) return [{ date: keyDate, types: typeText(value) }];
-    const valueDate = parseDate(value);
-    return valueDate ? [{ date: valueDate, types: key }] : [];
-  }).sort((left, right) => left.date - right.date);
-  const upcoming = Array.isArray(attributes.upcoming) ? attributes.upcoming[0] : null;
-  const pickupDate = parseDate(upcoming?.date || attributes.date || attributes.next_date || attributes.start || attributes.start_time) || dated[0]?.date || null;
-  let types = typeText(upcoming?.types || dated[0]?.types || attributes.type || attributes.waste_type || attributes.summary || attributes.subject || attributes.types);
-  if (!types && !/^-?\\d+(?:\\.\\d+)?$/.test(stateText)) {
-    types = stateText
-      .replace(/\\s+in\\s+-?\\d+\\s+(?:days?|tag(?:e|en)?)(?:\\s.*)?$/i, '')
-      .replace(/(?:^|\\s)(?:heute|morgen|today|tomorrow)(?:\\s|$)/ig, ' ')
-      .trim();
+    const status = this._status || "";
+    if (this._statusNode.textContent !== status) this._statusNode.textContent = status;
+    for (const button of this._buttons) button.disabled = Boolean(this._busy || !this._hass);
   }
-  if (!types) {
-    types = String(attributes.friendly_name || 'Abfall')
-      .replace(/^Waste Collection Schedule\\s*/i, '')
-      .trim() || 'Abfall';
-  }
-  types = typeText(types) || 'Abfall';
-  let days = Number(upcoming?.daysTo ?? attributes.daysTo ?? attributes.days_to);
-  if (!Number.isFinite(days)) {
-    const match = stateText.match(/\\bin\\s+(-?\\d+)\\s+(?:days?|tag(?:e|en)?)\\b/i);
-    if (match) days = Number(match[1]);
-    else if (/^-?\\d+$/.test(stateText)) days = Number(stateText);
-    else if (/\\b(?:heute|today)\\b/i.test(stateText)) days = 0;
-    else if (/\\b(?:morgen|tomorrow)\\b/i.test(stateText)) days = 1;
-  }
-  let dateLabel = '';
-  if (pickupDate) {
-    const today = new Date();
-    const start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    const target = new Date(pickupDate.getFullYear(), pickupDate.getMonth(), pickupDate.getDate());
-    const difference = Math.round((target - start) / 86400000);
-    const formatted = target.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' });
-    dateLabel = difference === 0 ? 'heute · ' + formatted : difference === 1 ? 'morgen · ' + formatted : target.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit' });
-  } else if (Number.isFinite(days)) {
-    dateLabel = days === 0 ? 'heute' : days === 1 ? 'morgen' : 'in ' + days + ' Tagen';
-  } else if (stateText && !['unknown', 'unavailable'].includes(stateText.toLowerCase())) {
-    dateLabel = stateText;
-  }
-  const name = card.querySelector('.bubble-name');
-  const state = card.querySelector('.bubble-state');
-  const icon = card.querySelector('.bubble-icon');
-  const normalizedTypes = types.toLowerCase();
-  const iconColor = /gelb|wertstoff|verpack/.test(normalizedTypes)
-    ? '#FFD700'
-    : /rest|grau/.test(normalizedTypes)
-      ? '#4A4A4A'
-      : /papier|pappe|blau/.test(normalizedTypes)
-        ? '#4169E1'
-        : /bio|braun|organisch/.test(normalizedTypes)
-          ? '#8B4513'
-          : 'var(--primary-text-color)';
-  card?.style?.setProperty('--sd-alert-accent', iconColor);
-  if (name) name.innerText = types;
-  if (state) state.innerText = dateLabel ? 'Nächster Termin: ' + dateLabel : 'Kein Termin verfügbar';
-  if (icon) icon.style.setProperty('color', iconColor, 'important');
-})()}`;
-const PARCEL_SUMMARY_STYLES = `\${(() => {
-  const runtimeEntity = typeof entity === 'undefined' ? null : entity;
-  const entityId = (typeof runtimeEntity === 'string' ? runtimeEntity : runtimeEntity?.entity_id)
-    || this?.config?.entity
-    || this?._config?.entity;
-  const source = hass.states[entityId];
-  const labels = {
-    registered: 'Registriert', in_transit: 'Unterwegs', out_for_delivery: 'In Zustellung',
-    at_pickup_point: 'Abholbereit', returning: 'Rücksendung', problem: 'Problem', unknown: 'Status unbekannt',
-  };
-  const parcelRank = (parcel) => {
-    const immediate = { at_pickup_point: 0, out_for_delivery: 1, problem: 2 };
-    if (Object.hasOwn(immediate, parcel?.status)) return immediate[parcel.status];
-    if (parcel?.planned_from || parcel?.planned_to) return 3;
-    return ({ in_transit: 4, returning: 5, registered: 6, unknown: 7 })[parcel?.status] ?? 7;
-  };
-  const parcelTime = (parcel) => {
-    const timestamp = Date.parse(parcel?.planned_from || parcel?.planned_to || '');
-    return Number.isFinite(timestamp) ? timestamp : Number.MAX_SAFE_INTEGER;
-  };
-  const parcels = (Array.isArray(source?.attributes?.parcels) ? source.attributes.parcels : [])
-    .filter((parcel) => parcel && parcel.delivered !== true && parcel.status !== 'delivered')
-    .sort((left, right) => parcelRank(left) - parcelRank(right) || parcelTime(left) - parcelTime(right));
-  const first = parcels[0] || {};
-  const cleanParcelText = (value) => {
-    let text = String(value || '').replaceAll(String.fromCharCode(8203), ' ').replace(/\\s+/g, ' ').trim();
-    const placeholder = text.match(/\\(\\s*(?:not\\s+sel(?:ected)?|not\\s+set|none|null|unknown|n\\/?a)\\b/i);
-    if (placeholder) text = text.slice(0, placeholder.index);
-    else if ((text.match(/\\(/g) || []).length > (text.match(/\\)/g) || []).length) text = text.slice(0, text.lastIndexOf('('));
-    text = text.replace(/^[\\s\\-–—·,:;()]+|[\\s\\-–—·,:;()]+$/g, '');
-    return /^(?:none|null|unknown|unbekannt|not set|not selected|n\\/?a)$/i.test(text) ? '' : text;
-  };
-  const contentLabel = (parcel) => {
-    const candidates = [parcel?.content_title, parcel?.contents, parcel?.items, parcel?.raw?.items];
-    for (const candidate of candidates) {
-      const items = (Array.isArray(candidate) ? candidate : [candidate])
-        .map(cleanParcelText).filter(Boolean)
-        .filter((item, index, all) => all.findIndex((other) => other.toLowerCase() === item.toLowerCase()) === index);
-      if (items.length) return items[0] + (items.length > 1 ? ' + ' + (items.length - 1) + ' weitere' : '');
-    }
-    return '';
-  };
-  const parcelCache = globalThis.__smartphoneDashboardParcelContentCache ||
-    (globalThis.__smartphoneDashboardParcelContentCache = { updated: 0, values: new Map() });
-  if (Date.now() - parcelCache.updated > 300000) {
-    parcelCache.values = new Map();
-    Object.values(hass.states).forEach((state) => {
-      (Array.isArray(state?.attributes?.parcels) ? state.attributes.parcels : []).forEach((parcel) => {
-        const barcode = String(parcel?.barcode || '').trim();
-        const content = contentLabel(parcel);
-        if (barcode && content) parcelCache.values.set(barcode, content);
-      });
-    });
-    parcelCache.updated = Date.now();
-  }
-  const contentByBarcode = parcelCache.values;
-  const parcelLabel = contentLabel(first) || contentByBarcode.get(String(first.barcode || '').trim())
-    || cleanParcelText(first.sender) || cleanParcelText(first.carrier);
-  const designs = {
-    registered: { progress: 1, icon: 'mdi:package-variant-closed', color: '#0A84FF' },
-    in_transit: { progress: 2, icon: 'mdi:truck-fast', color: '#0A84FF' },
-    out_for_delivery: { progress: 3, icon: 'mdi:truck-delivery', color: 'var(--success-color)' },
-    at_pickup_point: { progress: 4, icon: 'mdi:package-variant', color: '#FF9F0A' },
-    returning: { progress: 2, icon: 'mdi:package-variant-remove', color: 'var(--error-color)' },
-    problem: { progress: 2, icon: 'mdi:alert-circle-outline', color: 'var(--error-color)' },
-    unknown: { progress: 1, icon: 'mdi:package-variant-closed', color: '#8E8E93' },
-  };
-  const design = designs[first.status] || designs.unknown;
-  const name = card.querySelector('.bubble-name');
-  const state = card.querySelector('.bubble-state');
-  const icon = card.querySelector('.bubble-icon');
-  const background = card.querySelector('.bubble-button-background');
-  card?.style?.setProperty('--sd-alert-accent', design.color);
-  if (name) name.innerText = 'Nächstes Paket';
-  if (state) state.innerText = [parcelLabel, labels[first.status] || labels.unknown].filter(Boolean).join(' · ');
-  if (icon) {
-    icon.setAttribute('icon', design.icon);
-    icon.style.setProperty('color', design.color, 'important');
-  }
-  if (background) {
-    background.style.setProperty('width', (design.progress * 25) + '%', 'important');
-    background.style.setProperty('opacity', '0.14', 'important');
-    background.style.setProperty('background-color', design.color, 'important');
-  }
-})()}`;
-function batterySummaryStyles(threshold) {
-  const limit = Number.isFinite(Number(threshold)) ? Number(threshold) : 6;
-  return `\${(() => {
-    const entityId = typeof entity === 'string' ? entity : entity?.entity_id;
-    const value = Number(hass.states[entityId]?.state);
-    const criticalLimit = Math.max(1, ${limit} / 2);
-    const iconColor = Number.isFinite(value) && value <= criticalLimit
-      ? 'var(--error-color)'
-      : 'var(--warning-color, #ff9800)';
-    card?.style?.setProperty('--smartphone-battery-icon-color', iconColor);
-    card?.style?.setProperty('--sd-alert-accent', iconColor);
-  })()}
-  .bubble-icon {
-    color: var(--smartphone-battery-icon-color, var(--warning-color, #ff9800)) !important;
-  }
-  `;
 }
 
-function notificationAccentStyles(color) {
-  return `ha-card { --sd-alert-accent: ${color}; }`;
+// Button Card evaluates the view in its own scope.
+function selectParcels(states, entityIds, contentEntityIds) {
+  const designs = {
+    registered: { label: "Registriert", step: 1, icon: "mdi:package-variant-closed", color: "#0A84FF" },
+    in_transit: { label: "Unterwegs", step: 2, icon: "mdi:truck-fast", color: "#0A84FF" },
+    out_for_delivery: { label: "In Zustellung", step: 3, icon: "mdi:truck-delivery", color: "var(--success-color)" },
+    at_pickup_point: { label: "Abholbereit", step: 4, icon: "mdi:package-variant", color: "#FF9F0A" },
+    returning: { label: "Rücksendung", step: 2, icon: "mdi:package-variant-remove", color: "var(--error-color)" },
+    problem: { label: "Problem", step: 2, icon: "mdi:alert-circle-outline", color: "var(--error-color)" },
+    unknown: { label: "Status unbekannt", step: 1, icon: "mdi:package-variant-closed", color: "#8E8E93" },
+  };
+  const parcelsFrom = (ids) => ids.flatMap((id) => {
+    const state = states[id];
+    const parcels = state?.attributes?.parcels;
+    return ["unavailable", "unknown"].includes(state?.state) || !Array.isArray(parcels) ? [] : parcels;
+  });
+  const clean = (value) => {
+    let text = typeof value === "string" ? value.replace(/\u200b/g, " ").replace(/\s+/g, " ").trim() : "";
+    const placeholder = text.match(/\(\s*(?:not\s+sel(?:ected)?|not\s+set|none|null|unknown|n\/?a)\b/i);
+    if (placeholder) text = text.slice(0, placeholder.index);
+    else if ((text.match(/\(/g) || []).length > (text.match(/\)/g) || []).length) text = text.slice(0, text.lastIndexOf("("));
+    text = text.replace(/^[\s\-–—·,:;()]+|[\s\-–—·,:;()]+$/g, "");
+    return /^(?:none|null|unknown|unbekannt|not set|not selected|n\/?a)$/i.test(text) ? "" : text;
+  };
+  const contentLabel = (parcel) => {
+    for (const candidate of [parcel.content_title, parcel.contents, parcel.items, parcel.raw?.items]) {
+      const items = new Map();
+      for (const item of Array.isArray(candidate) ? candidate : [candidate]) {
+        const label = clean(item) || clean(item?.title) || clean(item?.name);
+        if (label && !items.has(label.toLowerCase())) items.set(label.toLowerCase(), label);
+      }
+      if (items.size) {
+        const first = items.values().next().value;
+        return items.size > 1 ? first + " + " + (items.size - 1) + " weitere" : first;
+      }
+    }
+    return "";
+  };
+  const statusOf = (parcel) => String(parcel.status || "unknown").trim().toLowerCase();
+  const rank = (parcel) => {
+    const status = statusOf(parcel);
+    const immediate = { at_pickup_point: 0, out_for_delivery: 1, problem: 2 };
+    if (Object.hasOwn(immediate, status)) return immediate[status];
+    if (parcel.planned_from || parcel.planned_to) return 3;
+    const later = { in_transit: 4, returning: 5, registered: 6 };
+    return Object.hasOwn(later, status) ? later[status] : 7;
+  };
+  const time = (parcel) => {
+    for (const value of [parcel.planned_from, parcel.planned_to]) {
+      const timestamp = Date.parse(value || "");
+      if (Number.isFinite(timestamp)) return timestamp;
+    }
+    return Number.MAX_SAFE_INTEGER;
+  };
+  const identity = (parcel) => [parcel.carrier, parcel.barcode, parcel.sender].join("\0").toLowerCase();
+  const compare = (a, b) => rank(a) - rank(b) || time(a) - time(b) ||
+    (identity(a) < identity(b) ? -1 : Number(identity(a) > identity(b)));
+  const parcels = parcelsFrom(entityIds)
+    .filter((item) => item && item.delivered !== true && statusOf(item) !== "delivered")
+    .sort(compare);
+  const contents = new Map();
+  for (const candidate of parcelsFrom(contentEntityIds)) {
+    if (!candidate) continue;
+    const barcode = String(candidate.barcode || "").trim();
+    if (!barcode || contents.has(barcode)) continue;
+    const label = contentLabel(candidate);
+    if (label) contents.set(barcode, label);
+  }
+  const unique = new Map();
+  for (const parcel of parcels) {
+    const barcode = String(parcel.barcode || "").trim();
+    const key = barcode || identity(parcel) + String(parcel.planned_from || "");
+    const preferred = unique.get(key);
+    unique.set(key, preferred ? {
+      ...preferred,
+      sender: clean(preferred.sender) || parcel.sender,
+      url: preferred.url || parcel.url,
+    } : parcel);
+  }
+  return [...unique.values()].map((parcel) => {
+    const barcode = String(parcel.barcode || "").trim();
+    const status = statusOf(parcel);
+    const carrier = clean(parcel.carrier);
+    return {
+      parcel, status, carrier,
+      label: contentLabel(parcel) || contents.get(barcode) || clean(parcel.sender) || carrier || "Paket",
+      design: Object.hasOwn(designs, status) ? designs[status] : designs.unknown,
+    };
+  });
 }
+
+function parcelSelectionExpression(entityIds, contentEntityIds) {
+  return "(" + selectParcels.toString() + ")(hass.states, " +
+    JSON.stringify(entityIds) + ", " + JSON.stringify(contentEntityIds) + ")";
+}
+
 const NOTIFICATION_HELPERS = {
   notification_batteries: "input_boolean.smartphone_meldung_batterien",
   notification_contacts: "input_boolean.smartphone_meldung_kontakte",
@@ -544,9 +373,6 @@ const BACKEND_NOTIFICATION_KEYS = [
   ...Object.keys(NOTIFICATION_HELPERS), "waste_days", "notification_media", "notification_parcels", "notification_appliances",
 ];
 
-// Sofort registrieren: Home Assistant wartet maximal fünf Sekunden auf das
-// Strategy-Element. Die Funktionsdeklarationen darunter werden beim Aufruf
-// bereits verfügbar sein; generate() läuft erst nach Abschluss des Moduls.
 class SmartphoneDashboardStrategy extends HTMLElement {
   static async getConfigElement() {
     await customElements.whenDefined("smartphone-dashboard-strategy-editor");
@@ -563,36 +389,30 @@ class SmartphoneDashboardStrategy extends HTMLElement {
   static async generate(config, hass) {
     const explicitConfig = config && typeof config === "object" ? config : {};
     if (typeof hass?.callWS === "function") {
-      const dashboardKey = "default";
       const displayCacheKey = displayConfigCacheKey(hass);
-      const storedConfig = readDisplayConfigCache(hass);
-      if (storedConfig) cachedDisplayNotificationConfigs.set(displayCacheKey, storedConfig);
-      const backendRequest = hass.callWS({
-        type: "smartphone_dashboard/config/display",
-        dashboard_key: dashboardKey,
-      }).then((backend) => {
-        const backendConfig = backend?.config || {};
-        cachedDisplayNotificationConfigs.set(displayCacheKey, backendConfig);
-        writeDisplayConfigCache(hass, backendConfig);
-        return backendConfig;
-      });
-      const cachedDisplayConfig = cachedDisplayNotificationConfigs.get(displayCacheKey);
-      if (cachedDisplayConfig) {
-        config = mergeBackendNotifications(explicitConfig, cachedDisplayConfig);
-        void backendRequest.catch(() => undefined);
-      } else {
-        let timeoutId;
-        try {
-          const backendConfig = await Promise.race([
-            backendRequest,
-            new Promise((_, reject) => { timeoutId = setTimeout(() => reject(new Error("Backend-Zeitlimit")), 1500); }),
-          ]);
-          config = mergeBackendNotifications(explicitConfig, backendConfig);
-        } catch (_error) {
-          config = mergeBackendNotifications(explicitConfig, undefined);
-        } finally {
-          clearTimeout(timeoutId);
+      const cachedConfig = cachedDisplayNotificationConfigs.get(displayCacheKey) ?? readDisplayConfigCache(hass);
+      let timeoutId;
+      try {
+        const backendRequest = hass.callWS({
+          type: "smartphone_dashboard/config/display",
+          dashboard_key: "default",
+        });
+        const backend = await Promise.race([
+          backendRequest,
+          new Promise((resolve) => {
+            timeoutId = setTimeout(resolve, cachedConfig ? 300 : 1500);
+          }),
+        ]);
+        const backendConfig = backend?.config;
+        if (backendConfig) {
+          cachedDisplayNotificationConfigs.set(displayCacheKey, backendConfig);
+          writeDisplayConfigCache(hass, backendConfig);
         }
+        config = mergeBackendNotifications(explicitConfig, backendConfig ?? cachedConfig);
+      } catch (_error) {
+        config = mergeBackendNotifications(explicitConfig, cachedConfig);
+      } finally {
+        clearTimeout(timeoutId);
       }
     }
     config = migrateConfig(config, hass);
@@ -617,8 +437,8 @@ class SmartphoneDashboardStrategy extends HTMLElement {
     return applyEntityOverrides(
       generated,
       config.entity_overrides && typeof config.entity_overrides === "object"
-        ? { "binary_sensor.nina_warning_*": normalizeNinaGlob(notificationSetting(config, hass, "nina_entities")), ...config.entity_overrides }
-        : { "binary_sensor.nina_warning_*": normalizeNinaGlob(notificationSetting(config, hass, "nina_entities")) },
+        ? config.entity_overrides
+        : {},
     );
   }
 }
@@ -659,27 +479,6 @@ function writeDisplayConfigCache(hass, config) {
   }
 }
 
-function isBatteryLevelEntity(entityId, state) {
-  const attributes = state?.attributes || {};
-  const deviceClass = String(attributes.device_class || "").toLowerCase();
-  const unit = String(attributes.unit_of_measurement || "").trim().toLowerCase().replaceAll(" ", "");
-  const descriptor = `${entityId} ${attributes.friendly_name || ""} ${attributes.name || ""}`.toLowerCase();
-  const batteryVoltage = /(?:battery|batterie|akku).{0,12}(?:voltage|spannung)|(?:voltage|spannung).{0,12}(?:battery|batterie|akku)/.test(descriptor);
-  if (deviceClass === "voltage" || ["v", "mv", "kv"].includes(unit) || batteryVoltage) return false;
-  const namedBattery = /battery|batterie/i.test(entityId);
-  return deviceClass === "battery" || (namedBattery && ["", "%", "percent"].includes(unit));
-}
-
-if (!customElements.get(STRATEGY_ELEMENT)) {
-  customElements.define(STRATEGY_ELEMENT, SmartphoneDashboardStrategy);
-}
-
-if (!customElements.get(LEGACY_STRATEGY_ELEMENT)) {
-  customElements.define(
-    LEGACY_STRATEGY_ELEMENT,
-    class SmartphoneDashboardLegacyStrategy extends SmartphoneDashboardStrategy {},
-  );
-}
 
 const BASE_DASHBOARD = {
   title: "Smartphone Dashboard",
@@ -689,42 +488,13 @@ const BASE_DASHBOARD = {
     sections: [{ type: "grid", cards: [
       { type: "heading", heading: "Personen", icon: "mdi:account-group-outline" },
       { type: "horizontal-stack", cards: [] },
-      { type: "heading", heading: "Meldungen", icon: "mdi:bell-badge-outline" },
-      { type: "custom:auto-entities", unique: true, show_empty: false, card: { type: "vertical-stack" }, card_param: "cards", filter: { include: [
-        { entity_id: "sensor.*battery", options: { type: "custom:bubble-card", card_type: "button" } },
-        { entity_id: "sensor.*batterie", options: { type: "custom:bubble-card", card_type: "button" } },
-        { domain: "sensor", attributes: { device_class: "battery" }, options: { type: "custom:bubble-card", card_type: "button" } },
-        { entity_id: "binary_sensor.*contact", options: { type: "custom:bubble-card", card_type: "button" } },
-        { entity_id: "binary_sensor.*kontakt", options: { type: "custom:bubble-card", card_type: "button" } },
-        { domain: "binary_sensor", attributes: { device_class: "door" }, options: { type: "custom:bubble-card", card_type: "button" } },
-        { domain: "binary_sensor", attributes: { device_class: "window" }, options: { type: "custom:bubble-card", card_type: "button" } },
-        { domain: "binary_sensor", attributes: { device_class: "opening" }, options: { type: "custom:bubble-card", card_type: "button" } },
-        { entity_id: "sensor.*kohlendioxid", options: { type: "custom:bubble-card", card_type: "button" } },
-        { entity_id: "sensor.*co2*", options: { type: "custom:bubble-card", card_type: "button" } },
-        { domain: "sensor", attributes: { device_class: "carbon_dioxide" }, options: { type: "custom:bubble-card", card_type: "button" } },
-        { entity_id: "sensor.*abfall", options: { type: "custom:bubble-card", card_type: "button" } },
-        { entity_id: "sensor.*ups_status", options: { type: "custom:bubble-card", card_type: "button" } },
-        { entity_id: "sensor.*parcel_incoming", options: { type: "custom:bubble-card", card_type: "button" } },
-        { entity_id: "sensor.*temperature", options: { type: "custom:bubble-card", card_type: "button" } },
-        { entity_id: "binary_sensor.nina_warning_*", state: "on", options: {
-          type: "custom:bubble-card", card_type: "button", button_type: "state",
-          icon: "mdi:alert-outline", show_state: false, show_attribute: true,
-          styles: [ENTITY_NOTIFICATION_STYLES, NINA_SUMMARY_STYLES].join("\n"),
-        } }
-      ], exclude: [] },
-      else: {
-        type: "custom:bubble-card",
-        card_type: "button",
-        button_type: "name",
-        name: "Keine Meldungen",
-        icon: "mdi:bell-off-outline",
-        styles: ACTIVE_ROOM_STYLES,
-      } },
-      { type: "heading", heading: "Aktionen", icon: "mdi:gesture-tap" },
+      sectionHeading("notifications", "mdi:bell-badge-outline"),
+      { type: "custom:smartphone-dashboard-alerts", summary: true },
+      sectionHeading("quick_actions", "mdi:gesture-tap"),
       { type: "grid", columns: 2, square: false, cards: [] },
-      { type: "custom:bubble-card", card_type: "separator", name: "Räume", icon: "mdi:floor-plan" },
+      sectionHeading("rooms", "mdi:floor-plan"),
       { type: "grid", columns: 2, square: false, cards: [] },
-      { type: "custom:bubble-card", card_type: "separator", name: "Weitere Bereiche", icon: "mdi:view-grid-plus-outline" },
+      sectionHeading("navigation", "mdi:view-grid-plus-outline"),
       { type: "grid", columns: 2, square: false, cards: [] }
     ] }]
   }]
@@ -865,25 +635,6 @@ function entityDisplayName(hass, entityId) {
   return entityName || entityId.split(".")[1] || entityId;
 }
 
-function entityLocationLabel(hass, entityId) {
-  const index = dashboardEntityIndex(hass);
-  const entry = index.registry.get(entityId);
-  const device = index.deviceById.get(entry?.device_id);
-  const areaId = entry?.area_id || device?.area_id;
-  const area = index.areaById.get(areaId);
-  const areaName = String(area?.name || "").trim();
-  const entityName = entityDisplayName(hass, entityId);
-  return areaName && entityName.toLocaleLowerCase("de-DE") !== areaName.toLocaleLowerCase("de-DE")
-    ? `${areaName} · ${entityName}`
-    : entityName || areaName || entityId;
-}
-
-function hiddenDashboardEntityIds(hass) {
-  const registry = entityRegistryMap(hass);
-  return dashboardEntityIndex(hass).stateIds.filter(
-    (entityId) => !isEntityVisible(hass, entityId, registry),
-  );
-}
 
 function normalizeRoomKey(value) {
   return String(value || "")
@@ -988,7 +739,7 @@ function createPersonCard(person) {
     show_state: true,
     state_color: true,
     card_layout: "large",
-    styles: `${ACTIVE_ROOM_STYLES}\n\${(() => {
+    styles: `\${(() => {
       const personState = hass.states[${personId}]?.state;
       const travelEntity = ${travelId};
       const travel = travelEntity ? Number(hass.states[travelEntity]?.state) : NaN;
@@ -1057,72 +808,6 @@ function normalizeNinaGlob(value) {
     : "";
 }
 
-function isUpsHistoryEntity(entityId, state) {
-  const deviceClass = String(state?.attributes?.device_class || "").toLowerCase();
-  if (UPS_HISTORY_DEVICE_CLASSES.has(deviceClass)) return true;
-  const rawState = String(state?.state || "").trim();
-  if (/^\d{4}-\d{2}-\d{2}(?:[T ]|$)/.test(rawState)) return true;
-  const descriptor = `${entityId} ${state?.attributes?.friendly_name || ""}`.toLowerCase();
-  return /(?:umschaltung|letzte[rs]?|last).{0,32}(?:batter|netz|mains|switch)/.test(descriptor);
-}
-
-function upsNonAlertFilters() {
-  return [
-    ...UPS_NON_ALERT_STATES.map((normalState) => ({ state: normalState })),
-    ...upsHistoryFilters(),
-  ];
-}
-
-function upsHistoryFilters() {
-  return [
-    { attributes: { device_class: "date" } },
-    { attributes: { device_class: "timestamp" } },
-    { state: "/^\\d{4}-\\d{2}-\\d{2}(?:[T ].*)?$/" },
-    { entity_id: "/(?:umschaltung|letzte[rns]?|last).{0,64}(?:batter|netz|mains|switch)/" },
-    { name: "/(?:[Uu]mschaltung|[Ll]etzte[rns]?|[Ll]ast).{0,64}(?:[Bb]atter|[Nn]etz|[Mm]ains|[Ss]witch)/" },
-  ];
-}
-
-function upsHistoryExcludeFilters(entityIds = []) {
-  const [dateClass, timestampClass, timestampState, entityPattern, namePattern] = upsHistoryFilters();
-  return [
-    entityPattern,
-    namePattern,
-    ...entityIds.flatMap((entity_id) => [
-      { entity_id, ...dateClass },
-      { entity_id, ...timestampClass },
-      { entity_id, ...timestampState },
-    ]),
-  ];
-}
-
-function registryEntityId(hass, domain, uniqueId) {
-  const prefix = `${domain}.`;
-  return entityRegistryEntries(hass).find(
-    (entry) =>
-      entry?.unique_id === uniqueId &&
-      String(entry?.entity_id || "").startsWith(prefix),
-  )?.entity_id;
-}
-
-function packageEntity(hass, { domain, uniqueId, entityId, alias, attributeId }) {
-  const registeredId = registryEntityId(hass, domain, uniqueId);
-  if (registeredId) return [registeredId, hass?.states?.[registeredId]];
-
-  const exact = entityId ? hass?.states?.[entityId] : undefined;
-  if (exact && (!alias || exact.attributes?.friendly_name === alias)) {
-    return [entityId, exact];
-  }
-
-  return dashboardEntityIndex(hass).stateEntries.find(
-    ([candidateId, state]) =>
-      candidateId.startsWith(`${domain}.`) &&
-      (
-        (attributeId && state?.attributes?.id === attributeId) ||
-        (alias && state?.attributes?.friendly_name === alias)
-      ),
-  );
-}
 
 function synchronizationStatus(config, hass) {
   const helperIds = Object.values(NOTIFICATION_HELPERS);
@@ -1138,32 +823,19 @@ function synchronizationStatus(config, hass) {
     detail: problems.length ? problems.join(" · ") : `Eine Persistent Notification · ${pushDetail} · ${installedHelpers} optionale Legacy-Helfer` };
 }
 
-function withNotificationPopup(entry, category) {
-  const hash = NOTIFICATION_POPUPS[category]?.[0];
-  if (!hash) return entry;
-  return {
-    ...entry,
-    options: {
-      ...(entry.options || {}),
-      tap_action: { action: "navigate", navigation_path: hash },
-      button_action: { tap_action: { action: "navigate", navigation_path: hash } },
-    },
-  };
-}
-
-function parcelSensorEntities(hass) {
+function parcelSourceEntityIds(hass) {
   const registry = entityRegistryMap(hass);
-  const candidates = dashboardEntityIndex(hass).stateEntries
+  return dashboardEntityIndex(hass).stateEntries
     .filter(([entityId, state]) =>
       entityId.startsWith("sensor.") &&
       isEntityVisible(hass, entityId, registry) &&
-      Array.isArray(state?.attributes?.parcels) &&
-      !/(?:^|_)outgoing|delivered/i.test(entityId),
+      Array.isArray(state?.attributes?.parcels),
     )
     .map(([entityId]) => entityId);
-  if (candidates.includes("sensor.parcel_aggregator_incoming_parcels")) {
-    return ["sensor.parcel_aggregator_incoming_parcels"];
-  }
+}
+
+function parcelSensorEntities(hass) {
+  const candidates = parcelSourceEntityIds(hass).filter((entityId) => !/(?:^|_)outgoing|delivered/i.test(entityId));
   const incoming = candidates.filter((entityId) => /incoming.*parcel|parcel.*incoming/i.test(entityId));
   return (incoming.length ? incoming : candidates).sort((left, right) => left.localeCompare(right, "de"));
 }
@@ -1208,543 +880,116 @@ function notificationCalendarEntities(hass, wasteEntityIds = []) {
   return selected.map(({ entityId }) => entityId).sort((a, b) => a.localeCompare(b, "de"));
 }
 
-function notificationDetailCard(filters, category, hiddenEntityIds = []) {
-  const include = filters.map((entry) => {
-    const detail = structuredClone(entry);
-    if (category === "nina") {
-      detail.options = {
-        type: "custom:button-card",
-        icon: "mdi:alert-outline",
-        show_state: false,
-        show_label: true,
-        show_icon: true,
-        name: "[[[ return entity?.attributes?.headline || entity?.attributes?.friendly_name || 'NINA-Warnung'; ]]]",
-        label: "[[[ return [entity?.attributes?.severity, entity?.attributes?.sender_name].filter(Boolean).join(' · '); ]]]",
-        custom_fields: {
-          description: "[[[ return entity?.attributes?.description || 'Keine Beschreibung vorhanden.'; ]]]",
-          instruction: "[[[ return entity?.attributes?.instruction || ''; ]]]",
-          period: "[[[ const start = entity?.attributes?.onset || entity?.attributes?.sent; const end = entity?.attributes?.expires; return [start && `Von: ${start}`, end && `Bis: ${end}`].filter(Boolean).join(' · '); ]]]",
-        },
-        styles: {
-          card: [
-            { padding: "18px" },
-            { "text-align": "left" },
-            { "border-left": "5px solid var(--error-color)" },
-          ],
-          grid: [
-            { "grid-template-areas": "'i n' 'i l' 'description description' 'instruction instruction' 'period period'" },
-            { "grid-template-columns": "42px 1fr" },
-          ],
-          name: [{ "white-space": "normal" }, { "font-weight": "700" }],
-          icon: [{ color: "var(--error-color)" }],
-          label: [{ "white-space": "normal" }, { color: "var(--secondary-text-color)" }],
-          custom_fields: {
-            description: [{ "white-space": "pre-wrap" }, { "margin-top": "14px" }, { "line-height": "1.45" }],
-            instruction: [{ "white-space": "pre-wrap" }, { "margin-top": "12px" }, { "font-weight": "600" }, { "line-height": "1.45" }],
-            period: [{ "white-space": "normal" }, { "margin-top": "12px" }, { color: "var(--secondary-text-color)" }, { "font-size": "12px" }],
-          },
-        },
-        tap_action: { action: "more-info" },
-      };
-    } else {
-      detail.options = {
-        ...(detail.options || {}),
-        button_type: "state",
-        show_state: true,
-        tap_action: { action: "more-info" },
-      };
-      delete detail.options.button_action;
-    }
-    return detail;
-  });
-  return {
-    type: "custom:auto-entities",
-    unique: true,
-    show_empty: false,
-    card: { type: "vertical-stack" },
-    card_param: "cards",
-    filter: {
-      include,
-      exclude: [
-        { state: "unavailable" },
-        { state: "unknown" },
-        ...hiddenEntityIds.map((entity_id) => ({ entity_id })),
-        ...(category === "batteries" ? BATTERY_VOLTAGE_EXCLUDE_FILTERS : []),
-        ...(category === "ups"
-          ? upsHistoryExcludeFilters(filters.map((entry) => entry.entity_id).filter(Boolean))
-          : []),
-      ],
-    },
-    else: {
-      type: "markdown",
-      content: "Aktuell ist keine passende Meldung aktiv.",
-    },
-  };
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  })[character]);
 }
 
-function parcelOverviewCard(entityIds) {
+function parcelOverviewCard(entityIds, hass) {
   const ids = [...new Set(entityIds.filter(Boolean))];
   return {
     type: "custom:button-card",
-    icon: "mdi:package-variant-closed",
-    name: "Nächstes Paket",
+    show_name: false,
+    show_icon: false,
     show_state: false,
-    show_label: false,
     tap_action: { action: "none" },
     custom_fields: {
       parcels: `[[[
-        const ids = ${JSON.stringify(ids)};
-        const designs = {
-          registered: { label: 'Registriert', step: 1, icon: 'mdi:package-variant-closed', color: '#0A84FF' },
-          in_transit: { label: 'Unterwegs', step: 2, icon: 'mdi:truck-fast', color: '#0A84FF' },
-          out_for_delivery: { label: 'In Zustellung', step: 3, icon: 'mdi:truck-delivery', color: '#30D158' },
-          at_pickup_point: { label: 'Abholbereit', step: 4, icon: 'mdi:package-variant', color: '#FF9F0A' },
-          delivered: { label: 'Zugestellt', step: 4, icon: 'mdi:package-check', color: '#30D158' },
-          returning: { label: 'Rücksendung', step: 2, icon: 'mdi:package-variant-remove', color: '#FF453A' },
-          problem: { label: 'Problem', step: 2, icon: 'mdi:alert-circle-outline', color: '#FF453A' },
-          unknown: { label: 'Status unbekannt', step: 1, icon: 'mdi:package-variant-closed', color: '#8E8E93' },
-        };
-        const escape = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({
-          '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-        })[character]);
-        const cleanParcelText = (value) => {
-          let text = String(value || '').replaceAll(String.fromCharCode(8203), ' ').replace(/\\s+/g, ' ').trim();
-          const placeholder = text.match(/\\(\\s*(?:not\\s+sel(?:ected)?|not\\s+set|none|null|unknown|n\\/?a)\\b/i);
-          if (placeholder) text = text.slice(0, placeholder.index);
-          else if ((text.match(/\\(/g) || []).length > (text.match(/\\)/g) || []).length) text = text.slice(0, text.lastIndexOf('('));
-          text = text.replace(/^[\\s\\-–—·,:;()]+|[\\s\\-–—·,:;()]+$/g, '');
-          return /^(?:none|null|unknown|unbekannt|not set|not selected|n\\/?a)$/i.test(text) ? '' : text;
-        };
-        const contentLabel = (parcel) => {
-          const candidates = [parcel?.content_title, parcel?.contents, parcel?.items, parcel?.raw?.items];
-          for (const candidate of candidates) {
-            const items = (Array.isArray(candidate) ? candidate : [candidate])
-              .map(cleanParcelText).filter(Boolean)
-              .filter((item, index, all) => all.findIndex((other) => other.toLowerCase() === item.toLowerCase()) === index);
-            if (items.length) return items[0] + (items.length > 1 ? ' + ' + (items.length - 1) + ' weitere' : '');
-          }
-          return '';
-        };
-        const parcelCache = globalThis.__smartphoneDashboardParcelContentCache ||
-          (globalThis.__smartphoneDashboardParcelContentCache = { updated: 0, values: new Map() });
-        if (Date.now() - parcelCache.updated > 300000) {
-          parcelCache.values = new Map();
-          Object.values(hass.states).forEach((state) => {
-            (Array.isArray(state?.attributes?.parcels) ? state.attributes.parcels : []).forEach((parcel) => {
-              const barcode = String(parcel?.barcode || '').trim();
-              const content = contentLabel(parcel);
-              if (barcode && content) parcelCache.values.set(barcode, content);
-            });
-          });
-          parcelCache.updated = Date.now();
-        }
-        const contentByBarcode = parcelCache.values;
-        const parcelRank = (parcel) => {
-          const immediate = { at_pickup_point: 0, out_for_delivery: 1, problem: 2 };
-          if (Object.hasOwn(immediate, parcel?.status)) return immediate[parcel.status];
-          if (parcel?.planned_from || parcel?.planned_to) return 3;
-          return ({ in_transit: 4, returning: 5, registered: 6, unknown: 7 })[parcel?.status] ?? 7;
-        };
-        const parcelTime = (parcel) => {
-          const timestamp = Date.parse(parcel?.planned_from || parcel?.planned_to || '');
-          return Number.isFinite(timestamp) ? timestamp : Number.MAX_SAFE_INTEGER;
-        };
-        const seen = new Set();
-        const parcels = ids.flatMap((id) => hass.states[id]?.attributes?.parcels || [])
-          .filter((parcel) => {
-            if (!parcel || parcel.delivered === true || parcel.status === 'delivered') return false;
-            const key = parcel.barcode || [parcel.carrier, parcel.sender, parcel.planned_from].join('|');
-            if (seen.has(key)) return false;
-            seen.add(key);
-            return true;
-          })
-          .sort((left, right) => parcelRank(left) - parcelRank(right) || parcelTime(left) - parcelTime(right))
-          .slice(0, 1);
-        if (!parcels.length) return '<div class="parcel-empty">Aktuell sind keine Pakete unterwegs.</div>';
-        return parcels.map((parcel) => {
-          const cleanCarrier = cleanParcelText(parcel.carrier) || 'Paketdienst';
-          const itemLabel = contentLabel(parcel) || contentByBarcode.get(String(parcel.barcode || '').trim());
-          const sender = escape(itemLabel || cleanParcelText(parcel.sender) || cleanCarrier);
-          const carrier = escape(cleanCarrier);
-          const design = designs[parcel.status] || designs.unknown;
-          const status = escape(design.label);
-          const point = parcel.status === 'at_pickup_point' && parcel.pickup_point
-            ? ' · ' + escape(parcel.pickup_point) : '';
-          let planned = '';
-          if (parcel.planned_from) {
-            const from = new Date(parcel.planned_from);
-            const to = parcel.planned_to ? new Date(parcel.planned_to) : null;
-            if (!Number.isNaN(from.getTime())) {
-              const day = from.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit' });
-              const start = from.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
-              const end = to && !Number.isNaN(to.getTime())
-                ? '–' + to.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '';
-              planned = '<div class="parcel-time">' + day + ' · ' + start + end + '</div>';
-            }
-          }
-          const progress = Math.max(1, Math.min(4, design.step)) * 25;
-          const content = '<div class="parcel-icon" style="--parcel-color:' + design.color + '">' +
-            '<ha-icon icon="' + design.icon + '"></ha-icon></div>' +
-            '<div class="parcel-copy"><div class="parcel-name">' + sender +
-            '</div><div class="parcel-meta">' + carrier + ' · ' + status + point + '</div>' + planned +
-            '<div class="parcel-progress" aria-label="Fortschritt ' + progress + ' Prozent">' +
-            '<span style="width:' + progress + '%;background:' + design.color + '"></span></div></div>';
-          const url = /^https?:\\/\\//i.test(String(parcel.url || '')) ? String(parcel.url) : '';
-          return url
-            ? '<a class="parcel-row" href="' + escape(url) + '" target="_self" rel="external" onclick="event.stopPropagation()" onpointerdown="event.stopPropagation()" ontouchstart="event.stopPropagation()">' + content + '<span class="parcel-open" aria-hidden="true"><ha-icon icon="mdi:open-in-new"></ha-icon></span></a>'
-            : '<div class="parcel-row">' + content + '</div>';
+        const parcels = ${parcelSelectionExpression(ids, parcelSourceEntityIds(hass))};
+        if (!parcels.length) return '<div class="parcel-empty">Keine Pakete unterwegs</div>';
+        const escape = ${escapeHtml.toString()};
+        return parcels.map(({ parcel, status, carrier, label, design }) => {
+        const date = (value) => value ? new Date(value) : null;
+        const from = date(parcel.planned_from);
+        const to = date(parcel.planned_to);
+        const windowStart = from && Number.isFinite(from.getTime()) ? from : to;
+        const formatTime = (value) => value.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+        const planned = windowStart && Number.isFinite(windowStart.getTime())
+          ? windowStart.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit' }) +
+            ' · ' + formatTime(windowStart) +
+            (to && to > windowStart ? '–' + formatTime(to) : '')
+          : '';
+        const subtitle = [
+          carrier !== label ? carrier : '', design.label,
+          status === 'at_pickup_point' ? parcel.pickup_point : '',
+        ].filter(Boolean).join(' · ');
+        const content = '<div class="parcel-icon" style="--parcel-color:' + design.color + '">' +
+          '<ha-icon icon="' + design.icon + '" aria-hidden="true"></ha-icon></div>' +
+          '<div class="parcel-copy"><div class="parcel-name">' + escape(label) +
+          '</div><div class="parcel-meta">' + escape(subtitle) + '</div>' +
+          (planned ? '<div class="parcel-meta">' + escape(planned) + '</div>' : '') +
+          '<progress class="parcel-progress" style="--parcel-color:' + design.color + '" value="' + design.step +
+          '" max="4" aria-label="Versandfortschritt"></progress></div>';
+        let url = '';
+        try {
+          const parsed = new URL(parcel.url);
+          if (['http:', 'https:'].includes(parsed.protocol)) url = parsed.href;
+        } catch {}
+        return url
+          ? '<a class="parcel-row" href="' + escape(url) + '" target="_self" rel="external" onclick="event.stopPropagation()" onpointerdown="event.stopPropagation()" ontouchstart="event.stopPropagation()">' + content + '<span class="parcel-open" aria-hidden="true"><ha-icon icon="mdi:open-in-new"></ha-icon></span></a>'
+          : '<div class="parcel-row">' + content + '</div>';
         }).join('');
       ]]]`,
     },
     styles: {
-      card: [{ padding: "16px" }, { "border-radius": "20px" }, { "text-align": "left" }, { "box-shadow": "none" }],
-      grid: [{ "grid-template-areas": "'i n' 'parcels parcels'" }, { "grid-template-columns": "44px 1fr" }],
-      icon: [{ color: "#0A84FF" }, { width: "30px" }],
-      name: [{ "font-size": "18px" }, { "font-weight": "700" }, { "justify-self": "start" }],
-      custom_fields: { parcels: [{ "margin-top": "14px" }, { width: "100%" }, { "pointer-events": "auto" }, { "z-index": "3" }] },
+      card: [{ padding: "0" }, { "text-align": "left" }, { "box-shadow": "none" }],
+      grid: [{ "grid-template-areas": "'parcels'" }, { "grid-template-columns": "minmax(0, 1fr)" }],
+      custom_fields: { parcels: [{ width: "100%" }, { "pointer-events": "auto" }, { "z-index": "3" }] },
     },
     extra_styles: `
-      .parcel-row { display:flex; align-items:center; gap:12px; width:100%; box-sizing:border-box; padding:12px; margin-top:8px; border:1px solid var(--divider-color); border-radius:16px; background:var(--secondary-background-color); color:var(--primary-text-color); text-decoration:none; }
-      a.parcel-row { position:relative; z-index:3; pointer-events:auto !important; cursor:pointer; touch-action:manipulation; -webkit-tap-highlight-color:transparent; }
+      .parcel-row { display:flex; align-items:center; gap:12px; width:100%; box-sizing:border-box; padding:12px; color:var(--primary-text-color); text-decoration:none; }
+      .parcel-row + .parcel-row { border-top: 1px solid var(--divider-color); }
+      a.parcel-row { position:relative; z-index:3; pointer-events:auto !important; cursor:pointer; touch-action:manipulation; }
       a.parcel-row > * { pointer-events:none !important; }
-      .parcel-icon { width:44px; height:44px; border-radius:12px; display:grid; place-items:center; flex:0 0 44px; color:var(--parcel-color); background:color-mix(in srgb, var(--parcel-color) 14%, var(--card-background-color)); }
-      .parcel-icon ha-icon { width:25px; height:25px; color:inherit; }
+      a.parcel-row:focus-visible { outline:2px solid var(--primary-color); outline-offset:-4px; border-radius:inherit; }
+      .parcel-icon { width:44px; height:44px; border-radius:50%; display:grid; place-items:center; flex:0 0 44px; color:var(--parcel-color); background:var(--secondary-background-color); }
+      .parcel-icon ha-icon { --mdc-icon-size:24px; color:inherit; }
       .parcel-copy { flex:1; min-width:0; }
-      .parcel-name { font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-      .parcel-meta, .parcel-time, .parcel-empty { margin-top:3px; color:var(--secondary-text-color); font-size:13px; line-height:1.35; }
-      .parcel-progress { height:5px; margin-top:9px; overflow:hidden; border-radius:999px; background:color-mix(in srgb, var(--secondary-text-color) 18%, transparent); }
-      .parcel-progress span { display:block; height:100%; border-radius:inherit; }
-      .parcel-row .parcel-open { width:24px; height:24px; display:grid; place-items:center; align-self:center; color:#0A84FF; flex:0 0 24px; }
-      .parcel-row .parcel-open ha-icon { width:20px; height:20px; }
-      .parcel-empty { padding:10px 2px; }
+      .parcel-name { font-weight:600; overflow-wrap:anywhere; }
+      .parcel-meta, .parcel-empty { color:var(--secondary-text-color); font-size:13px; line-height:1.4; overflow-wrap:anywhere; }
+      .parcel-progress { display:block; width:100%; height:4px; margin-top:8px; accent-color:var(--parcel-color); }
+      .parcel-row .parcel-open { width:24px; height:24px; display:grid; place-items:center; color:var(--secondary-text-color); flex:0 0 24px; }
+      .parcel-row .parcel-open ha-icon { --mdc-icon-size:20px; }
+      .parcel-empty { padding:16px; }
     `,
   };
 }
 
-function notificationDetailPopups(filtersByCategory, hass, hiddenEntityIds = [], wasteEntityIds = []) {
-  const calendars = notificationCalendarEntities(hass, wasteEntityIds);
-  return Object.entries(filtersByCategory).flatMap(([category, filters]) => {
-    if (!filters.length || !NOTIFICATION_POPUPS[category]) return [];
-    const [hash, name, icon] = NOTIFICATION_POPUPS[category];
-    const cards = category === "parcels"
-      ? [parcelOverviewCard(filters.map((entry) => entry.entity_id))]
-      : [notificationDetailCard(filters, category, hiddenEntityIds)];
-    if (category === "waste" && calendars.length) {
-      cards.push({
-        type: "custom:bubble-card",
-        card_type: "calendar",
-        entities: calendars.map((entity) => ({ entity, color: "var(--success-color)" })),
-        days: 45,
-        limit: 6,
-        card_layout: "normal",
-        rows: 4,
-        show_end: false,
-        show_progress: false,
-      });
-    }
-    if (category === "parcels") {
-      const parcelCalendars = parcelCalendarEntities(hass);
-      if (parcelCalendars.length) cards.push({
-        type: "custom:bubble-card",
-        card_type: "calendar",
-        entities: parcelCalendars.map((entity) => ({ entity, color: "#0A84FF" })),
-        days: 30,
-        limit: 8,
-        card_layout: "normal",
-        rows: 5,
-        show_end: true,
-        show_progress: false,
-      });
-    }
-    return [{
-      type: "custom:bubble-card",
-      card_type: "pop-up",
-      popup_mode: "adaptive-dialog",
-      hash,
-      button_type: "name",
-      name,
-      icon,
-      show_header: true,
-      scrolling_effect: true,
-      styles: ACTIVE_ROOM_STYLES,
-      cards,
-    }];
-  });
-}
-
 function applyNotificationOptions(dashboard, config, hass) {
+  if (config.show_notifications === false) return dashboard;
   const cards = dashboard.views?.[0]?.sections?.[0]?.cards;
   if (!Array.isArray(cards)) return dashboard;
-  const section = cards.find(
-    (card) => card?.type === "vertical-stack" && card.cards?.[0]?.name === "Meldungen",
-  );
-  const notificationHeadingIndex = cards.findIndex((card) => card?.heading === "Meldungen" || card?.name === "Meldungen");
-  const autoEntities = section?.cards?.find((card) => card?.type === "custom:auto-entities") ||
-    cards.slice(notificationHeadingIndex + 1).find((card) => card?.type === "custom:auto-entities");
-  const includes = autoEntities?.filter?.include;
-  if (!Array.isArray(includes)) return dashboard;
-
-  const settings = {
-    batteries: notificationSetting(config, hass, "notification_batteries") !== false,
-    contacts: notificationSetting(config, hass, "notification_contacts") !== false,
-    co2: notificationSetting(config, hass, "notification_co2") !== false,
-    waste: notificationSetting(config, hass, "notification_waste") !== false,
-    ups: notificationSetting(config, hass, "notification_ups") !== false,
-    frost: notificationSetting(config, hass, "notification_frost") !== false,
-    nina: notificationSetting(config, hass, "notification_nina") !== false,
-    parcels: notificationSetting(config, hass, "notification_parcels") !== false,
-  };
-  const batteryThreshold = Number(notificationSetting(config, hass, "battery_threshold")) || 6;
-  const contactMinutes = Number(notificationSetting(config, hass, "contact_minutes")) || 15;
-  const co2Threshold = Number(notificationSetting(config, hass, "co2_threshold")) || 1000;
-  const configuredWasteDays = Number(notificationSetting(config, hass, "waste_days"));
-  const wasteDays = Number.isFinite(configuredWasteDays)
-    ? Math.min(30, Math.max(0, Math.trunc(configuredWasteDays)))
-    : 1;
-  const frostSetting = notificationSetting(config, hass, "frost_threshold");
-  const frostThreshold = Number.isFinite(Number(frostSetting))
-    ? Number(frostSetting)
-    : 4;
-  const frostEntity =
-    notificationSetting(config, hass, "frost_entity") || "";
+  const list = (category = "") => ({ type: "custom:smartphone-dashboard-alerts", category });
+  const controls = { type: "custom:smartphone-dashboard-notification-controls" };
   const wasteEntities = csv(notificationSetting(config, hass, "waste_entities"));
-  const upsEntities = csv(notificationSetting(config, hass, "ups_entities"));
-  const ninaEntities = normalizeNinaGlob(notificationSetting(config, hass, "nina_entities"));
-  const parcelEntities = parcelSensorEntities(hass);
-  const batteryExclusions = String(
-    notificationSetting(config, hass, "battery_exclusions") ||
-      "",
-  )
-    .split(",")
-    .map((entityId) => entityId.trim())
-    .filter(Boolean);
-  const hiddenEntityIds = hiddenDashboardEntityIds(hass);
-  const registry = entityRegistryMap(hass);
-  const stateEntries = dashboardEntityIndex(hass).stateEntries;
-  const visibleStates = stateEntries.filter(([entityId]) =>
-    isEntityVisible(hass, entityId));
-  const batteryEntityIds = stateEntries.filter(([entityId, state]) =>
-    entityId.startsWith("sensor.") &&
-    !registry.get(entityId)?.disabled_by &&
-    !batteryExclusions.includes(entityId) &&
-    isBatteryLevelEntity(entityId, state),
-  ).map(([entityId]) => entityId);
-  const notificationHiddenEntityIds = hiddenEntityIds.filter(
-    (entityId) => !batteryEntityIds.includes(entityId),
-  );
-  const contactEntityIds = visibleStates.filter(([entityId, state]) =>
-    entityId.startsWith("binary_sensor.") &&
-    (["door", "window", "opening"].includes(state?.attributes?.device_class) ||
-      /contact|kontakt/i.test(entityId)),
-  ).map(([entityId]) => entityId);
-  const co2EntityIds = visibleStates.filter(([entityId, state]) =>
-    entityId.startsWith("sensor.") &&
-    (state?.attributes?.device_class === "carbon_dioxide" ||
-      /co2|kohlendioxid/i.test(`${entityId} ${state?.attributes?.friendly_name || ""}`)),
-  ).map(([entityId]) => entityId);
-  const locationOptions = (options = {}, entityId, extraStyles = "") => ({
-    ...options,
-    button_type: "state",
-    show_state: true,
-    ...(entityId ? { name: entityLocationLabel(hass, entityId) } : {}),
-    styles: [options.styles, ENTITY_NOTIFICATION_STYLES, extraStyles].filter(Boolean).join("\n"),
-  });
+  const wasteCalendars = notificationCalendarEntities(hass, wasteEntities);
+  const parcelCalendars = parcelCalendarEntities(hass);
 
-  const emitted = new Set();
-  const detailFilters = Object.fromEntries(
-    Object.keys(NOTIFICATION_POPUPS).map((category) => [category, []]),
-  );
-  const emit = (category, entries) => {
-    detailFilters[category].push(...entries.map((entry) => structuredClone(entry)));
-    return entries.map((entry) => withNotificationPopup(entry, category));
-  };
-  autoEntities.filter.include = includes.flatMap((entry) => {
-    const entityId = entry.entity_id || "";
-    if (["sensor.*battery", "sensor.*batterie"].includes(entityId) || entry.attributes?.device_class === "battery") {
-      if (batteryEntityIds.length && emitted.has("batteries")) return [];
-      if (batteryEntityIds.length) emitted.add("batteries");
-      const entities = batteryEntityIds.length ? batteryEntityIds : [""];
-      const entries = entities.map((entity_id) => ({
-        ...entry,
-        entity_id: entity_id || entityId,
-        state: `<= ${batteryThreshold}`,
-        options: {
-          ...locationOptions(entry.options, entity_id || undefined, batterySummaryStyles(batteryThreshold)),
-          icon: "mdi:battery-alert",
-        },
-      }));
-      return settings.batteries ? emit("batteries", entries) : [];
+  cards.push(bubblePopup("#meldungen", {
+    button_type: "name", name: "Meldungen", icon: "mdi:bell-badge-outline",
+  }, [list(), controls]));
+
+  for (const [category, [hash, name, icon]] of Object.entries(ALERT_POPUPS)) {
+    const content = category === "parcel"
+      ? [parcelOverviewCard(parcelSensorEntities(hass), hass)]
+      : [list(category)];
+    const calendars = category === "waste" ? wasteCalendars : category === "parcel" ? parcelCalendars : [];
+    if (calendars.length) {
+      const waste = category === "waste";
+      content.push({
+        type: "custom:bubble-card",
+        card_type: "calendar",
+        entities: calendars.map((entity) => ({ entity, color: waste ? "var(--success-color)" : "#0A84FF" })),
+        days: waste ? 45 : 30,
+        limit: waste ? 6 : 8,
+        card_layout: "normal",
+        rows: waste ? 4 : 5,
+        show_end: !waste,
+        show_progress: false,
+      });
     }
-    if (["binary_sensor.*contact", "binary_sensor.*kontakt"].includes(entityId) || ["door", "window", "opening"].includes(entry.attributes?.device_class)) {
-      if (contactEntityIds.length && emitted.has("contacts")) return [];
-      if (contactEntityIds.length) emitted.add("contacts");
-      const entities = contactEntityIds.length ? contactEntityIds : [""];
-      const entries = entities.map((entity_id) => ({
-        ...entry,
-        entity_id: entity_id || entityId,
-        state: "on",
-        last_changed: `> ${contactMinutes}`,
-        options: locationOptions(
-          entry.options,
-          entity_id || undefined,
-          notificationAccentStyles("var(--warning-color, #ff9f0a)"),
-        ),
-      }));
-      return settings.contacts ? emit("contacts", entries) : [];
-    }
-    if (["sensor.*kohlendioxid", "sensor.*co2*"].includes(entityId) || entry.attributes?.device_class === "carbon_dioxide") {
-      if (co2EntityIds.length && emitted.has("co2")) return [];
-      if (co2EntityIds.length) emitted.add("co2");
-      const entities = co2EntityIds.length ? co2EntityIds : [""];
-      const entries = entities.map((entity_id) => ({
-        ...entry,
-        entity_id: entity_id || entityId,
-        state: `>= ${co2Threshold}`,
-        options: locationOptions(
-          entry.options,
-          entity_id || undefined,
-          notificationAccentStyles("#A2AA52"),
-        ),
-      }));
-      return settings.co2 ? emit("co2", entries) : [];
-    }
-    if (entityId === "sensor.*abfall") {
-      const dueNumbers = Array.from({ length: wasteDays + 1 }, (_value, index) => index).join("|");
-      const dueWords = wasteDays >= 1
-        ? "[Hh]eute|[Mm]orgen|[Tt]oday|[Tt]omorrow"
-        : "[Hh]eute|[Tt]oday";
-      const dueState = `/(?:${dueWords}|\\bin\\s+(?:${dueNumbers})\\s+(?:[Tt]ag(?:e|en)?|days?)\\b|^(?:${dueNumbers})$)/`;
-      const entries = wasteEntities.map((entity_id) => ({
-        ...entry,
-        entity_id,
-        or: [
-          { attributes: { daysTo: `<= ${wasteDays}` }, not: { attributes: { daysTo: "< 0" } } },
-          { attributes: { days_to: `<= ${wasteDays}` }, not: { attributes: { days_to: "< 0" } } },
-          { state: dueState },
-        ],
-        options: {
-          ...(entry.options || {}),
-          button_type: "state",
-          show_state: true,
-          icon: "mdi:trash-can-outline",
-          styles: [ENTITY_NOTIFICATION_STYLES, WASTE_SUMMARY_STYLES].join("\n"),
-        },
-      }));
-      return settings.waste ? emit("waste", entries) : [];
-    }
-    if (entityId === "sensor.*ups_status") {
-      if (emitted.has("ups")) return [];
-      emitted.add("ups");
-      const entries = upsEntities.map((entity_id) => {
-        const state = hass?.states?.[entity_id];
-        if (isUpsHistoryEntity(entity_id, state)) return null;
-        if (entity_id.startsWith("binary_sensor.")) {
-          const problemSensor = UPS_PROBLEM_DEVICE_CLASSES.has(
-            String(state?.attributes?.device_class || "").toLowerCase(),
-          );
-          return {
-            ...entry,
-            entity_id,
-            state: problemSensor ? "on" : "off",
-            options: locationOptions(
-              entry.options,
-              entity_id,
-              notificationAccentStyles("var(--warning-color, #ff9f0a)"),
-            ),
-          };
-        }
-        return {
-          ...entry,
-          entity_id,
-          options: locationOptions(
-            entry.options,
-            entity_id,
-            notificationAccentStyles("var(--warning-color, #ff9f0a)"),
-          ),
-          // Diese Regeln werden von Auto-Entities bei jeder Zustandsänderung
-          // erneut ausgewertet. So bleiben historische Umschalt-Sensoren auch
-          // dann verborgen, wenn ihre Attribute beim HA-Start noch fehlen.
-          not: { or: upsNonAlertFilters() },
-        };
-      }).filter(Boolean);
-      return settings.ups ? emit("ups", entries) : [];
-    }
-    if (entityId === "sensor.*parcel_incoming") {
-      const entries = parcelEntities.map((entity_id) => ({
-        ...entry,
-        entity_id,
-        state: "> 0",
-        options: {
-          ...(entry.options || {}),
-          button_type: "state",
-          show_state: true,
-          icon: "mdi:package-variant-closed",
-          styles: [entry.options?.styles, ENTITY_NOTIFICATION_STYLES, PARCEL_SUMMARY_STYLES]
-            .filter(Boolean).join("\n"),
-        },
-      }));
-      return settings.parcels ? emit("parcels", entries) : [];
-    }
-    if (entityId === "sensor.*temperature") {
-      entry.entity_id = frostEntity;
-      entry.state = `<= ${frostThreshold}`;
-      entry.options = locationOptions(
-        entry.options,
-        frostEntity,
-        notificationAccentStyles("#64D2FF"),
-      );
-      return settings.frost && Boolean(frostEntity) ? emit("frost", [entry]) : [];
-    }
-    if (entityId.startsWith("binary_sensor.nina_warning_")) {
-      if (emitted.has("nina")) return [];
-      emitted.add("nina");
-      return settings.nina && Boolean(ninaEntities)
-        ? emit("nina", [{
-          ...entry,
-          entity_id: ninaEntities,
-          options: {
-            ...(entry.options || {}),
-            icon: "mdi:alert-outline",
-            styles: [ENTITY_NOTIFICATION_STYLES, NINA_SUMMARY_STYLES].join("\n"),
-          },
-        }])
-        : [];
-    }
-    return [entry];
-  });
-  autoEntities.filter.exclude = [
-    { state: "unavailable" },
-    { state: "unknown" },
-    ...BATTERY_VOLTAGE_EXCLUDE_FILTERS,
-    ...notificationHiddenEntityIds.map((entity_id) => ({ options: {}, entity_id })),
-    ...batteryExclusions.map((entity_id) => ({ options: {}, entity_id })),
-    ...upsHistoryExcludeFilters(upsEntities),
-  ];
-  const popupHashes = new Set([
-    "#meldungen",
-    ...Object.values(NOTIFICATION_POPUPS).map(([hash]) => hash),
-  ]);
-  for (let index = cards.length - 1; index >= 0; index -= 1) {
-    if (popupHashes.has(cards[index]?.hash)) cards.splice(index, 1);
-  }
-  if (config.show_notifications !== false) {
-    cards.push({
-      type: "custom:bubble-card",
-      card_type: "pop-up",
-      popup_mode: "adaptive-dialog",
-      hash: "#meldungen",
-      button_type: "name",
-      name: "Meldungen",
-      icon: "mdi:bell-badge-outline",
-      show_header: true,
-      scrolling_effect: true,
-      styles: ACTIVE_ROOM_STYLES,
-      cards: [
-        { type: "custom:smartphone-dashboard-notification-controls" },
-        structuredClone(autoEntities),
-      ],
-    });
-    cards.push(...notificationDetailPopups(detailFilters, hass, notificationHiddenEntityIds, wasteEntities));
+    cards.push(bubblePopup(hash, { button_type: "name", name, icon }, [...content, controls]));
   }
   return dashboard;
 }
@@ -1766,7 +1011,7 @@ function applyQuickActionOptions(dashboard, config, hass) {
   if (!Array.isArray(config.quick_actions)) return dashboard;
   const cards = dashboard.views?.[0]?.sections?.[0]?.cards;
   if (!Array.isArray(cards)) return dashboard;
-  const headingIndex = cards.findIndex((card) => card?.name === "Aktionen" || card?.heading === "Aktionen");
+  const headingIndex = cards.findIndex((card) => homeSectionKey(card) === "quick_actions");
   if (headingIndex < 0) return dashboard;
   const actions = configuredQuickActions(hass, config.quick_actions).filter((entityId) => isEntityVisible(hass, entityId));
   if (!actions.length) {
@@ -1779,7 +1024,6 @@ function applyQuickActionOptions(dashboard, config, hass) {
     button_type: "name",
     entity,
     icon: hass.states[entity]?.attributes?.icon || "mdi:gesture-tap-button",
-    styles: ACTIVE_ROOM_STYLES,
     tap_action: { action: "perform-action", perform_action: "script.turn_on", target: { entity_id: entity } },
     button_action: {
       tap_action: { action: "perform-action", perform_action: "script.turn_on", target: { entity_id: entity } },
@@ -2025,21 +1269,14 @@ function genericRoomPopup(room, hass) {
     });
   }
 
-  return {
-    type: "custom:bubble-card",
-    card_type: "pop-up",
-    popup_mode: "adaptive-dialog",
-    hash: room.popup_hash,
+  return bubblePopup(room.popup_hash, {
     button_type: room.main_light ? "switch" : "name",
     name: room.name,
     icon: room.icon,
     entity: room.main_light || undefined,
-    scrolling_effect: true,
     show_name: true,
-    show_header: true,
     ...(room.entity_count ? { styles: ACTIVE_ROOM_STYLES } : {}),
-    cards,
-  };
+  }, cards);
 }
 
 function removeHiddenEntities(value, hidden) {
@@ -2106,11 +1343,6 @@ function applyRoomOptions(dashboard, config, hass) {
   }
 
   const legacyHashes = new Set(["#kueche", "#wohnzimmer", "#schlafzimmer", "#arbeitszimmer"]);
-  const legacyPopups = new Map(
-    cards
-      .filter((card) => legacyHashes.has(card?.hash))
-      .map((card) => [card.hash, card]),
-  );
   const firstLegacyPopup = cards.findIndex((card) => legacyHashes.has(card?.hash));
   const withoutRoomPopups = cards.filter((card) => !legacyHashes.has(card?.hash));
   const insertionIndex = firstLegacyPopup < 0 ? withoutRoomPopups.length : firstLegacyPopup;
@@ -2145,20 +1377,12 @@ function applyDashboardOptions(dashboard, config) {
   };
 
   const filtered = [];
-  const sectionKey = (card) => ({
-    Personen: "persons",
-    Meldungen: "notifications",
-    Aktionen: "quick_actions",
-    Räume: "rooms",
-    "Weitere Bereiche": "navigation",
-  })[card?.heading || card?.name];
-
   for (let index = 0; index < cards.length; index += 1) {
     const card = cards[index];
-    const key = sectionKey(card);
+    const key = homeSectionKey(card);
     if (key && !visible[key]) {
       const next = cards[index + 1];
-      if (next && !sectionKey(next) && next?.card_type !== "pop-up") index += 1;
+      if (next && !homeSectionKey(next) && next?.card_type !== "pop-up") index += 1;
       continue;
     }
     const isPersons =
@@ -2665,7 +1889,7 @@ function featurePopupCards(item, hass) {
 function parcelFeatureCards(item, hass) {
   const calendars = parcelCalendarEntities(hass);
   if (!item.entities.length && !calendars.length) return [];
-  const cards = item.entities.length ? [parcelOverviewCard(item.entities)] : [];
+  const cards = item.entities.length ? [parcelOverviewCard(item.entities, hass)] : [];
   if (calendars.length) cards.push({
     type: "custom:bubble-card",
     card_type: "calendar",
@@ -2711,7 +1935,6 @@ function applyDynamicFeatures(dashboard, config, hass) {
   }
   const navigation = { type: "grid", columns: 2, square: false, cards: features.map((item) => ({
     type: "custom:bubble-card", card_type: "button", button_type: "name", name: item.name, icon: item.icon,
-    styles: ACTIVE_ROOM_STYLES,
     tap_action: { action: "navigate", navigation_path: item.hash },
     button_action: { tap_action: { action: "navigate", navigation_path: item.hash } },
   })) };
@@ -2724,11 +1947,7 @@ function applyDynamicFeatures(dashboard, config, hass) {
           tap_action: { action: "more-info" },
         }
       : { button_type: "name", name: item.name, icon: item.icon };
-    return {
-      type: "custom:bubble-card", card_type: "pop-up", popup_mode: "adaptive-dialog", hash: item.hash,
-      ...securityHeader, show_header: true, scrolling_effect: true, styles: ACTIVE_ROOM_STYLES,
-      cards: item.popup_cards,
-    };
+    return bubblePopup(item.hash, securityHeader, item.popup_cards);
   });
   if (navigationHeadingIndex >= 0 && cleaned[navigationHeadingIndex + 1]?.type === "grid") {
     cleaned[navigationHeadingIndex + 1] = navigation;
@@ -2736,7 +1955,7 @@ function applyDynamicFeatures(dashboard, config, hass) {
     const popupIndex = cleaned.findIndex((card) => card?.card_type === "pop-up");
     const insertionIndex = popupIndex < 0 ? cleaned.length : popupIndex;
     cleaned.splice(insertionIndex, 0,
-      { type: "custom:bubble-card", card_type: "separator", name: "Weitere Bereiche", icon: "mdi:view-grid-plus-outline" },
+      sectionHeading("navigation", "mdi:view-grid-plus-outline"),
       navigation,
     );
   }
@@ -2748,15 +1967,6 @@ function applyDynamicFeatures(dashboard, config, hass) {
 function applyHomeSectionOrder(dashboard, config) {
   const cards = dashboard.views?.[0]?.sections?.[0]?.cards;
   if (!Array.isArray(cards) || !Array.isArray(config.home_sections)) return dashboard;
-  const headerKey = (card) => {
-    const title = card?.heading || card?.name;
-    if (title === "Personen") return "persons";
-    if (title === "Meldungen") return "notifications";
-    if (title === "Aktionen") return "quick_actions";
-    if (title === "Räume") return "rooms";
-    if (title === "Weitere Bereiche") return "navigation";
-    return undefined;
-  };
   const standaloneKey = (card) => {
     if (card?.card_type === "pop-up") return "popup";
     if (card?.type === "horizontal-stack" && card.cards?.some((x) => x?.entity?.startsWith("person."))) return "persons";
@@ -2766,10 +1976,10 @@ function applyHomeSectionOrder(dashboard, config) {
   const blocks = [];
   for (let index = 0; index < cards.length; index += 1) {
     const card = cards[index];
-    const sectionKey = headerKey(card);
+    const sectionKey = homeSectionKey(card);
     const key = sectionKey || standaloneKey(card);
     const block = [card];
-    if (sectionKey && cards[index + 1] && !headerKey(cards[index + 1]) && cards[index + 1]?.card_type !== "pop-up") {
+    if (sectionKey && cards[index + 1] && !homeSectionKey(cards[index + 1]) && cards[index + 1]?.card_type !== "pop-up") {
       block.push(cards[index + 1]);
       index += 1;
     }
@@ -3217,7 +2427,9 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
 
   _updateRoom(areaId, changes) {
     const rooms = detectedRooms(this._hass, this._config.rooms).map((room) =>
-      room.area_id === areaId ? { ...room, ...changes } : room,
+      room.area_id === areaId
+        ? { ...room, ...(typeof changes === "function" ? changes(room) : changes) }
+        : room,
     );
     this._update("rooms", rooms);
   }
@@ -3330,6 +2542,64 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
     return this._createSelector({ label, value, selector: { icon: {} }, onChange });
   }
 
+  _addReorderControls(row, host, key, getEntries, entryKey, getId, label) {
+    const entries = getEntries();
+    const index = entries.findIndex((entry) => getId(entry) === entryKey);
+    const move = (source, target, offset = 0) => {
+      const ordered = [...getEntries()];
+      const from = ordered.findIndex((entry) => getId(entry) === source);
+      const targetIndex = ordered.findIndex((entry) => getId(entry) === target);
+      if (from < 0 || targetIndex < 0) return;
+      const to = targetIndex + offset;
+      if (to < 0 || to >= ordered.length || from === to) return;
+      const [entry] = ordered.splice(from, 1);
+      ordered.splice(to, 0, entry);
+      this._update(key, ordered);
+      this._render();
+      [...this.shadowRoot.querySelectorAll("[data-reorder-key]")].find(
+        (item) => item.dataset.reorderKey === key && item.dataset.reorderEntry === getId(entry),
+      )?.focus();
+    };
+    row.tabIndex = -1;
+    row.dataset.reorderKey = key;
+    row.dataset.reorderEntry = entryKey;
+    row.draggable = true;
+    const transferType = `application/x-smartphone-dashboard-${key}`;
+    row.addEventListener("dragstart", (event) => {
+      event.dataTransfer.setData(transferType, entryKey);
+      event.dataTransfer.effectAllowed = "move";
+      row.classList.add("dragging");
+    });
+    row.addEventListener("dragend", () => row.classList.remove("dragging"));
+    row.addEventListener("dragover", (event) => {
+      if (event.dataTransfer.types.includes(transferType)) event.preventDefault();
+    });
+    row.addEventListener("drop", (event) => {
+      const source = event.dataTransfer.getData(transferType);
+      if (!source) return;
+      event.preventDefault();
+      move(source, entryKey);
+    });
+    const controls = document.createElement("div");
+    controls.className = "reorder-controls";
+    for (const [step, icon, direction] of [
+      [-1, "mdi:chevron-up", "nach oben"],
+      [1, "mdi:chevron-down", "nach unten"],
+    ]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.title = `${label} ${direction} verschieben`;
+      button.setAttribute("aria-label", button.title);
+      button.disabled = index + step < 0 || index + step >= entries.length;
+      const symbol = document.createElement("ha-icon");
+      symbol.setAttribute("icon", icon);
+      controls.append(button);
+      button.append(symbol);
+      button.addEventListener("click", () => move(entryKey, entryKey, step));
+    }
+    host.append(controls);
+  }
+
   _renderPersons(container) {
     const persons = detectedPersons(this._hass, this._config.persons);
     if (!persons.length) {
@@ -3340,18 +2610,9 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
       return;
     }
 
-    const registry = entityRegistryMap(this._hass);
-    const travelSensors = Object.keys(this._hass?.states || {}).filter((entityId) => {
-      if (!entityId.startsWith("sensor.") || !isEntityVisible(this._hass, entityId, registry)) return false;
-      const state = this._hass.states[entityId];
-      const unit = state?.attributes?.unit_of_measurement;
-      return unit === "min" || /travel|fahrt|fahrzeit|home_travel/i.test(entityId);
-    });
-
     for (const person of persons) {
       const item = document.createElement("div");
       item.className = "person-item";
-      item.draggable = true;
       item.dataset.personEntity = person.entity;
 
       const row = document.createElement("div");
@@ -3371,7 +2632,6 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
         this._updatePerson(person.entity, { enabled: event.currentTarget.checked }),
       );
 
-      const candidates = [...new Set([person.travel_sensor, ...travelSensors].filter(Boolean))];
       const sensorLabel = this._entitySelector(
         "Fahrzeitsensor nach Hause (optional)",
         person.travel_sensor,
@@ -3380,26 +2640,9 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
       );
       sensorLabel.classList.add("person-sensor");
 
-      item.addEventListener("dragstart", (event) => {
-        event.dataTransfer.setData("text/plain", person.entity);
-        event.dataTransfer.effectAllowed = "move";
-        item.classList.add("dragging");
-      });
-      item.addEventListener("dragend", () => item.classList.remove("dragging"));
-      item.addEventListener("dragover", (event) => event.preventDefault());
-      item.addEventListener("drop", (event) => {
-        event.preventDefault();
-        const sourceId = event.dataTransfer.getData("text/plain");
-        if (!sourceId || sourceId === person.entity) return;
-        const ordered = detectedPersons(this._hass, this._config.persons);
-        const sourceIndex = ordered.findIndex((entry) => entry.entity === sourceId);
-        const targetIndex = ordered.findIndex((entry) => entry.entity === person.entity);
-        if (sourceIndex < 0 || targetIndex < 0) return;
-        const [moved] = ordered.splice(sourceIndex, 1);
-        ordered.splice(targetIndex, 0, moved);
-        this._update("persons", ordered);
-        this._render();
-      });
+      this._addReorderControls(item, row, "persons", () => detectedPersons(this._hass, this._config.persons),
+        person.entity, (entry) => entry.entity,
+        row.querySelector(".person-name").textContent);
 
       item.append(row, sensorLabel);
       container.appendChild(item);
@@ -3445,7 +2688,6 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
     for (const entityId of actions) {
       const item = document.createElement("div");
       item.className = "action-item";
-      item.draggable = true;
       item.dataset.actionEntity = entityId;
       item.innerHTML = `<span class="drag">⋮⋮</span><ha-icon></ha-icon><div class="action-copy"><div class="action-name"></div><div class="action-id"></div></div><button type="button" title="Entfernen">×</button>`;
       item.querySelector("ha-icon").setAttribute(
@@ -3462,25 +2704,9 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
         );
         this._render();
       });
-      item.addEventListener("dragstart", (event) => {
-        event.dataTransfer.setData("text/plain", entityId);
-        item.classList.add("dragging");
-      });
-      item.addEventListener("dragend", () => item.classList.remove("dragging"));
-      item.addEventListener("dragover", (event) => event.preventDefault());
-      item.addEventListener("drop", (event) => {
-        event.preventDefault();
-        const source = event.dataTransfer.getData("text/plain");
-        if (!source || source === entityId) return;
-        const ordered = [...actions];
-        const sourceIndex = ordered.indexOf(source);
-        const targetIndex = ordered.indexOf(entityId);
-        if (sourceIndex < 0 || targetIndex < 0) return;
-        const [moved] = ordered.splice(sourceIndex, 1);
-        ordered.splice(targetIndex, 0, moved);
-        this._update("quick_actions", ordered);
-        this._render();
-      });
+      this._addReorderControls(item, item, "quick_actions", () => configuredQuickActions(this._hass, this._config.quick_actions),
+        entityId, (entry) => entry,
+        item.querySelector(".action-name").textContent);
       container.appendChild(item);
     }
   }
@@ -3499,7 +2725,6 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
     for (const room of rooms) {
       const item = document.createElement("div");
       item.className = "room-item";
-      item.draggable = true;
       item.dataset.areaId = room.area_id;
 
       const header = document.createElement("div");
@@ -3522,7 +2747,13 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
       const body = document.createElement("div");
       body.className = "room-body";
       body.hidden = !this._expandedRooms?.has(room.area_id);
-      header.querySelector(".expand").textContent = body.hidden ? "⌄" : "⌃";
+      const expand = header.querySelector(".expand");
+      const updateExpanded = () => {
+        expand.textContent = body.hidden ? "⌄" : "⌃";
+        expand.setAttribute("aria-expanded", String(!body.hidden));
+        expand.setAttribute("aria-label", `${room.name} konfigurieren`);
+      };
+      updateExpanded();
 
       const icon = this._iconSelector("Icon", room.icon, (value) =>
         this._updateRoom(room.area_id, { icon: value }),
@@ -3558,45 +2789,27 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
           this._hass?.states?.[entityId]?.attributes?.friendly_name || entityId;
         copy.textContent = `${friendlyName} · ${entityId}`;
         checkbox.addEventListener("change", (event) => {
-          const hidden = new Set(room.hidden_entities || []);
-          if (event.currentTarget.checked) hidden.delete(entityId);
-          else hidden.add(entityId);
-          this._updateRoom(room.area_id, { hidden_entities: [...hidden] });
+          const visible = event.currentTarget.checked;
+          this._updateRoom(room.area_id, (currentRoom) => {
+            const hidden = new Set(currentRoom.hidden_entities || []);
+            if (visible) hidden.delete(entityId);
+            else hidden.add(entityId);
+            return { hidden_entities: [...hidden] };
+          });
         });
         label.append(checkbox, copy);
         body.appendChild(label);
       }
 
-      header.querySelector(".expand").addEventListener("click", () => {
+      expand.addEventListener("click", () => {
         body.hidden = !body.hidden;
         if (body.hidden) this._expandedRooms.delete(room.area_id);
         else this._expandedRooms.add(room.area_id);
-        header.querySelector(".expand").textContent = body.hidden ? "⌄" : "⌃";
+        updateExpanded();
       });
 
-      item.addEventListener("dragstart", (event) => {
-        event.dataTransfer.setData("text/plain", room.area_id);
-        event.dataTransfer.effectAllowed = "move";
-        item.classList.add("dragging");
-      });
-      item.addEventListener("dragend", () => item.classList.remove("dragging"));
-      item.addEventListener("dragover", (event) => {
-        event.preventDefault();
-        event.dataTransfer.dropEffect = "move";
-      });
-      item.addEventListener("drop", (event) => {
-        event.preventDefault();
-        const sourceId = event.dataTransfer.getData("text/plain");
-        if (!sourceId || sourceId === room.area_id) return;
-        const ordered = detectedRooms(this._hass, this._config.rooms);
-        const sourceIndex = ordered.findIndex((entry) => entry.area_id === sourceId);
-        const targetIndex = ordered.findIndex((entry) => entry.area_id === room.area_id);
-        if (sourceIndex < 0 || targetIndex < 0) return;
-        const [moved] = ordered.splice(sourceIndex, 1);
-        ordered.splice(targetIndex, 0, moved);
-        this._update("rooms", ordered);
-        this._render();
-      });
+      this._addReorderControls(item, header, "rooms", () => detectedRooms(this._hass, this._config.rooms),
+        room.area_id, (entry) => entry.area_id, room.name);
 
       item.append(header, body);
       container.appendChild(item);
@@ -3787,10 +3000,10 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <style>
         :host { display: block; }
-        .editor { display: grid; gap: 14px; color: var(--primary-text-color); }
+        .editor { display: grid; gap: 12px; color: var(--primary-text-color); }
         .intro { padding: 4px 2px 8px; }
         h2 { margin: 0 0 6px; font-size: 22px; }
-        .version { display: inline-flex; margin-left: 8px; padding: 3px 7px; border-radius: 999px; color: var(--primary-color); background: color-mix(in srgb, var(--primary-color) 14%, transparent); font-size: 11px; vertical-align: middle; }
+        .version { margin-inline-start: 8px; color: var(--secondary-text-color); font-size: 12px; font-weight: 400; vertical-align: middle; }
         .intro p, .hint { margin: 0; color: var(--secondary-text-color); line-height: 1.45; }
         .hint.error { color: var(--error-color); }
         details {
@@ -3812,7 +3025,7 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
         summary::-webkit-details-marker { display: none; }
         summary::after { content: "›"; margin-left: auto; font-size: 25px; transform: rotate(90deg); }
         details[open] summary::after { transform: rotate(-90deg); }
-        summary ha-icon { color: var(--primary-color); }
+        summary ha-icon { color: var(--secondary-text-color); }
         .panel { display: grid; gap: 16px; padding: 0 16px 18px; }
         ha-textfield { width: 100%; }
         .switch-row {
@@ -3846,6 +3059,24 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
         .action-name { font-weight: 600; }
         .action-id { overflow: hidden; color: var(--secondary-text-color); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
         .action-item button { width: 34px; height: 34px; padding: 0; font-size: 20px; background: transparent; color: var(--error-color); }
+        .reorder-controls { display: flex; margin-inline-start: auto; }
+        .reorder-controls button {
+          display: grid; place-items: center; height: 44px; width: 44px; padding: 0;
+          color: var(--secondary-text-color); background: transparent;
+          border: 0; border-radius: 8px; cursor: pointer;
+        }
+        .reorder-controls button:disabled { opacity: .35; cursor: default; }
+        .reorder-controls ha-icon { color: inherit; }
+        .editor button:focus-visible, .editor summary:focus-visible, [data-reorder-key]:focus {
+          outline: 2px solid var(--primary-color); outline-offset: -2px;
+        }
+        @media (pointer: coarse) { .drag { display: none; } }
+        @media (max-width: 440px) {
+          .room-header, .person-row, .action-item { flex-wrap: wrap; gap: 4px; }
+          .room-body { padding-inline: 12px; }
+          .action-add { grid-template-columns: minmax(0, 1fr); }
+          .action-add button { min-height: 44px; }
+        }
         .sync-status { display: flex; align-items: center; gap: 10px; padding: 12px; border-radius: 12px; background: color-mix(in srgb, var(--success-color, #22c55e) 14%, transparent); }
         .sync-status.incomplete { background: color-mix(in srgb, var(--warning-color, #f59e0b) 16%, transparent); }
         .sync-status ha-icon { color: var(--success-color, #22c55e); }
@@ -4026,8 +3257,8 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
     const switches = [
       ["show_persons", "Personen", "Anwesenheit und Fahrzeit anzeigen."],
       ["show_notifications", "Meldungen", "Batterien, Kontakte und Warnungen anzeigen."],
-      ["show_quick_actions", "Schnellaktionen", "Den Bereich „Aktionen“ anzeigen."],
-      ["show_rooms", "Räume", "Raumkacheln und deren Navigation anzeigen."],
+      ["show_quick_actions", "Schnellaktionen", "Ausgewählte Skripte direkt ausführen."],
+      ["show_rooms", "Räume", "Räume öffnen und Hauptlichter steuern."],
       ["show_navigation", "Weitere Bereiche", "Pakete, Medien, System, Sicherheit und 3D-Druck anzeigen."],
     ];
 
@@ -4045,19 +3276,14 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
       );
       switchPanel.appendChild(row);
     }
-    const sectionLabels = { persons: "Personen", notifications: "Meldungen", quick_actions: "Schnellaktionen", rooms: "Räume", navigation: "Weitere Bereiche", other: "Sonstige Karten" };
     const homeOrder = this.shadowRoot.querySelector("[data-home-order]");
     for (const key of this._config.home_sections) {
-      const item = document.createElement("div"); item.className = "action-item"; item.draggable = true; item.dataset.homeSection = key;
+      const item = document.createElement("div"); item.className = "action-item";
       item.innerHTML = `<span class="drag">⋮⋮</span><div class="action-copy"><div class="action-name"></div></div>`;
-      item.querySelector(".action-name").textContent = sectionLabels[key] || key;
-      item.addEventListener("dragstart", (event) => event.dataTransfer.setData("text/plain", key));
-      item.addEventListener("dragover", (event) => event.preventDefault());
-      item.addEventListener("drop", (event) => {
-        event.preventDefault(); const source = event.dataTransfer.getData("text/plain"); if (!source || source === key) return;
-        const order = [...this._config.home_sections]; const from = order.indexOf(source); const to = order.indexOf(key); if (from < 0 || to < 0) return;
-        order.splice(to, 0, order.splice(from, 1)[0]); this._update("home_sections", order); this._render();
-      });
+      const label = HOME_SECTION_LABELS[key] || "Sonstige Karten";
+      item.querySelector(".action-name").textContent = label;
+      this._addReorderControls(item, item, "home_sections", () => this._config.home_sections, key,
+        (entry) => entry, label);
       homeOrder.appendChild(item);
     }
 
@@ -4275,29 +3501,15 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
   }
 }
 
-if (!customElements.get("smartphone-dashboard-strategy-editor")) {
-  customElements.define(
-    "smartphone-dashboard-strategy-editor",
-    SmartphoneDashboardStrategyEditor,
-  );
-}
-
-window.customStrategies = window.customStrategies || [];
-
-if (
-  !window.customStrategies.some(
-    (strategy) =>
-      strategy.type === STRATEGY_TYPE &&
-      strategy.strategyType === "dashboard",
-  )
-) {
-  window.customStrategies.push({
-    type: STRATEGY_TYPE,
-    strategyType: "dashboard",
-    name: "Smartphone-Dashboard",
-    description:
-      "Ein kompaktes deutsches Dashboard mit Räumen, Meldungen und Pop-ups.",
-  });
+function registerDashboardComponents(registry) {
+  for (const [tag, component] of [
+    ["smartphone-dashboard-strategy-editor", SmartphoneDashboardStrategyEditor],
+    ["smartphone-dashboard-deferred-cards", SmartphoneDashboardDeferredCards],
+    ["smartphone-dashboard-notification-controls", SmartphoneDashboardNotificationControls],
+    ["smartphone-dashboard-alerts", SmartphoneDashboardAlerts],
+  ]) {
+    if (!registry.get(tag)) registry.define(tag, component);
+  }
 }
 
 console.info(`Smartphone-Dashboard-Strategy v${STRATEGY_VERSION} geladen`);
@@ -4305,6 +3517,7 @@ console.info(`Smartphone-Dashboard-Strategy v${STRATEGY_VERSION} geladen`);
 export {
   SmartphoneDashboardStrategy,
   SmartphoneDashboardStrategyEditor,
+  registerDashboardComponents,
   STRATEGY_VERSION,
   configurationValidationErrors,
   configuredQuickActions,

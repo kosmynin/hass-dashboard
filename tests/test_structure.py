@@ -1,6 +1,10 @@
 import ast
+import asyncio
 import json
+from copy import deepcopy
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 ROOT = Path(__file__).parents[1]
 COMPONENT = ROOT / "custom_components" / "smartphone_dashboard"
@@ -10,7 +14,7 @@ def test_manifest_and_hacs():
     hacs = json.loads((ROOT / "hacs.json").read_text())
     assert manifest["domain"] == "smartphone_dashboard"
     assert manifest["config_flow"] is True
-    assert manifest["version"] == "22.0.69"
+    assert manifest["version"] == "23.0.0"
     assert hacs["name"] == "Smartphone Dashboard"
     assert hacs["zip_release"] is True
     assert hacs["filename"] == "smartphone_dashboard.zip"
@@ -82,9 +86,9 @@ def test_backend_notifications_are_active_and_legacy_yaml_is_not():
     ).read_text()
     assert "asyncio.Queue" in runtime and "blocking=True" in runtime
     assert "alert_set_digest" in runtime and "valid_nina_glob" in runtime
-    assert 'LIVE_ACTIVITY_PAYLOAD_VERSION = "10"' in runtime
-    assert "alert_content_digest(alerts)" in runtime
-    assert "same_alert_set" in runtime and "reuse_existing" in runtime
+    assert "alert_live_activity_tag(entry," in runtime
+    assert "alert_content_digest(entries)" in runtime
+    assert "set(previous_live_tags) != set(target_tags)" in runtime
     assert "same_payload_version" in runtime
     assert "LIVE_ACTIVITY_CONTENT_UPDATE_INTERVAL = 30 * 60" in runtime
     assert "MOBILE_PUSH_DAILY_LIMIT = 120" in runtime
@@ -130,22 +134,16 @@ def test_editor_keeps_entity_multi_selectors_open_while_values_change():
     excluded_printer_handler = strategy[printer_start:strategy.index('toggle.addEventListener', printer_start)]
     assert "this._render()" not in excluded_printer_handler
 
-def test_loader_repairs_registry_races_and_bounds_timeout_recovery():
+def test_loader_recovers_registry_without_reloading_the_dashboard():
     loader = (COMPONENT / "frontend/smartphone-dashboard-loader.js").read_text()
-    assert 'text.includes("Timeout waiting for strategy element")' in loader
-    assert "text.includes(ELEMENT)" in loader
-    assert "sessionStorage.getItem(RECOVERY_KEY)" in loader
-    assert "sessionStorage.setItem(RECOVERY_KEY" in loader
-    assert "location.reload()" in loader
-    assert "clearRecoveryMarker();" in loader
-    assert "installImplementation(ELEMENT, SmartphoneDashboardLoader)" in loader
-    assert "updateConstructor(existing, implementation)" in loader
-    assert "installImplementation(EDITOR_ELEMENT" in loader
+    assert "location.reload()" not in loader
+    assert "querySelectorAll" not in loader
+    assert "Object.defineProperty" not in loader
+    assert "registry.define(ELEMENT, SmartphoneDashboardLoader)" in loader
+    assert "registerDashboardComponents(registry)" in loader
     assert "REGISTRY_MONITOR_DURATION" in loader
     assert "observedRegistry !== window.customElements" in loader
     assert "ensureRegistrations();" in loader
-    assert "RECOVERY_LIMIT = 2" in loader
-    assert "target - performance.now()" in loader
     assert 'new URLSearchParams(location.search || "").get("sd_popup")' in loader
     assert "function requestedDashboardPopup" in loader
     assert "replayDashboardPopupDeepLink();" in loader
@@ -159,45 +157,22 @@ def test_frontend_is_an_automatically_versioned_lovelace_resource():
     assert "await resources.async_update_item(" in source
     assert "await _async_register_frontend_resource(hass)" in source
 
-def test_generic_base_matches_notification_and_quick_action_transformers():
+def test_generic_base_uses_shared_alerts_and_bubble_rooms():
     strategy = (COMPONENT / "frontend/smartphone-dashboard-strategy.js").read_text()
-    assert 'heading: "Meldungen"' in strategy
-    assert 'heading: "Aktionen"' in strategy
-    assert 'entity_id: "sensor.*battery"' in strategy
-    assert 'entity_id: "binary_sensor.nina_warning_*"' in strategy
-    assert 'unique: true' in strategy
-    assert 'show_empty: false' in strategy
-    assert 'name: "Keine Meldungen"' in strategy
-    assert 'card_param: "cards"' in strategy
-    assert 'state: `<= ${batteryThreshold}`' in strategy
-    assert "BATTERY_VOLTAGE_EXCLUDE_FILTERS" in strategy
-    assert "isBatteryLevelEntity" in strategy
-    assert 'not: { state: "0" }' not in strategy
-    assert 'state: `>= ${co2Threshold}`' in strategy
-    assert 'state: "on"' in strategy
-    assert 'attributes: { daysTo: `<= ${wasteDays}` }' in strategy
-    assert 'const dueState =' in strategy
-    assert "const UPS_NON_ALERT_STATES" in strategy
-    assert 'entity_id.startsWith("binary_sensor.")' in strategy
-    assert 'state: problemSensor ? "on" : "off"' in strategy
-    assert 'const NOTIFICATION_POPUPS' in strategy
+    alerts = (COMPONENT / "frontend/notification-cards.js").read_text()
+    assert 'type: "custom:smartphone-dashboard-alerts"' in strategy
+    assert "smartphone_dashboard/notifications/subscribe" in alerts
+    assert "custom:auto-entities" not in strategy
+    assert 'sectionHeading("notifications",' in strategy
+    assert 'sectionHeading("quick_actions",' in strategy
     assert 'card_type: "calendar"' in strategy
-    assert "data-waste-frequency" not in strategy
-    assert "delete result.waste_frequency" in strategy
-    assert "delete result.waste_frequencies" in strategy
-    assert 'entity?.attributes?.instruction' in strategy
-    assert 'entry["state 1"]' not in strategy
-    assert 'card?.heading === "Aktionen"' in strategy
-    assert 'hass?.states?.[entityId]' in strategy
-    assert 'template: "bubble_room_tile"' not in strategy
+    assert 'homeSectionKey(card) === "quick_actions"' in strategy
     assert "function lightSupportsBrightness" in strategy
     assert 'dimmable ? "slider" : "switch"' in strategy
     assert 'tap_action: { action: room.main_light ? "toggle" : "none" }' in strategy
     assert "function graphSensorCard" in strategy
-    assert 'template: "bubble_card_graph"' not in strategy
     assert "ACTIVE_ROOM_STYLES" in strategy
     assert "function isEntityVisible" in strategy
-    assert "hiddenDashboardEntityIds(hass)" in strategy
     assert "_dashboard_entity_enabled" in (COMPONENT / "notification.py").read_text()
     assert "entry?.hidden !== true" in strategy
     assert "isEntityVisible(hass, configuredLight)" in strategy
@@ -208,6 +183,40 @@ def test_storage_is_dashboard_scoped_and_notification_status_atomic():
     assert "async_patch_strategy(self, key:" in source
     assert "async_update_notification_status" in source
     assert '"delivered_by_recipient"' in source
+
+def test_failed_dashboard_save_does_not_advance_revision():
+    source = (COMPONENT / "config_manager.py").read_text()
+    manager_class = next(node for node in ast.parse(source).body if getattr(node, "name", None) == "ConfigManager")
+    method = next(node for node in manager_class.body if getattr(node, "name", None) == "async_patch_strategy")
+    namespace = {"Any": Any, "deepcopy": deepcopy}
+    exec(compile(ast.Module(body=[method], type_ignores=[]), str(COMPONENT / "config_manager.py"), "exec"), namespace)
+    save_strategy = namespace["async_patch_strategy"]
+
+    async def check():
+        async def fail(_data):
+            raise OSError("storage unavailable")
+
+        manager = SimpleNamespace(
+            _lock=asyncio.Lock(),
+            data={"dashboards": {"default": {"revision": 1, "config": {"title": "Handy"}}}},
+            store=SimpleNamespace(async_save=fail),
+        )
+        original = deepcopy(manager.data)
+        try:
+            await save_strategy(manager, "default", {"title": "Neu"}, 1)
+        except OSError:
+            assert manager.data == original
+        else:
+            raise AssertionError("The failed write must be reported")
+
+        async def save(data):
+            assert data["dashboards"]["default"]["revision"] == 2
+
+        manager.store.async_save = save
+        assert (await save_strategy(manager, "default", {"title": "Neu"}, 1))["saved"]
+        assert manager.data["dashboards"]["default"]["config"]["title"] == "Neu"
+
+    asyncio.run(check())
 
 def test_storage_version_and_redacted_dashboard_diagnostics():
     assert "STORAGE_VERSION = 3" in (COMPONENT / "const.py").read_text()

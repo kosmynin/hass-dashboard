@@ -45,16 +45,16 @@ class ConfigManager:
 
     async def async_import_legacy_helpers(self) -> dict[str, Any]:
         async with self._lock:
-            previous_data = deepcopy(self.data)
+            next_data = deepcopy(self.data)
             snapshot: dict[str, str] = {}
             for entity_id in HELPER_ENTITY_IDS:
                 state = self.hass.states.get(entity_id)
                 if state is not None and state.state not in ("unknown", "unavailable"):
                     snapshot[entity_id] = state.state
-            self.data["legacy_helpers"] = snapshot
-            seeded_fields = set(self.data.get("migration", {}).get("seeded_fields", []))
+            next_data["legacy_helpers"] = snapshot
+            seeded_fields = set(next_data.get("migration", {}).get("seeded_fields", []))
             if snapshot:
-                dashboard = self.data["dashboards"].setdefault("default", {"revision": 0, "config": {}})
+                dashboard = next_data["dashboards"].setdefault("default", {"revision": 0, "config": {}})
                 config = dashboard["config"]
                 config_changed = False
                 for entity_id, state in snapshot.items():
@@ -69,14 +69,15 @@ class ConfigManager:
                 if config_changed:
                     dashboard["revision"] = int(dashboard.get("revision", 0)) + 1
             seeded = len(seeded_fields) == len(HELPER_ENTITY_IDS)
-            self.data["migration"] = {
+            next_data["migration"] = {
                 "legacy_helpers_found": len(snapshot), "legacy_helpers_expected": len(HELPER_ENTITY_IDS),
                 "mode": "seeded_backend_authority", "helpers_deleted": False, "seeded": seeded,
                 "seeded_fields": sorted(seeded_fields),
             }
-            if self.data != previous_data:
-                await self.store.async_save(self.data)
-            return deepcopy(self.data["migration"])
+            if next_data != self.data:
+                await self.store.async_save(next_data)
+                self.data = next_data
+            return deepcopy(next_data["migration"])
 
     async def async_get_dashboard(self, key: str) -> dict[str, Any]:
         async with self._lock:
@@ -91,13 +92,20 @@ class ConfigManager:
 
     async def async_patch_strategy(self, key: str, patch: dict[str, Any], revision: int) -> dict[str, Any]:
         async with self._lock:
-            dashboard = self.data["dashboards"].setdefault(key, {"revision": 0, "config": {}})
+            dashboard = self.data["dashboards"].get(key, {"revision": 0, "config": {}})
             if revision != dashboard["revision"]:
                 return {"saved": False, "conflict": True, **deepcopy(dashboard)}
-            dashboard["config"].update(deepcopy(patch))
-            dashboard["revision"] += 1
-            await self.store.async_save(self.data)
-            return {"saved": True, **deepcopy(dashboard)}
+            updated = {
+                "revision": revision + 1,
+                "config": {**dashboard["config"], **deepcopy(patch)},
+            }
+            next_data = {
+                **self.data,
+                "dashboards": {**self.data["dashboards"], key: updated},
+            }
+            await self.store.async_save(next_data)
+            self.data = next_data
+            return {"saved": True, **deepcopy(updated)}
 
     async def async_update_notification_status(
         self,

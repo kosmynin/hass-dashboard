@@ -14,12 +14,15 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_STATE_CHANGED
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers import area_registry as ar, device_registry as dr, entity_registry as er
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.util import dt as dt_util
 from .config_manager import ConfigManager
+from .const import SIGNAL_ALERTS_UPDATED
 from .notification_core import (
     aggregate_alert_message,
     alert_content_digest,
     alert_is_urgent,
+    alert_live_activity_tag,
     alert_set_digest,
     appliance_activity_presentation,
     appliance_kind,
@@ -62,7 +65,7 @@ CLEAR_DIGEST = "clear"
 MOBILE_ACTION_EVENT = "mobile_app_notification_action"
 LIVE_ACTIVITY_RENEW_AFTER = 7 * 60 * 60
 LIVE_ACTIVITY_CONTENT_UPDATE_INTERVAL = 30 * 60
-LIVE_ACTIVITY_PAYLOAD_VERSION = "10"
+LIVE_ACTIVITY_PAYLOAD_VERSION = "11"
 MOBILE_PUSH_DUPLICATE_INTERVAL = 10 * 60
 MOBILE_PUSH_HOURLY_LIMIT = 40
 MOBILE_PUSH_DAILY_LIMIT = 120
@@ -118,6 +121,7 @@ class NotificationCoordinator:
         self._mobile_payload_sent_at: dict[tuple[str, str], float] = {}
         self._appliance_remaining_baselines: dict[str, float] = {}
         self._test_design_sent_at: dict[str, float] = {}
+        self.alerts: list[dict[str, object]] | None = None
 
     async def async_start(self) -> None:
         if self._worker: return
@@ -147,6 +151,13 @@ class NotificationCoordinator:
             except asyncio.CancelledError: pass
             except Exception: _LOGGER.exception("Fehler der Legacy-Migration beim Beenden verarbeitet")
             self._migration_task = None
+        self._publish_alerts(None)
+
+    @callback
+    def _publish_alerts(self, alerts: list[dict[str, object]] | None) -> None:
+        if self.alerts != alerts:
+            self.alerts = alerts
+            async_dispatcher_send(self.hass, SIGNAL_ALERTS_UPDATED, alerts)
 
     async def _import_with_retry(self) -> None:
         attempt = 0
@@ -414,14 +425,6 @@ class NotificationCoordinator:
         return True
 
     @staticmethod
-    def _next_live_tags(previous: list[str], count: int) -> list[str]:
-        """Create one generation-scoped tag for every visible activity."""
-        previous_tag = previous[0] if previous else ""
-        generation = "1" if "_live_0_" in previous_tag else "0"
-        base = f"smartphone_dashboard_live_{generation}"
-        return [f"{base}_{index}" for index in range(1, count + 1)]
-
-    @staticmethod
     def _next_media_tag(entity_id: str, previous: str = "") -> str:
         generation = 1 if previous.endswith("_0") else 0
         return media_live_activity_tag(entity_id, generation)
@@ -478,8 +481,8 @@ class NotificationCoordinator:
             allow_hidden=allow_hidden,
         )
 
-    def evaluate(self) -> list[dict[str, str]]:
-        alerts: list[dict[str, str]] = []
+    def evaluate(self) -> list[dict[str, object]]:
+        alerts: list[dict[str, object]] = []
         battery_limit = self._number("input_number.smartphone_batterie_grenzwert", DEFAULTS["battery"], 1, 100)
         battery_exclusions = {x.strip() for x in self._state("input_text.smartphone_batterie_ausnahmen").split(",") if x.strip()}
         contact_minutes = self._number("input_number.smartphone_kontakt_minuten", DEFAULTS["contact"], 1, 1440)
@@ -490,15 +493,34 @@ class NotificationCoordinator:
             if self._enabled("batterien") and entity_id.startswith("sensor.") and entity_id not in battery_exclusions and self._dashboard_entity_enabled(entity_id, allow_hidden=True) and is_battery_level_sensor(entity_id, attrs):
                 try:
                     value = float(state.state)
-                    if value <= battery_limit: alerts.append({"fingerprint": f"battery:{entity_id}", "message": f"🔋 {self._entity_label(entity_id, attrs)}: {value:g}%"})
+                    if value <= battery_limit:
+                        title = self._entity_label(entity_id, attrs)
+                        alerts.append({
+                            "fingerprint": f"battery:{entity_id}", "entity_id": entity_id,
+                            "title": title, "detail": f"{value:g}%",
+                            "critical": value <= max(1, battery_limit / 2),
+                            "message": f"🔋 {title}: {value:g}%",
+                        })
                 except ValueError: pass
             if self._enabled("kontakte") and self._dashboard_entity_enabled(entity_id) and entity_id.startswith("binary_sensor.") and (attrs.get("device_class") in ("door", "window", "opening") or "contact" in entity_id or "kontakt" in entity_id) and state.state == "on":
                 minutes = (now - state.last_changed).total_seconds() / 60
-                if minutes >= contact_minutes: alerts.append({"fingerprint": f"contact:{entity_id}", "message": f"🚪 {self._entity_label(entity_id, attrs)} ist seit {minutes:.0f} Minuten offen"})
+                if minutes >= contact_minutes:
+                    title = self._entity_label(entity_id, attrs)
+                    alerts.append({
+                        "fingerprint": f"contact:{entity_id}", "entity_id": entity_id,
+                        "title": title, "detail": f"Seit {minutes:.0f} Minuten offen",
+                        "message": f"🚪 {title} ist seit {minutes:.0f} Minuten offen",
+                    })
             if self._enabled("co2") and self._dashboard_entity_enabled(entity_id) and entity_id.startswith("sensor.") and (attrs.get("device_class") == "carbon_dioxide" or any(token in f"{entity_id} {attrs.get('friendly_name','')}".lower() for token in ("co2", "kohlendioxid"))):
                 try:
                     value = float(state.state)
-                    if value >= co2_limit: alerts.append({"fingerprint": f"co2:{entity_id}", "message": f"💨 {self._entity_label(entity_id, attrs)}: {value:g} ppm"})
+                    if value >= co2_limit:
+                        title = self._entity_label(entity_id, attrs)
+                        alerts.append({
+                            "fingerprint": f"co2:{entity_id}", "entity_id": entity_id,
+                            "title": title, "detail": f"{value:g} ppm",
+                            "message": f"💨 {title}: {value:g} ppm",
+                        })
                 except ValueError: pass
         alerts.extend(self._configured_alerts(now))
         alerts.extend(self._parcel_alerts(now))
@@ -509,61 +531,55 @@ class NotificationCoordinator:
         strategy = self.manager.data.get("dashboards", {}).get("default", {}).get("config", {})
         if strategy.get("notification_parcels", True) is False:
             return []
-        sensor_states = self.hass.states.async_all("sensor")
-        content_by_barcode: dict[str, str] = {}
+        sensor_states = [
+            state for state in self.hass.states.async_all("sensor")
+            if isinstance(state.attributes.get("parcels"), list)
+            and state.state not in ("unknown", "unavailable")
+            and self._dashboard_entity_enabled(state.entity_id)
+        ]
+        content_by_barcode: dict[str, tuple[str, str]] = {}
         for state in sensor_states:
-            source_parcels = state.attributes.get("parcels")
-            if not isinstance(source_parcels, list):
-                continue
+            source_parcels = state.attributes["parcels"]
             for parcel in source_parcels:
                 if not isinstance(parcel, dict):
                     continue
                 barcode = str(parcel.get("barcode") or "").strip()
                 content = parcel_content_label(parcel)
                 if barcode and content:
-                    content_by_barcode[barcode] = content
+                    content_by_barcode.setdefault(barcode, (content, state.entity_id))
         candidates = [
             state for state in sensor_states
-            if self._dashboard_entity_enabled(state.entity_id)
-            and isinstance(state.attributes.get("parcels"), list)
-            and not re.search(r"(?:^|_)outgoing|delivered", state.entity_id, re.IGNORECASE)
+            if not re.search(r"(?:^|_)outgoing|delivered", state.entity_id, re.IGNORECASE)
         ]
-        aggregator = next(
-            (
-                state for state in candidates
-                if state.entity_id == "sensor.parcel_aggregator_incoming_parcels"
-            ),
-            None,
-        )
-        if aggregator is not None:
-            candidates = [aggregator]
-        else:
-            incoming = [
-                state for state in candidates
-                if re.search(r"incoming.*parcel|parcel.*incoming", state.entity_id, re.IGNORECASE)
-            ]
-            if incoming:
-                candidates = incoming
+        incoming = [
+            state for state in candidates
+            if re.search(r"incoming.*parcel|parcel.*incoming", state.entity_id, re.IGNORECASE)
+        ]
+        candidates = sorted(incoming or candidates, key=lambda state: state.entity_id)
         ranked_alerts: list[tuple[tuple[int, float, str], dict[str, object]]] = []
-        seen: set[str] = set()
         for state in candidates:
             for parcel in state.attributes.get("parcels", []):
                 if not isinstance(parcel, dict):
                     continue
                 enriched = dict(parcel)
                 barcode = str(parcel.get("barcode") or "").strip()
+                content_source = None
                 if barcode and not parcel_content_label(enriched):
-                    enriched["content_title"] = content_by_barcode.get(barcode, "")
+                    content = content_by_barcode.get(barcode)
+                    if content:
+                        enriched["content_title"], content_source = content
                 alert = parcel_alert(enriched, now)
-                if alert is None or alert["fingerprint"] in seen:
+                if alert is None:
                     continue
-                seen.add(alert["fingerprint"])
+                alert["entity_id"] = state.entity_id
+                if content_source and content_source != state.entity_id:
+                    alert["related_entity_id"] = content_source
                 ranked_alerts.append((parcel_sort_key(enriched, now), alert))
         if not ranked_alerts:
             return []
         return [min(ranked_alerts, key=lambda item: item[0])[1]]
 
-    def _configured_alerts(self, now: datetime) -> list[dict[str, str]]:
+    def _configured_alerts(self, now: datetime) -> list[dict[str, object]]:
         alerts = []
         strategy = self.manager.data.get("dashboards", {}).get("default", {}).get("config", {})
         try:
@@ -577,7 +593,11 @@ class NotificationCoordinator:
                 details = waste_collection_details(state.state, state.attributes, state.attributes.get("friendly_name", entity_id), now.date())
                 if isinstance(details["days"], int) and 0 <= details["days"] <= waste_days:
                     fingerprint_date = details["date"] or str(state.state)
-                    alerts.append({"fingerprint": f"waste:{entity_id}:{fingerprint_date}", "message": f"🗑️ {details['type']}: {details['date_label']}"})
+                    alerts.append({
+                        "fingerprint": f"waste:{entity_id}:{fingerprint_date}", "entity_id": entity_id,
+                        "title": details["type"], "detail": f"Nächster Termin: {details['date_label']}",
+                        "message": f"🗑️ {details['type']}: {details['date_label']}",
+                    })
         for entity_id in filter(None, map(str.strip, self._state("input_text.smartphone_usv_sensoren").split(","))):
             state = self.hass.states.get(entity_id)
             if not (self._enabled("usv") and state and self._dashboard_entity_enabled(entity_id)):
@@ -591,6 +611,7 @@ class NotificationCoordinator:
             ):
                 alerts.append({
                     "fingerprint": f"ups:{entity_id}:{condition['code']}",
+                    "entity_id": entity_id, "title": label, "detail": condition["message"],
                     "message": f"🔌 {label}: {condition['message']}",
                 })
         frost_id = self._state("input_text.smartphone_frost_sensor")
@@ -598,7 +619,13 @@ class NotificationCoordinator:
         if self._enabled("frost") and frost and self._dashboard_entity_enabled(frost_id):
             try:
                 value = float(frost.state); limit = self._number("input_number.smartphone_frost_grenzwert", DEFAULTS["frost"], -30, 20)
-                if value <= limit: alerts.append({"fingerprint": f"frost:{frost_id}", "message": f"❄️ {self._entity_label(frost_id, frost.attributes)}: {value:g} °C"})
+                if value <= limit:
+                    title = self._entity_label(frost_id, frost.attributes)
+                    alerts.append({
+                        "fingerprint": f"frost:{frost_id}", "entity_id": frost_id,
+                        "title": title, "detail": f"{value:g} °C",
+                        "message": f"❄️ {title}: {value:g} °C",
+                    })
             except ValueError: pass
         pattern = self._state("input_text.smartphone_nina_muster", DEFAULTS["nina"])
         if self._enabled("nina") and valid_nina_glob(pattern):
@@ -609,7 +636,13 @@ class NotificationCoordinator:
                     severity = attrs.get("severity", "")
                     identifier = attrs.get("identifier", "")
                     fingerprint_source = f"{state.entity_id}:{identifier}:{detail}:{severity}:{attrs.get('onset',attrs.get('start',''))}:{attrs.get('expires',attrs.get('expires_at',''))}"
-                    alerts.append({"fingerprint": f"nina:{hashlib.sha256(fingerprint_source.encode()).hexdigest()[:24]}", "message": f"⚠️ {detail}" + (f" ({severity})" if severity else "")})
+                    alerts.append({
+                        "fingerprint": f"nina:{hashlib.sha256(fingerprint_source.encode()).hexdigest()[:24]}",
+                        "entity_id": state.entity_id, "title": str(detail),
+                        "detail": str(attrs.get("description") or ""),
+                        "instruction": str(attrs.get("instruction") or ""),
+                        "message": f"⚠️ {detail}" + (f" ({severity})" if severity else ""),
+                    })
         return alerts
 
     def _active_media_entries(self) -> list[dict[str, str]]:
@@ -865,7 +898,7 @@ class NotificationCoordinator:
         }
         return sorted(entries, key=lambda entry: str(entry["title"]).casefold())[:2]
 
-    async def _sync_persistent_notification(self, alerts: list[dict[str, str]]) -> None:
+    async def _sync_persistent_notification(self, alerts: list[dict[str, object]]) -> None:
         message = aggregate_alert_message(alerts, bullet="- ") if alerts else ""
         if message == self._persistent_message:
             return
@@ -1107,7 +1140,12 @@ class NotificationCoordinator:
             except asyncio.TimeoutError: pass
             await asyncio.sleep(0.5)
             try:
-                alerts = normalized_alerts(self.evaluate())
+                try:
+                    alerts = normalized_alerts(self.evaluate())
+                except Exception:
+                    self._publish_alerts(None)
+                    raise
+                self._publish_alerts(alerts)
                 media_entries = self._active_media_entries()
                 appliance_entries = self._active_appliance_entries()
                 fingerprints = [alert["fingerprint"] for alert in alerts]
@@ -1287,19 +1325,20 @@ class NotificationCoordinator:
                         previous_fingerprints = set(
                             alert_fingerprint_map.get(recipient, [])
                         )
-                        audible_fingerprint = next(
-                            (
-                                alert["fingerprint"]
-                                for alert in alerts
-                                if alert_is_urgent(alert)
-                                and alert["fingerprint"] not in previous_fingerprints
-                            ),
-                            "",
-                        )
                         if mobile_app and not snoozed and not muted:
-                            content_digest = alert_content_digest(alerts)
+                            entries = live_activity_entries(alerts)
+                            audible_fingerprint = next(
+                                (
+                                    entry["fingerprint"]
+                                    for entry in entries
+                                    if alert_is_urgent(entry)
+                                    and entry["fingerprint"] not in previous_fingerprints
+                                ),
+                                "",
+                            )
+                            content_digest = alert_content_digest(entries)
                             live_payload_digest = (
-                                f"{LIVE_ACTIVITY_PAYLOAD_VERSION}:{digest}:{content_digest}"
+                                f"{LIVE_ACTIVITY_PAYLOAD_VERSION}:{alert_set_digest(entries)}:{content_digest}"
                             )
                             previous_live_tags = live_tag_map.get(recipient, [])
                             live_started = live_started_map.get(recipient, 0)
@@ -1310,10 +1349,6 @@ class NotificationCoordinator:
                                 len(previous_live_parts) >= 1
                                 and previous_live_parts[0]
                                 == LIVE_ACTIVITY_PAYLOAD_VERSION
-                            )
-                            same_alert_set = (
-                                len(previous_live_parts) >= 2
-                                and previous_live_parts[1] == digest
                             )
                             renewal_due = (
                                 live_started > 0
@@ -1327,22 +1362,22 @@ class NotificationCoordinator:
                                 or now_epoch - live_updated
                                 >= LIVE_ACTIVITY_CONTENT_UPDATE_INTERVAL
                             )
+                            generation_started = (
+                                live_started if live_started and not renewal_due else now_epoch
+                            )
+                            target_tags = [
+                                alert_live_activity_tag(entry, int(generation_started * 1000))
+                                for entry in entries
+                            ]
                             live_due = (
-                                renewal_due
-                                or not previous_live_tags
+                                set(previous_live_tags) != set(target_tags)
                                 or not same_payload_version
-                                or not same_alert_set
                                 or (content_changed and content_update_due)
                             )
                             if live_due:
-                                entries = live_activity_entries(alerts)
-                                reuse_existing = (
-                                    same_alert_set
-                                    and len(previous_live_tags) == len(entries)
-                                    and not renewal_due
-                                )
+                                active_tags = set(previous_live_tags)
                                 clear_succeeded = True
-                                for old_tag in ([] if reuse_existing else previous_live_tags):
+                                for old_tag in (tag for tag in previous_live_tags if tag not in target_tags):
                                     clear_key = (recipient, f"replace-live:{old_tag}")
                                     active_retry_keys.add(clear_key)
                                     if self._retry_after.get(clear_key, 0) > time.monotonic():
@@ -1353,6 +1388,7 @@ class NotificationCoordinator:
                                             recipient, service,
                                             {"message": "clear_notification", "data": mobile_live_clear_data(old_tag)},
                                         )
+                                        active_tags.discard(old_tag)
                                         self._retry_after.pop(clear_key, None)
                                         self._retry_count.pop(clear_key, None)
                                     except Exception as err:
@@ -1363,29 +1399,20 @@ class NotificationCoordinator:
                                         errors.append(f"{recipient}: Alte Live Activity entfernen: {err}")
 
                                 if clear_succeeded:
-                                    if reuse_existing:
-                                        new_live_tags = previous_live_tags
-                                    else:
-                                        live_digest_map.pop(recipient, None)
-                                        live_tag_map.pop(recipient, None)
-                                        live_started_map.pop(recipient, None)
-                                        live_updated_map.pop(recipient, None)
-                                        new_live_tags = self._next_live_tags(
-                                            previous_live_tags, len(entries)
-                                        )
                                     sent_tags: list[str] = []
                                     for index, (entry, live_tag) in enumerate(
-                                        zip(entries, new_live_tags, strict=True), start=1
+                                        zip(entries, target_tags, strict=True), start=1
                                     ):
                                         live_key = (
                                             recipient,
-                                            f"live:{live_tag}:{live_payload_digest}",
+                                            f"live:{live_tag}",
                                         )
                                         active_retry_keys.add(live_key)
                                         presentation = live_activity_presentation(entry)
                                         audible = (
                                             entry["fingerprint"]
                                             == audible_fingerprint
+                                            and live_tag not in active_tags
                                         )
                                         live_payload = {
                                             "title": live_activity_title(entry),
@@ -1405,6 +1432,7 @@ class NotificationCoordinator:
                                             await self._async_notify(
                                                 recipient, service, live_payload
                                             )
+                                            active_tags.add(live_tag)
                                             sent_tags.append(live_tag)
                                             self._retry_after.pop(live_key, None)
                                             self._retry_count.pop(live_key, None)
@@ -1413,19 +1441,17 @@ class NotificationCoordinator:
                                             self._retry_count[live_key] = count
                                             self._retry_after[live_key] = time.monotonic() + min(3600, 30 * (2 ** (count - 1)))
                                             errors.append(f"{recipient}: Live Activity {index}: {err}")
-                                    if sent_tags:
-                                        live_tag_map[recipient] = (
-                                            previous_live_tags
-                                            if reuse_existing else sent_tags
-                                        )
+                                    if entries:
+                                        live_started_map[recipient] = generation_started
                                     if len(sent_tags) == len(entries):
                                         live_digest_map[recipient] = live_payload_digest
-                                        live_started_map[recipient] = (
-                                            live_started
-                                            if reuse_existing and live_started > 0
-                                            else now_epoch
-                                        )
                                         live_updated_map[recipient] = now_epoch
+                                if active_tags:
+                                    live_tag_map[recipient] = sorted(active_tags)
+                                else:
+                                    live_tag_map.pop(recipient, None)
+                                    if not entries:
+                                        live_started_map.pop(recipient, None)
 
                         # Remember which situations have already requested
                         # attention, even while the user has temporarily muted

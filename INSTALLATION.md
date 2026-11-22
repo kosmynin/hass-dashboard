@@ -15,7 +15,8 @@ Der statische Pfad nutzt `hass.http.async_register_static_paths`. Im normalen
 Storage-Modus legt die Integration automatisch eine Lovelace-Modulressource mit
 dem versionsabhängigen Pfad
 `/smartphone-dashboard/v<installierte-version>/smartphone-dashboard-loader.js` an und
-aktualisiert vorhandene Einträge bei jedem Release. Im YAML-Ressourcenmodus
+aktualisiert den Eintrag bei jedem Release. Mehrere automatisch angelegte
+Einträge werden zusammengeführt. Im YAML-Ressourcenmodus
 wird der Loader weiterhin über Home Assistants Extra-Modul-Schnittstelle
 eingebunden. Entferne manuell angelegte `/local/...`-Ressourcen, damit keine
 unabhängige alte Kopie geladen wird.
@@ -23,9 +24,8 @@ unabhängige alte Kopie geladen wird.
 Der Loader registriert das Strategy-Element vor dem eigentlichen Dashboard-Code
 und überwacht zusätzlich, ob Home Assistants Scoped-Registry-Polyfill eine sehr
 frühe Registrierung ersetzt. In diesem Fall registriert er sich selbstständig
-in der aktiven Registry neu. Falls Home Assistants festes Fünf-Sekunden-Limit
-bei einem stark verzögerten Download trotzdem zuerst abläuft, sind höchstens
-zwei automatische Wiederholungen erlaubt; eine Endlosschleife ist ausgeschlossen.
+in der aktiven Registry neu. Bleibt ein Modul-Download aus, prüfe in der
+Browserkonsole die versionsgebundene Modul-URL.
 
 Die primäre Strategy-Konfiguration lautet:
 

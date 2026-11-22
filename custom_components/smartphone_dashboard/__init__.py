@@ -16,21 +16,23 @@ from homeassistant.components.lovelace import LOVELACE_DATA
 from homeassistant.components.lovelace.resources import ResourceStorageCollection
 from homeassistant.auth.permissions.const import POLICY_READ
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from .config_manager import ConfigManager
 from .notification import NotificationCoordinator
-from .const import DOMAIN, FRONTEND_DIR, MODULE_URL, STATIC_URL, VERSION
+from .const import DOMAIN, FRONTEND_DIR, MODULE_URL, SIGNAL_ALERTS_UPDATED, STATIC_URL, VERSION
+from .notification_core import dashboard_alert_rows
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 _LOGGER = logging.getLogger(__name__)
 
 def _is_own_frontend_resource(url: object) -> bool:
-    path = urlsplit(str(url or "")).path
-    return (
-        path.startswith("/smartphone-dashboard/")
-        and path.endswith("/smartphone-dashboard-loader.js")
+    parts = urlsplit(str(url or ""))
+    return not (parts.scheme or parts.netloc) and (
+        re.fullmatch(r"/smartphone-dashboard/(?:v[^/]+/)?smartphone-dashboard-loader\.js", parts.path)
+        is not None
     )
 
 async def _async_register_frontend_resource(hass: HomeAssistant) -> None:
@@ -52,11 +54,14 @@ async def _async_register_frontend_resource(hass: HomeAssistant) -> None:
         if not matches:
             await resources.async_create_item({"res_type": "module", "url": MODULE_URL})
             return
+        current = next((item for item in matches if item.get("url") == MODULE_URL), matches[0])
+        if current.get("url") != MODULE_URL or current.get("type") != "module":
+            await resources.async_update_item(
+                current["id"], {"res_type": "module", "url": MODULE_URL}
+            )
         for item in matches:
-            if item.get("url") != MODULE_URL or item.get("type") != "module":
-                await resources.async_update_item(
-                    item["id"], {"res_type": "module", "url": MODULE_URL}
-                )
+            if item["id"] != current["id"]:
+                await resources.async_delete_item(item["id"])
     except Exception:
         # YAML mode and future resource implementations keep the supported
         # extra-module fallback. The loader additionally repairs registry races.
@@ -69,6 +74,7 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     await _async_register_frontend_resource(hass)
     websocket_api.async_register_command(hass, websocket_get_config)
     websocket_api.async_register_command(hass, websocket_get_display_config)
+    websocket_api.async_register_command(hass, websocket_subscribe_alerts)
     websocket_api.async_register_command(hass, websocket_save_config)
     websocket_api.async_register_command(hass, websocket_import_legacy)
     websocket_api.async_register_command(hass, websocket_notification_action)
@@ -282,6 +288,25 @@ async def websocket_get_display_config(hass, connection, msg):
     permissions = connection.user.permissions
     can_read = lambda entity_id: connection.user.is_admin or permissions.access_all_entities(POLICY_READ) or permissions.check_entity(entity_id, POLICY_READ)
     connection.send_result(msg["id"], {"config": _public_notification_config(dashboard.get("config"), existing_entities, can_read)})
+
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/notifications/subscribe"})
+@callback
+def websocket_subscribe_alerts(hass, connection, msg):
+    """Stream the same alert snapshot used by notification delivery."""
+    msg_id = msg["id"]
+
+    @callback
+    def send_alerts(alerts) -> None:
+        user = connection.user
+        permissions = user.permissions
+        all_readable = user.is_admin or permissions.access_all_entities(POLICY_READ)
+        rows = dashboard_alert_rows(alerts, lambda entity_id: all_readable or permissions.check_entity(entity_id, POLICY_READ))
+        connection.send_event(msg_id, {"alerts": rows})
+
+    connection.subscriptions[msg_id] = async_dispatcher_connect(hass, SIGNAL_ALERTS_UPDATED, send_alerts)
+    connection.send_result(msg_id)
+    coordinator = _coordinator(hass)
+    send_alerts(coordinator.alerts if coordinator else None)
 
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/config/get", vol.Required("dashboard_key"): _valid_key})
 @websocket_api.require_admin

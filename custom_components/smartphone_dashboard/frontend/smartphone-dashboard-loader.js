@@ -6,12 +6,9 @@
 const TYPE = "smartphone-dashboard";
 const ELEMENT = `ll-strategy-dashboard-${TYPE}`;
 const LEGACY_ELEMENT = `ll-strategy-${TYPE}`;
-const VERSION = "22.0.69";
+const VERSION = "23.0.0";
 const CORE_URL = new URL(`./smartphone-dashboard-strategy.js?v=${VERSION}`, import.meta.url).href;
-const RECOVERY_KEY = `smartphone-dashboard:timeout-reload:${VERSION}:${location.pathname}`;
-const EDITOR_ELEMENT = "smartphone-dashboard-strategy-editor";
 const REGISTRY_MONITOR_DURATION = 15000;
-const RECOVERY_LIMIT = 2;
 
 let corePromise;
 let coreModule;
@@ -63,39 +60,12 @@ function loadCore() {
   return corePromise;
 }
 
-function updateConstructor(target, implementation) {
-  for (const [name, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(implementation))) {
-    if (["length", "name", "prototype"].includes(name)) continue;
-    Object.defineProperty(target, name, descriptor);
-  }
-  for (const [name, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(implementation.prototype))) {
-    if (name === "constructor") continue;
-    Object.defineProperty(target.prototype, name, descriptor);
-  }
-}
-
-function installImplementation(tag, implementation) {
-  const existing = customElements.get(tag);
-  if (!existing) customElements.define(tag, implementation);
-  else if (existing !== implementation) updateConstructor(existing, implementation);
-  return customElements.get(tag);
-}
-
-function clearRecoveryMarker() {
-  try {
-    sessionStorage.removeItem(RECOVERY_KEY);
-  } catch (_error) {
-    // Session Storage kann in besonders restriktiven Browserprofilen gesperrt sein.
-  }
-}
-
 class SmartphoneDashboardLoader extends HTMLElement {
   static getCreateSuggestions() {
     return { title: "Handy", icon: "mdi:cellphone" };
   }
 
   static async generate(config, hass) {
-    clearRecoveryMarker();
     const core = await loadCore();
     const dashboard = await core.SmartphoneDashboardStrategy.generate(config, hass);
     replayDashboardPopupDeepLink();
@@ -115,12 +85,9 @@ function ensureRegistrations() {
   const registry = window.customElements;
   if (!registry) return false;
   observedRegistry = registry;
-  installImplementation(ELEMENT, SmartphoneDashboardLoader);
-  installImplementation(LEGACY_ELEMENT, SmartphoneDashboardLegacyLoader);
-  if (coreModule) {
-    installImplementation(EDITOR_ELEMENT, coreModule.SmartphoneDashboardStrategyEditor);
-  }
-  return Boolean(registry.get(ELEMENT));
+  if (!registry.get(ELEMENT)) registry.define(ELEMENT, SmartphoneDashboardLoader);
+  if (!registry.get(LEGACY_ELEMENT)) registry.define(LEGACY_ELEMENT, SmartphoneDashboardLegacyLoader);
+  coreModule?.registerDashboardComponents(registry);
 }
 
 ensureRegistrations();
@@ -134,7 +101,7 @@ function monitorRegistry() {
   const registrationMissing = !window.customElements?.get(ELEMENT);
   if (registryChanged || registrationMissing) ensureRegistrations();
   if (performance.now() - registryMonitorStarted < REGISTRY_MONITOR_DURATION) {
-    setTimeout(monitorRegistry, 50);
+    setTimeout(monitorRegistry, 250);
   }
 }
 setTimeout(monitorRegistry, 0);
@@ -155,40 +122,8 @@ if (!window.customStrategies.some((item) => item.type === TYPE)) {
   });
 }
 
-function containsStrategyTimeout(root) {
-  const text = root.textContent || "";
-  if (text.includes("Timeout waiting for strategy element") && text.includes(ELEMENT)) {
-    return true;
-  }
-  for (const element of root.querySelectorAll?.("*") || []) {
-    if (element.shadowRoot && containsStrategyTimeout(element.shadowRoot)) return true;
-  }
-  return false;
-}
-
-function recoverLateRegistration() {
-  // HA wartet derzeit nur fünf Sekunden und lädt Ressourcen parallel. Nur nach
-  // diesem Zeitfenster nach der exakt zugehörigen Fehlerkarte suchen.
-  if (performance.now() < 4500 || !containsStrategyTimeout(document)) return;
-  try {
-    const attempts = Number.parseInt(sessionStorage.getItem(RECOVERY_KEY) || "0", 10) || 0;
-    if (attempts >= RECOVERY_LIMIT) {
-      console.error("Smartphone-Dashboard: Strategy blieb trotz Ladeversuchen zu spät");
-      return;
-    }
-    sessionStorage.setItem(RECOVERY_KEY, String(attempts + 1));
-  } catch (_error) {
-    return;
-  }
-  console.warn("Smartphone-Dashboard: verspätete Strategy-Registrierung erkannt; begrenzter Reload");
-  location.reload();
-}
-
 // Download früh starten, ohne die sofortige Registrierung zu verzögern.
-void loadCore();
-for (const target of [5250, 7000, 10000]) {
-  setTimeout(recoverLateRegistration, Math.max(0, target - performance.now()));
-}
+void loadCore().catch((error) => console.error("Smartphone-Dashboard konnte nicht geladen werden", error));
 console.info(`Smartphone-Dashboard-Loader v${VERSION} registriert`);
 
 export { ensureRegistrations };
