@@ -4,6 +4,7 @@ globalThis.customElements = { registry: new Map(), get(name) { return this.regis
 globalThis.window = globalThis;
 const { SmartphoneDashboardStrategy, SmartphoneDashboardStrategyEditor, partitionConflictPatch, applyNotificationOptions, mergeBackendNotifications, detectedRooms, applyRoomOptions, configuredFeatures, parcelSensorEntities, popupContentCards } = await import("../custom_components/smartphone_dashboard/frontend/smartphone-dashboard-strategy.js");
 const { energyPopupCards, loadEnergyPopupCards } = await import("../custom_components/smartphone_dashboard/frontend/energy-popup.js");
+const { agendaRows, loadCalendarEvents } = await import("../custom_components/smartphone_dashboard/frontend/agenda-cards.js");
 
 const roomHass = {
   states: {
@@ -244,7 +245,7 @@ const energyHass = {
   },
 };
 const isEnergyVisible = (entity) => !energyHass.entities[entity]?.hidden;
-const [energyDistribution, energyReadings, energyLink] = await loadEnergyPopupCards(energyHass, isEnergyVisible);
+const [energyDistribution, energyReadings, livePower, energyLink] = await loadEnergyPopupCards(energyHass, isEnergyVisible);
 assert.deepEqual(energyDistribution, {
   type: "energy-distribution",
   title: "Energieverteilung",
@@ -253,6 +254,14 @@ assert.deepEqual(energyDistribution, {
 assert.equal(energyReadings.columns, 2);
 assert.deepEqual(energyReadings.cards.map((card) => card.entity),
   ["sensor.house_power", "sensor.pv_power", "sensor.storage_soc", "sensor.water_flow", "sensor.gas_flow"]);
+assert.deepEqual(livePower, {
+  type: "power-sankey",
+  title: "Aktueller Leistungsfluss",
+  collection_key: "energy_dashboard_now",
+  layout: "vertical",
+  show_values: true,
+  max_devices: 5,
+});
 assert.equal(energyLink.button_action.tap_action.navigation_path, "/energy");
 const waterMeter = { type: "water", stat_energy_from: "sensor.water_total" };
 const gasMeter = { type: "gas", stat_energy_from: "sensor.gas_total" };
@@ -263,6 +272,26 @@ for (const sources of [[waterMeter], [gasMeter], [waterMeter, gasMeter]]) {
     [energyDistribution, energyLink],
   );
 }
+const gridMeter = { type: "grid", stat_energy_from: "sensor.grid_energy" };
+const gridPower = { ...gridMeter, power_config: {
+  stat_rate_from: "sensor.grid_import", stat_rate_to: "sensor.grid_export",
+} };
+const batteryPower = { type: "battery", power_config: {
+  stat_rate_from_solar: "sensor.charge_from_pv", stat_rate_to_home: "sensor.discharge_to_house",
+} };
+const firstLiveVersion = { config: { version: "2025.12.0" }, states: {} };
+for (const source of [gridPower, batteryPower]) {
+  assert.deepEqual(
+    energyPopupCards({ energy_sources: [source] }, firstLiveVersion, isEnergyVisible),
+    [energyDistribution, livePower, energyLink],
+  );
+}
+const onlyEnergyTotals = energyPopupCards({
+  energy_sources: [gridMeter, { ...gasMeter, stat_rate: "sensor.gas_flow" }],
+}, firstLiveVersion, isEnergyVisible);
+assert.equal(onlyEnergyTotals[0].type, "energy-distribution");
+assert.match(onlyEnergyTotals[1].content, /Leistungssensoren/);
+assert.match(energyPopupCards({ energy_sources: [gridPower] }, olderEnergyHass, isEnergyVisible)[1].content, /2025\.12/);
 const fetchErrorCards = await loadEnergyPopupCards({
   async callWS() { throw new Error("offline"); },
 }, isEnergyVisible);
@@ -384,8 +413,9 @@ const wasteDashboard = await SmartphoneDashboardStrategy.generate({ waste_entiti
 const wasteCards = popupContentCards(wasteDashboard.views[0].sections[0].cards
   .find((card) => card.hash === "#meldung-abfall"));
 assert.equal(wasteCards[0].category, "waste");
-assert.equal(wasteCards[1].card_type, "calendar");
-assert.deepEqual(wasteCards[1].entities, [{ entity: "calendar.hausplan", color: "var(--success-color)" }]);
+assert.equal(wasteCards[1].type, "custom:smartphone-dashboard-agenda");
+assert.deepEqual(wasteCards[1].calendars, ["calendar.hausplan"]);
+assert.deepEqual(wasteCards[1].entities, ["sensor.abfall"]);
 
 const wasteCalendarWithoutSensorRegistry = { views: [{ sections: [{ cards: [] }] }] };
 applyNotificationOptions(wasteCalendarWithoutSensorRegistry, {
@@ -396,23 +426,57 @@ applyNotificationOptions(wasteCalendarWithoutSensorRegistry, {
   states: {
     "sensor.abfall": { state: "Biomüll morgen", attributes: { daysTo: 1 } },
     "calendar.hausplan": { state: "off", attributes: { friendly_name: "Haushaltstermine" } },
+    "calendar.privat": { state: "off", attributes: { friendly_name: "Privat" } },
+    "calendar.ausgeblendet": { state: "off", attributes: { friendly_name: "Müllabfuhr intern" } },
   },
   entities: {
-    "calendar.hausplan": { entity_id: "calendar.hausplan", platform: "waste_collection_schedule" },
+    "calendar.ausgeblendet": { hidden: true },
   },
 });
 const wasteCalendarFallbackPopup = wasteCalendarWithoutSensorRegistry.views[0].sections[0].cards
   .find((card) => card.hash === "#meldung-abfall");
-assert.deepEqual(popupContentCards(wasteCalendarFallbackPopup)[1].entities, [
-  { entity: "calendar.hausplan", color: "var(--success-color)" },
-]);
+const wasteAgenda = popupContentCards(wasteCalendarFallbackPopup)[1];
+assert.deepEqual(wasteAgenda.calendars, []);
+assert.deepEqual(wasteAgenda.calendar_candidates, ["calendar.hausplan", "calendar.privat"]);
+
+const agendaStart = new Date(2026, 10, 22);
+const agendaEnd = new Date(2026, 11, 20);
+const collection = { summary: "Braune Biotonne", start: { date: "2026-11-24" }, end: { date: "2026-11-25" } };
+const calendarEvents = await loadCalendarEvents({
+  async callWS(request) {
+    assert.deepEqual(request, {
+      type: "config/entity_registry/get_entries",
+      entity_ids: ["calendar.hausplan", "calendar.privat"],
+    });
+    return { "calendar.hausplan": { platform: "waste_collection_schedule" }, "calendar.privat": { platform: "caldav" } };
+  },
+  async callApi(method, path) {
+    assert.equal(method, "GET");
+    assert.match(path, /^calendars\/calendar\.hausplan\?start=/);
+    return [collection];
+  },
+}, wasteAgenda, agendaStart, agendaEnd);
+assert.deepEqual(calendarEvents, [collection]);
+const wasteStates = {
+  "sensor.abfall": { state: "unknown", attributes: {
+    "2026-11-21": "Alter Termin",
+    "2026-11-23": "Gelbe Tonne",
+    "Restmüll": "26.11.2026",
+    upcoming: [{ date: "2026-12-05", type: "Papier" }],
+    last_update: "2026-11-22",
+  } },
+};
+assert.deepEqual(agendaRows(wasteAgenda, wasteStates, calendarEvents, agendaStart, agendaEnd).map((row) => row.title),
+  ["Braune Biotonne"]);
+assert.deepEqual(agendaRows(wasteAgenda, wasteStates, [], agendaStart, agendaEnd).map((row) => row.title),
+  ["Gelbe Tonne", "Restmüll", "Papier"]);
 
 const parcelHass = {
   states: {
     "sensor.parcel_aggregator_incoming_parcels": {
       state: "2",
       attributes: { friendly_name: "Incoming parcels", parcels: [
-        { carrier: "DHL", barcode: "abc", sender: "Shop", status: "in_transit", delivered: false },
+        { carrier: "DHL", barcode: "abc", sender: "Shop", status: "in_transit", delivered: false, planned_from: "2026-11-27" },
         { carrier: "UPS", barcode: "def", sender: "Apple", status: "out_for_delivery", delivered: false, url: "https://example.org/track?name=a&code=b" },
       ] },
     },
@@ -458,9 +522,18 @@ assert.match(parcelHtml, /<progress[^>]*value="3" max="4"/);
 assert.match(parcelHtml, /href="https:\/\/example\.org\/track\?name=a&amp;code=b"/);
 assert.match(parcelHtml, /mdi:open-in-new/);
 assert.ok(parcelHtml.indexOf("USB-C Netzteil") < parcelHtml.indexOf("Apple"));
-assert.deepEqual(parcelPopupCards[1].entities, [
-  { entity: "calendar.parcel_aggregator_deliveries", color: "#0A84FF" },
-]);
+const parcelAgenda = parcelPopupCards[1];
+assert.deepEqual(parcelAgenda.calendars, ["calendar.parcel_aggregator_deliveries"]);
+const parcelEvent = { summary: "Amazon: Parcel amz", description: "Carrier: Amazon\nBarcode: amz",
+  start: { dateTime: "2026-11-24T10:00:00+01:00" }, end: { dateTime: "2026-11-24T14:00:00+01:00" } };
+const unidentifiedParcel = { summary: "UPS: Parcel 123456", start: "2026-11-25" };
+const deliveryRows = agendaRows(parcelAgenda, parcelHass.states,
+  [parcelEvent, parcelEvent, unidentifiedParcel], agendaStart, agendaEnd);
+assert.deepEqual(deliveryRows.map((row) => row.title), ["USB-C Netzteil + 1 weitere", "UPS", "Shop"]);
+assert.equal(deliveryRows[0].end.toISOString(), "2026-11-24T13:00:00.000Z");
+assert.equal(deliveryRows[2].allDay, true);
+const parcelFeaturePopup = parcelDashboard.views[0].sections[0].cards.find((card) => card.hash === "#pakete");
+assert.deepEqual(popupContentCards(parcelFeaturePopup)[1], parcelAgenda);
 
 const roomEditor = new SmartphoneDashboardStrategyEditor();
 roomEditor._hass = roomHass;
@@ -550,6 +623,7 @@ assert.equal(
 );
 assert.equal(typeof replacementRegistry.get("smartphone-dashboard-deferred-cards").prototype.setConfig, "function");
 assert.equal(typeof replacementRegistry.get("smartphone-dashboard-notification-controls").prototype.setConfig, "function");
+assert.equal(typeof replacementRegistry.get("smartphone-dashboard-agenda").prototype.setConfig, "function");
 globalThis.setTimeout = nativeSetTimeout;
 
 const DeferredCards = replacementRegistry.get("smartphone-dashboard-deferred-cards");
@@ -584,7 +658,13 @@ try {
   globalThis.location.hash = "#energie";
   lazyEnergy._onLocationChange();
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.deepEqual(lazyEnergy._cards.map((card) => card.config), [energyDistribution, energyReadings, energyLink]);
+  assert.deepEqual(lazyEnergy._cards.map((card) => card.config), [energyDistribution, energyReadings, livePower, energyLink]);
+  const updatedEnergyHass = {
+    ...energyHass,
+    states: { ...energyHass.states, "sensor.house_power": { state: "615" } },
+  };
+  lazyEnergy.hass = updatedEnergyHass;
+  assert.equal(lazyEnergy._cards[2].hass, updatedEnergyHass);
   assert.equal(energyRequests, requestsBeforeOpen + 1);
   globalThis.location.hash = "";
   lazyEnergy._onLocationChange();

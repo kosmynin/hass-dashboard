@@ -6,8 +6,10 @@
 
 import { ALERT_POPUPS, SmartphoneDashboardAlerts } from "./notification-cards.js";
 import { loadEnergyPopupCards } from "./energy-popup.js";
+import { SmartphoneDashboardAgenda } from "./agenda-cards.js";
+import { selectParcels } from "./parcel-selection.js";
 
-const STRATEGY_VERSION = "23.1.1";
+const STRATEGY_VERSION = "23.1.2";
 const CONFIG_VERSION = 26;
 
 const HOME_SECTION_LABELS = {
@@ -73,6 +75,8 @@ class SmartphoneDashboardDeferredCards extends HTMLElement {
     if (!config || !Array.isArray(config.cards)) throw new Error("Pop-up-Karten fehlen");
     if (this._config === config) return;
     this._config = config;
+    this._refreshOnOpen = config.card_source === "energy" ||
+      config.cards.some((card) => card.type === "custom:smartphone-dashboard-agenda");
     this._clearCards();
     this._activateIfNeeded();
   }
@@ -89,7 +93,7 @@ class SmartphoneDashboardDeferredCards extends HTMLElement {
 
   disconnectedCallback() {
     for (const event of POPUP_NAVIGATION_EVENTS) window.removeEventListener(event, this._onLocationChange);
-    if (this._config?.card_source === "energy" && this._mounted) this._clearCards();
+    if (this._refreshOnOpen && this._mounted) this._clearCards();
   }
 
   getCardSize() {
@@ -112,7 +116,7 @@ class SmartphoneDashboardDeferredCards extends HTMLElement {
     const config = this._config;
     const energy = config.card_source === "energy";
     if (!this._isRequested()) {
-      if (energy && this._mounted) this._clearCards();
+      if (this._refreshOnOpen && this._mounted) this._clearCards();
       return;
     }
     if (this._mounting || (energy && !this._hass)) return;
@@ -267,97 +271,6 @@ class SmartphoneDashboardNotificationControls extends HTMLElement {
     if (this._statusNode.textContent !== status) this._statusNode.textContent = status;
     for (const button of this._buttons) button.disabled = Boolean(this._busy || !this._hass);
   }
-}
-
-// Button Card evaluates the view in its own scope.
-function selectParcels(states, entityIds, contentEntityIds) {
-  const designs = {
-    registered: { label: "Registriert", step: 1, icon: "mdi:package-variant-closed", color: "#0A84FF" },
-    in_transit: { label: "Unterwegs", step: 2, icon: "mdi:truck-fast", color: "#0A84FF" },
-    out_for_delivery: { label: "In Zustellung", step: 3, icon: "mdi:truck-delivery", color: "var(--success-color)" },
-    at_pickup_point: { label: "Abholbereit", step: 4, icon: "mdi:package-variant", color: "#FF9F0A" },
-    returning: { label: "Rücksendung", step: 2, icon: "mdi:package-variant-remove", color: "var(--error-color)" },
-    problem: { label: "Problem", step: 2, icon: "mdi:alert-circle-outline", color: "var(--error-color)" },
-    unknown: { label: "Status unbekannt", step: 1, icon: "mdi:package-variant-closed", color: "#8E8E93" },
-  };
-  const parcelsFrom = (ids) => ids.flatMap((id) => {
-    const state = states[id];
-    const parcels = state?.attributes?.parcels;
-    return ["unavailable", "unknown"].includes(state?.state) || !Array.isArray(parcels) ? [] : parcels;
-  });
-  const clean = (value) => {
-    let text = typeof value === "string" ? value.replace(/\u200b/g, " ").replace(/\s+/g, " ").trim() : "";
-    const placeholder = text.match(/\(\s*(?:not\s+sel(?:ected)?|not\s+set|none|null|unknown|n\/?a)\b/i);
-    if (placeholder) text = text.slice(0, placeholder.index);
-    else if ((text.match(/\(/g) || []).length > (text.match(/\)/g) || []).length) text = text.slice(0, text.lastIndexOf("("));
-    text = text.replace(/^[\s\-–—·,:;()]+|[\s\-–—·,:;()]+$/g, "");
-    return /^(?:none|null|unknown|unbekannt|not set|not selected|n\/?a)$/i.test(text) ? "" : text;
-  };
-  const contentLabel = (parcel) => {
-    for (const candidate of [parcel.content_title, parcel.contents, parcel.items, parcel.raw?.items]) {
-      const items = new Map();
-      for (const item of Array.isArray(candidate) ? candidate : [candidate]) {
-        const label = clean(item) || clean(item?.title) || clean(item?.name);
-        if (label && !items.has(label.toLowerCase())) items.set(label.toLowerCase(), label);
-      }
-      if (items.size) {
-        const first = items.values().next().value;
-        return items.size > 1 ? first + " + " + (items.size - 1) + " weitere" : first;
-      }
-    }
-    return "";
-  };
-  const statusOf = (parcel) => String(parcel.status || "unknown").trim().toLowerCase();
-  const rank = (parcel) => {
-    const status = statusOf(parcel);
-    const immediate = { at_pickup_point: 0, out_for_delivery: 1, problem: 2 };
-    if (Object.hasOwn(immediate, status)) return immediate[status];
-    if (parcel.planned_from || parcel.planned_to) return 3;
-    const later = { in_transit: 4, returning: 5, registered: 6 };
-    return Object.hasOwn(later, status) ? later[status] : 7;
-  };
-  const time = (parcel) => {
-    for (const value of [parcel.planned_from, parcel.planned_to]) {
-      const timestamp = Date.parse(value || "");
-      if (Number.isFinite(timestamp)) return timestamp;
-    }
-    return Number.MAX_SAFE_INTEGER;
-  };
-  const identity = (parcel) => [parcel.carrier, parcel.barcode, parcel.sender].join("\0").toLowerCase();
-  const compare = (a, b) => rank(a) - rank(b) || time(a) - time(b) ||
-    (identity(a) < identity(b) ? -1 : Number(identity(a) > identity(b)));
-  const parcels = parcelsFrom(entityIds)
-    .filter((item) => item && item.delivered !== true && statusOf(item) !== "delivered")
-    .sort(compare);
-  const contents = new Map();
-  for (const candidate of parcelsFrom(contentEntityIds)) {
-    if (!candidate) continue;
-    const barcode = String(candidate.barcode || "").trim();
-    if (!barcode || contents.has(barcode)) continue;
-    const label = contentLabel(candidate);
-    if (label) contents.set(barcode, label);
-  }
-  const unique = new Map();
-  for (const parcel of parcels) {
-    const barcode = String(parcel.barcode || "").trim();
-    const key = barcode || identity(parcel) + String(parcel.planned_from || "");
-    const preferred = unique.get(key);
-    unique.set(key, preferred ? {
-      ...preferred,
-      sender: clean(preferred.sender) || parcel.sender,
-      url: preferred.url || parcel.url,
-    } : parcel);
-  }
-  return [...unique.values()].map((parcel) => {
-    const barcode = String(parcel.barcode || "").trim();
-    const status = statusOf(parcel);
-    const carrier = clean(parcel.carrier);
-    return {
-      parcel, status, carrier,
-      label: contentLabel(parcel) || contents.get(barcode) || clean(parcel.sender) || carrier || "Paket",
-      design: Object.hasOwn(designs, status) ? designs[status] : designs.unknown,
-    };
-  });
 }
 
 function parcelSelectionExpression(entityIds, contentEntityIds) {
@@ -861,25 +774,32 @@ function parcelCalendarEntities(hass) {
     .filter(([entityId, state]) =>
       entityId.startsWith("calendar.") &&
       isEntityVisible(hass, entityId, registry) &&
-      /parcel|paket|delivery|liefer/i.test(`${entityId} ${state?.attributes?.friendly_name || ""}`),
+      (registry.get(entityId)?.platform === "parcel_aggregator" ||
+        /parcel|paket|deliver|liefer/i.test(`${entityId} ${state?.attributes?.friendly_name || ""}`)),
     )
     .map(([entityId]) => entityId)
     .sort((left, right) => left.localeCompare(right, "de"));
 }
 
-function notificationCalendarEntities(hass, wasteEntityIds = []) {
+const WASTE_NAME = /abfall|müll|muell|entsorg|waste|trash|garbage|recycl/i;
+
+function wasteAgendaCard(hass, wasteEntityIds) {
   const registry = entityRegistryMap(hass);
   const candidates = dashboardEntityIndex(hass).stateEntries
-    .filter(([entityId, state]) =>
-      entityId.startsWith("calendar.") &&
-      isEntityVisible(hass, entityId, registry),
-    )
+    .filter(([entityId]) => entityId.startsWith("calendar.") && isEntityVisible(hass, entityId, registry))
     .map(([entityId, state]) => ({ entityId, state, entry: registry.get(entityId) }));
+  if (!wasteEntityIds.length) {
+    wasteEntityIds = dashboardEntityIndex(hass).stateEntries
+      .filter(([id, state]) => id.startsWith("sensor.") && isEntityVisible(hass, id, registry) &&
+        (registry.get(id)?.platform === "waste_collection_schedule" ||
+          WASTE_NAME.test(`${id} ${state.attributes?.friendly_name || ""}`)))
+      .map(([id]) => id);
+  }
+  wasteEntityIds = wasteEntityIds.filter((id) => isEntityVisible(hass, id, registry));
   const wasteEntries = wasteEntityIds.map((entityId) => registry.get(entityId)).filter(Boolean);
   const linked = candidates.filter(({ entry }) => entry && wasteEntries.some((wasteEntry) =>
     (entry.device_id && entry.device_id === wasteEntry.device_id) ||
-    (entry.config_entry_id && entry.config_entry_id === wasteEntry.config_entry_id) ||
-    (entry.platform && entry.platform === wasteEntry.platform),
+    (entry.config_entry_id && entry.config_entry_id === wasteEntry.config_entry_id),
   ));
   const integrationCalendars = candidates.filter(({ entry }) =>
     [entry?.platform, entry?.integration]
@@ -889,10 +809,26 @@ function notificationCalendarEntities(hass, wasteEntityIds = []) {
     ? linked
     : integrationCalendars.length
       ? integrationCalendars
-      : candidates.filter(({ entityId, state }) => /abfall|müll|muell|entsorg|waste|trash|recycl/i.test(
+      : candidates.filter(({ entityId, state }) => WASTE_NAME.test(
         `${entityId} ${state?.attributes?.friendly_name || ""}`,
       ));
-  return selected.map(({ entityId }) => entityId).sort((a, b) => a.localeCompare(b, "de"));
+  return {
+    type: "custom:smartphone-dashboard-agenda",
+    kind: "waste",
+    entities: wasteEntityIds,
+    calendars: selected.map(({ entityId }) => entityId),
+    calendar_candidates: candidates.map(({ entityId }) => entityId),
+  };
+}
+
+function parcelAgendaCard(hass, entities, calendars) {
+  return {
+    type: "custom:smartphone-dashboard-agenda",
+    kind: "parcel",
+    entities,
+    calendars,
+    content_entities: parcelSourceEntityIds(hass),
+  };
 }
 
 function escapeHtml(value) {
@@ -978,8 +914,6 @@ function applyNotificationOptions(dashboard, config, hass) {
   const list = (category = "") => ({ type: "custom:smartphone-dashboard-alerts", category });
   const controls = { type: "custom:smartphone-dashboard-notification-controls" };
   const wasteEntities = csv(notificationSetting(config, hass, "waste_entities"));
-  const wasteCalendars = notificationCalendarEntities(hass, wasteEntities);
-  const parcelCalendars = parcelCalendarEntities(hass);
 
   cards.push(bubblePopup("#meldungen", {
     button_type: "name", name: "Meldungen", icon: "mdi:bell-badge-outline",
@@ -987,23 +921,9 @@ function applyNotificationOptions(dashboard, config, hass) {
 
   for (const [category, [hash, name, icon]] of Object.entries(ALERT_POPUPS)) {
     const content = category === "parcel"
-      ? [parcelOverviewCard(parcelSensorEntities(hass), hass)]
+      ? parcelFeatureCards({ entities: parcelSensorEntities(hass) }, hass)
       : [list(category)];
-    const calendars = category === "waste" ? wasteCalendars : category === "parcel" ? parcelCalendars : [];
-    if (calendars.length) {
-      const waste = category === "waste";
-      content.push({
-        type: "custom:bubble-card",
-        card_type: "calendar",
-        entities: calendars.map((entity) => ({ entity, color: waste ? "var(--success-color)" : "#0A84FF" })),
-        days: waste ? 45 : 30,
-        limit: waste ? 6 : 8,
-        card_layout: "normal",
-        rows: waste ? 4 : 5,
-        show_end: !waste,
-        show_progress: false,
-      });
-    }
+    if (category === "waste") content.push(wasteAgendaCard(hass, wasteEntities));
     cards.push(bubblePopup(hash, { button_type: "name", name, icon }, [...content, controls]));
   }
   return dashboard;
@@ -1913,17 +1833,7 @@ function parcelFeatureCards(item, hass) {
   const calendars = parcelCalendarEntities(hass);
   if (!item.entities.length && !calendars.length) return [];
   const cards = item.entities.length ? [parcelOverviewCard(item.entities, hass)] : [];
-  if (calendars.length) cards.push({
-    type: "custom:bubble-card",
-    card_type: "calendar",
-    entities: calendars.map((entity) => ({ entity, color: "#0A84FF" })),
-    days: 30,
-    limit: 8,
-    card_layout: "normal",
-    rows: 5,
-    show_end: true,
-    show_progress: false,
-  });
+  cards.push(parcelAgendaCard(hass, item.entities, calendars));
   return cards;
 }
 
@@ -3551,6 +3461,7 @@ function registerDashboardComponents(registry) {
     ["smartphone-dashboard-deferred-cards", SmartphoneDashboardDeferredCards],
     ["smartphone-dashboard-notification-controls", SmartphoneDashboardNotificationControls],
     ["smartphone-dashboard-alerts", SmartphoneDashboardAlerts],
+    ["smartphone-dashboard-agenda", SmartphoneDashboardAgenda],
   ]) {
     if (!registry.get(tag)) registry.define(tag, component);
   }

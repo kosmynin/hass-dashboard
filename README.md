@@ -45,8 +45,9 @@ vollständige Beschreibung und Handlungsempfehlung. Abfallmeldungen zeigen einen
 eindeutigen Namen und den nächsten passenden Termin. Satzförmige Zustände wie
 „Restmüll wird abgeholt.“ werden dabei mit „Restmüll“ zusammengeführt. Meldungen
 erscheinen nur innerhalb des konfigurierbaren
-Vorlaufs und binden passende `calendar.*`-Entitäten darunter als kompakten
-Bubble-Card-Kalender mit bis zu sechs Terminen der kommenden 45 Tage ein.
+Vorlaufs. Im Abfall-Pop-up stehen darunter bis zu sechs Abholtermine der
+kommenden 45 Tage. Liefert der Kalender keine Termine, werden die datierten
+Abholungen des Abfallsensors verwendet.
 Abholrhythmen werden ausschließlich in Waste Collection Schedule konfiguriert;
 das Dashboard filtert sie nicht erneut. Der Kalender wird bevorzugt über die
 Integration des ausgewählten Abfallsensors zugeordnet, sodass auch neutral
@@ -62,8 +63,9 @@ und problematische Sendungen haben Vorrang. Danach entscheidet der früheste
 Liefertermin. Das **Paket-Pop-up** zeigt alle aktiven Sendungen mit Inhalt oder
 Absender, Zusteller, Status, Lieferfenster und Tracking-Link. Mehrfach erfasste
 Trackingnummern werden zusammengeführt. Der
-Fortschrittsbalken sitzt im Paket-Pop-up und in der Live Activity. Ein vorhandener
-`calendar.parcel_aggregator_deliveries` wird als Bubble-Card-Kalender ergänzt.
+Fortschrittsbalken sitzt im Paket-Pop-up und in der Live Activity. Die
+Liefertermine aus dem Paketkalender zeigen den verfügbaren Inhalt, sonst
+Absender oder Zusteller. Lieferfenster aus Paket-Sensoren ergänzen den Kalender.
 Zugestellte Sendungen verschwinden automatisch.
 Auf dem Sperrbildschirm ist Platz für bis zu drei Meldungs-Aktivitäten. NINA
 und USV werden zuerst berücksichtigt. Sind mehr Meldungen aktiv, führt die
@@ -101,6 +103,11 @@ Sie übernimmt die Strom-, Wasser- und Gasquellen aus dem Home-Assistant-Energie
 Wasser und Gas erscheinen automatisch, sobald dort die jeweiligen Zähler
 eingerichtet sind. Verfügbare Messwerte für Hausleistung, PV-Leistung,
 Speicher-Ladestand sowie Wasser- und Gasdurchfluss stehen darunter.
+
+Der [aktuelle Leistungsfluss](https://www.home-assistant.io/dashboards/energy/#power-flow-sankey-graph)
+zeigt die momentane Hausleistung sowie die Flüsse zwischen Netz, PV, Speicher
+und Verbrauchern mit ihren Leistungswerten. Dafür braucht Home Assistant ab
+2025.12 mindestens einen Leistungssensor (W oder kW) in den Energie-Einstellungen.
 
 Das Pop-up übernimmt die Quellen beim Öffnen. Über **Energie-Dashboard öffnen**
 ist die vollständige Auswertung erreichbar. In den Strategy-Einstellungen

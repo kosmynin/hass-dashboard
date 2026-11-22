@@ -14,7 +14,7 @@ def test_manifest_and_hacs():
     hacs = json.loads((ROOT / "hacs.json").read_text())
     assert manifest["domain"] == "smartphone_dashboard"
     assert manifest["config_flow"] is True
-    assert manifest["version"] == "23.1.1"
+    assert manifest["version"] == "23.1.2"
     assert hacs["name"] == "Smartphone Dashboard"
     assert hacs["zip_release"] is True
     assert hacs["filename"] == "smartphone_dashboard.zip"
@@ -165,7 +165,7 @@ def test_generic_base_uses_shared_alerts_and_bubble_rooms():
     assert "custom:auto-entities" not in strategy
     assert 'sectionHeading("notifications",' in strategy
     assert 'sectionHeading("quick_actions",' in strategy
-    assert 'card_type: "calendar"' in strategy
+    assert 'type: "custom:smartphone-dashboard-agenda"' in strategy
     assert 'homeSectionKey(card) === "quick_actions"' in strategy
     assert "function lightSupportsBrightness" in strategy
     assert 'dimmable ? "slider" : "switch"' in strategy

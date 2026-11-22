@@ -1,4 +1,5 @@
-const ENERGY_SOURCE_TYPES = new Set(["grid", "solar", "battery", "home", "water", "gas"]);
+const ELECTRICITY_TYPES = new Set(["grid", "solar", "battery", "home"]);
+const ENERGY_SOURCE_TYPES = new Set([...ELECTRICITY_TYPES, "water", "gas"]);
 
 function openEnergyDashboard() {
   const tapAction = { action: "navigate", navigation_path: "/energy" };
@@ -15,6 +16,36 @@ function openEnergyDashboard() {
 
 function hint(content) {
   return { type: "markdown", content };
+}
+
+function livePowerCard(sources, version) {
+  const electricity = sources.filter((source) => ELECTRICITY_TYPES.has(source.type));
+  if (!electricity.length) return null;
+
+  const [year, month] = String(version ?? "").split(".").map(Number);
+  if (!(year > 2025 || (year === 2025 && month >= 12))) {
+    return hint("Das Live-Diagramm für den Leistungsfluss ist ab Home Assistant 2025.12 verfügbar.");
+  }
+
+  const hasPower = electricity.some((source) =>
+    [source, source.power_config].some((settings) =>
+      Object.entries(settings ?? {}).some(([key, entity]) =>
+        /^stat_rate(?:_|$)/.test(key) && typeof entity === "string" && entity.trim(),
+      ),
+    ),
+  );
+  if (!hasPower) {
+    return hint("Für den aktuellen Leistungsfluss hinterlege Strom-Leistungssensoren (W oder kW) in den Energie-Einstellungen.");
+  }
+
+  return {
+    type: "power-sankey",
+    title: "Aktueller Leistungsfluss",
+    collection_key: "energy_dashboard_now",
+    layout: "vertical",
+    show_values: true,
+    max_devices: 5,
+  };
 }
 
 function energyPopupCards(prefs, hass, isVisible) {
@@ -53,6 +84,8 @@ function energyPopupCards(prefs, hass, isVisible) {
     collection_key: "energy_smartphone_dashboard",
   }];
   if (readings.length) cards.push({ type: "grid", columns: 2, square: false, cards: readings });
+  const livePower = livePowerCard(sources, hass.config?.version);
+  if (livePower) cards.push(livePower);
   return [...cards, dashboardLink];
 }
 

@@ -1,3 +1,8 @@
+# Version 23.1.2
+
+- Das Energie-Pop-up zeigt zusätzlich zur runden Tagesübersicht den aktuellen Leistungsfluss mit der momentanen Hausleistung. Die native Live-Karte übernimmt die Leistungssensoren aus den Energie-Einstellungen.
+- Liefertermine zeigen den Paketinhalt, sonst Absender oder Zusteller. Das Abfall-Pop-up lädt die kommenden Abholungen aus dem Kalender oder den Abfallsensoren.
+
 # Version 23.1.1
 
 - Das Energie-Pop-up verwendet die native Karte **Energieverteilung** als Hauptansicht. Konfigurierte Wasser- und Gaszähler erscheinen direkt in der Karte. Die Kacheln darunter zeigen verfügbare Live-Messwerte und den Ladestand.
