@@ -1,3 +1,7 @@
+# Version 23.1.1
+
+- Das Energie-Pop-up verwendet die native Karte **Energieverteilung** als Hauptansicht. Konfigurierte Wasser- und Gaszähler erscheinen direkt in der Karte. Die Kacheln darunter zeigen verfügbare Live-Messwerte und den Ladestand.
+
 # Version 23.1.0
 
 - Unter **Weitere Bereiche → Energie** öffnet sich eine kompakte Übersicht mit Hausverbrauch, PV-Leistung und Ladezustand der Speicher. Der Live-Stromfluss und die Energiebilanz verwenden die Quellen des eingebauten Energie-Dashboards.

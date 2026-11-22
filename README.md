@@ -95,18 +95,16 @@ USV-Meldung erzeugen.
 
 ## Energie
 
-**Weitere Bereiche → Energie** zeigt die aktuelle Hausleistung, PV-Leistung,
-den Speicher-Ladestand und den Stromfluss zwischen Netz, PV, Speicher und
-Verbrauchern, soweit diese Werte im Home-Assistant-Energie-Dashboard
-eingerichtet sind. Das Pop-up übernimmt die Quellen beim Öffnen. In den
-Strategy-Einstellungen lässt sich der Bereich ausblenden.
+**Weitere Bereiche → Energie** zeigt die heutige Bilanz mit der eingebauten
+Karte [Energieverteilung](https://www.home-assistant.io/dashboards/energy/#energy-distribution).
+Sie übernimmt die Strom-, Wasser- und Gasquellen aus dem Home-Assistant-Energie-Dashboard.
+Wasser und Gas erscheinen automatisch, sobald dort die jeweiligen Zähler
+eingerichtet sind. Verfügbare Messwerte für Hausleistung, PV-Leistung,
+Speicher-Ladestand sowie Wasser- und Gasdurchfluss stehen darunter.
 
-Der [eingebaute Stromfluss](https://www.home-assistant.io/dashboards/energy/#power-flow-sankey-graph)
-benötigt Home Assistant ab 2025.12 und konfigurierte Leistungssensoren in W
-oder kW. Für den Ladestand wird der konfigurierte Speicher-Ladezustand
-verwendet. Sind nur Energiezähler in kWh eingerichtet, zeigt das Pop-up die
-Energiebilanz. Die vollständige Auswertung bleibt über die Schaltfläche
-**Energie-Dashboard öffnen** erreichbar.
+Das Pop-up übernimmt die Quellen beim Öffnen. Über **Energie-Dashboard öffnen**
+ist die vollständige Auswertung erreichbar. In den Strategy-Einstellungen
+lässt sich der Bereich ausblenden.
 
 ## Migration und Benachrichtigungen
 

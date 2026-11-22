@@ -217,7 +217,9 @@ const energyPrefs = {
     { type: "home", stat_rate: "sensor.house_power" },
     { type: "solar", stat_rate: "sensor.pv_power" },
     { type: "solar", stat_rate: "sensor.hidden_pv_power" },
-    { type: "grid", power_config: { stat_rate_from: "sensor.grid_import", stat_rate_to: "sensor.grid_export" } },
+    { type: "grid", stat_energy_from: "sensor.grid_energy" },
+    { type: "water", stat_energy_from: "sensor.water_total", stat_rate: "sensor.water_flow" },
+    { type: "gas", stat_energy_from: "sensor.gas_total", stat_rate: "sensor.gas_flow" },
   ],
 };
 let energyRequests = 0;
@@ -229,6 +231,8 @@ const energyHass = {
     "sensor.pv_power": { state: "0" },
     "sensor.hidden_pv_power": { state: "230" },
     "sensor.storage_soc": { state: "72" },
+    "sensor.water_flow": { state: "0" },
+    "sensor.gas_flow": { state: "0.4" },
   },
   entities: {
     "sensor.hidden_pv_power": { entity_id: "sensor.hidden_pv_power", hidden: true },
@@ -239,34 +243,34 @@ const energyHass = {
     return currentEnergyPrefs;
   },
 };
-const otherwiseInvisible = (entity) => !energyHass.entities[entity]?.hidden;
-const [energyReadings, powerFlow, energyLink] = await loadEnergyPopupCards(energyHass, otherwiseInvisible);
+const isEnergyVisible = (entity) => !energyHass.entities[entity]?.hidden;
+const [energyDistribution, energyReadings, energyLink] = await loadEnergyPopupCards(energyHass, isEnergyVisible);
+assert.deepEqual(energyDistribution, {
+  type: "energy-distribution",
+  title: "Energieverteilung",
+  collection_key: "energy_smartphone_dashboard",
+});
 assert.equal(energyReadings.columns, 2);
 assert.deepEqual(energyReadings.cards.map((card) => card.entity),
-  ["sensor.house_power", "sensor.pv_power", "sensor.storage_soc"]);
-assert.equal(powerFlow.type, "power-sankey");
-assert.equal(powerFlow.collection_key, "energy_dashboard_now");
-assert.equal(powerFlow.layout, "vertical");
+  ["sensor.house_power", "sensor.pv_power", "sensor.storage_soc", "sensor.water_flow", "sensor.gas_flow"]);
 assert.equal(energyLink.button_action.tap_action.navigation_path, "/energy");
-const onlyGridPower = { energy_sources: [energyPrefs.energy_sources.at(-1)] };
-assert.equal(energyPopupCards(onlyGridPower, energyHass, otherwiseInvisible)[0].type, "power-sankey");
-const energyOnly = { energy_sources: [
-  { type: "grid", stat_energy_from: "sensor.grid_energy" },
-  { type: "gas", stat_rate: "sensor.gas_rate" },
-] };
-const [energyOnlyHint, energyBalance] = energyPopupCards(energyOnly, energyHass, otherwiseInvisible);
-assert.match(energyOnlyHint.content, /Leistungssensoren/);
-assert.equal(energyBalance.type, "energy-distribution");
-const olderEnergyHass = { ...energyHass, config: { version: "2025.11.0" } };
-assert.match(energyPopupCards(onlyGridPower, olderEnergyHass, otherwiseInvisible)[0].content, /2025\.12/);
+const waterMeter = { type: "water", stat_energy_from: "sensor.water_total" };
+const gasMeter = { type: "gas", stat_energy_from: "sensor.gas_total" };
+const olderEnergyHass = { config: { version: "2025.7.0" }, states: {} };
+for (const sources of [[waterMeter], [gasMeter], [waterMeter, gasMeter]]) {
+  assert.deepEqual(
+    energyPopupCards({ energy_sources: sources }, olderEnergyHass, isEnergyVisible),
+    [energyDistribution, energyLink],
+  );
+}
 const fetchErrorCards = await loadEnergyPopupCards({
   async callWS() { throw new Error("offline"); },
-}, otherwiseInvisible);
+}, isEnergyVisible);
 assert.match(fetchErrorCards[0].content, /konnte nicht geladen werden/);
 const missingConfigCards = await loadEnergyPopupCards({
   async callWS() { throw { code: "not_found" }; },
-}, otherwiseInvisible);
-assert.match(missingConfigCards[0].content, /keine Stromquellen/);
+}, isEnergyVisible);
+assert.match(missingConfigCards[0].content, /keine Quellen für Strom, Wasser oder Gas/);
 
 globalThis.location = {
   pathname: "/handy/handy",
@@ -580,16 +584,16 @@ try {
   globalThis.location.hash = "#energie";
   lazyEnergy._onLocationChange();
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.equal(lazyEnergy._cards[1].config.type, "power-sankey");
+  assert.deepEqual(lazyEnergy._cards.map((card) => card.config), [energyDistribution, energyReadings, energyLink]);
   assert.equal(energyRequests, requestsBeforeOpen + 1);
   globalThis.location.hash = "";
   lazyEnergy._onLocationChange();
   assert.equal(lazyEnergy._cards.length, 0);
-  currentEnergyPrefs = energyOnly;
+  currentEnergyPrefs = { energy_sources: [waterMeter, gasMeter] };
   globalThis.location.hash = "#energie";
   lazyEnergy._onLocationChange();
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.equal(lazyEnergy._cards[1].config.type, "energy-distribution");
+  assert.deepEqual(lazyEnergy._cards.map((card) => card.config), [energyDistribution, energyLink]);
   assert.equal(energyRequests, requestsBeforeOpen + 2);
 } finally {
   globalThis.location.hash = "";

@@ -7,7 +7,7 @@
 import { ALERT_POPUPS, SmartphoneDashboardAlerts } from "./notification-cards.js";
 import { loadEnergyPopupCards } from "./energy-popup.js";
 
-const STRATEGY_VERSION = "23.1.0";
+const STRATEGY_VERSION = "23.1.1";
 const CONFIG_VERSION = 26;
 
 const HOME_SECTION_LABELS = {

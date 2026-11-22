@@ -1,4 +1,4 @@
-const ELECTRICITY_TYPES = new Set(["grid", "solar", "battery", "home"]);
+const ENERGY_SOURCE_TYPES = new Set(["grid", "solar", "battery", "home", "water", "gas"]);
 
 function openEnergyDashboard() {
   const tapAction = { action: "navigate", navigation_path: "/energy" };
@@ -17,38 +17,26 @@ function hint(content) {
   return { type: "markdown", content };
 }
 
-function supportsLivePower(version) {
-  const [year, month] = String(version || "").split(".").map(Number);
-  return year > 2025 || (year === 2025 && month >= 12);
-}
-
-function hasPowerSensor(source) {
-  return [source, source.power_config].some((config) =>
-    Object.entries(config || {}).some(([key, value]) =>
-      /^stat_rate(?:_|$)/.test(key) && typeof value === "string" && value.trim(),
-    ),
-  );
-}
-
 function energyPopupCards(prefs, hass, isVisible) {
   const sources = (Array.isArray(prefs?.energy_sources) ? prefs.energy_sources : [])
-    .filter((source) => ELECTRICITY_TYPES.has(source?.type));
+    .filter((source) => ENERGY_SOURCE_TYPES.has(source?.type));
   const dashboardLink = openEnergyDashboard();
   if (!sources.length) {
     return [
-      hint("Im Energie-Dashboard sind noch keine Stromquellen eingerichtet. Hinterlege dort Netz, PV, Speicher oder Hausverbrauch."),
+      hint("Im Energie-Dashboard sind noch keine Quellen für Strom, Wasser oder Gas eingerichtet."),
       dashboardLink,
     ];
   }
 
-  // Use the entity states for the glanceable readings and let Home Assistant
-  // calculate totals, direction and watt conversion in the flow chart.
+  // The native card calculates today's totals. Tiles show current sensor values.
   const readings = [];
   const seen = new Set();
   for (const [type, key, icon, color] of [
     ["home", "stat_rate", "mdi:home-lightning-bolt-outline", "blue"],
     ["solar", "stat_rate", "mdi:solar-power", "amber"],
     ["battery", "stat_soc", undefined, "green"],
+    ["water", "stat_rate", "mdi:water", "cyan"],
+    ["gas", "stat_rate", "mdi:fire", "orange"],
   ]) {
     for (const source of sources) {
       const entity = source[key];
@@ -59,30 +47,12 @@ function energyPopupCards(prefs, hass, isVisible) {
     }
   }
 
-  const cards = [];
+  const cards = [{
+    type: "energy-distribution",
+    title: "Energieverteilung",
+    collection_key: "energy_smartphone_dashboard",
+  }];
   if (readings.length) cards.push({ type: "grid", columns: 2, square: false, cards: readings });
-  const supportsLive = supportsLivePower(hass.config?.version);
-  if (supportsLive && sources.some(hasPowerSensor)) {
-    cards.push({
-      type: "power-sankey",
-      title: "Stromfluss jetzt",
-      collection_key: "energy_dashboard_now",
-      layout: "vertical",
-      show_values: true,
-      max_devices: 5,
-    });
-  } else {
-    cards.push(
-      hint(supportsLive
-        ? "Für den Live-Stromfluss hinterlege Leistungssensoren (W oder kW) in den Energie-Einstellungen."
-        : "Der Live-Stromfluss ist ab Home Assistant 2025.12 verfügbar."),
-      {
-        type: "energy-distribution",
-        title: "Energiebilanz",
-        collection_key: "energy_smartphone_dashboard",
-      },
-    );
-  }
   return [...cards, dashboardLink];
 }
 
