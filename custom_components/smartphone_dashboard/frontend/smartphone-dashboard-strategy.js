@@ -6,7 +6,7 @@
 
 import { ALERT_POPUPS, SmartphoneDashboardAlerts } from "./notification-cards.js";
 
-const STRATEGY_VERSION = "23.0.0";
+const STRATEGY_VERSION = "23.0.1";
 const CONFIG_VERSION = 26;
 
 const HOME_SECTION_LABELS = {

@@ -44,11 +44,14 @@ class SmartphoneDashboardAlerts extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this.shadowRoot.innerHTML = `
       <style>
-        :host { display: block; }
-        .list { display: grid; gap: var(--vertical-stack-card-gap, 8px); }
+        :host { display: block; min-inline-size: 0; max-inline-size: 100%; contain: inline-size; }
+        .list {
+          display: grid; grid-template-columns: minmax(0, 1fr);
+          gap: var(--vertical-stack-card-gap, 8px);
+        }
         .row {
           display: flex; align-items: center; gap: 10px;
-          min-height: 48px; box-sizing: border-box; padding: 6px 12px 6px 6px;
+          min-inline-size: 0; min-height: 48px; box-sizing: border-box; padding: 6px 12px 6px 6px;
           border-radius: var(--bubble-button-border-radius, var(--bubble-border-radius, 999px));
           background: var(--bubble-button-main-background-color, var(--bubble-main-background-color, var(--secondary-background-color)));
           color: var(--primary-text-color); text-decoration: none;
@@ -59,7 +62,7 @@ class SmartphoneDashboardAlerts extends HTMLElement {
           border-radius: var(--bubble-button-icon-border-radius, 50%);
           background: var(--bubble-button-icon-background-color, var(--card-background-color));
         }
-        .copy { min-width: 0; font-size: 14px; line-height: 1.35; }
+        .copy { flex: 1; min-inline-size: 0; font-size: 14px; line-height: 1.35; }
         .title { font-weight: 600; overflow-wrap: anywhere; }
         .detail, .instruction { color: var(--secondary-text-color); overflow-wrap: anywhere; }
         .compact .title, .compact .detail { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

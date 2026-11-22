@@ -302,9 +302,9 @@ def parcel_alert(
         "fingerprint": f"parcel:{carrier.casefold()}:{identity}",
         "title": "Nächstes Paket",
         "detail": " · ".join(
-            [label, {"registered": "Registriert", "out_for_delivery": "In Zustellung"}.get(
+            [{"registered": "Registriert", "out_for_delivery": "In Zustellung"}.get(
                 status, PARCEL_STATUS_CRITICAL_TEXT.get(status, "Status unbekannt")
-            ), *details]
+            ), *details, label]
         ),
         "message": f"📦 {label}" + (f": {' · '.join(details)}" if details else ""),
         "critical_text": PARCEL_STATUS_CRITICAL_TEXT.get(

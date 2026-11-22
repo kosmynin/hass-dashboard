@@ -174,7 +174,7 @@ def test_parcel_contract_becomes_stable_german_live_alert():
         "fingerprint": "parcel:dhl:00340434161094000000",
         "message": "📦 Beispielshop: heute 14:00–16:00",
         "title": "Nächstes Paket",
-        "detail": "Beispielshop · In Zustellung · heute 14:00–16:00",
+        "detail": "In Zustellung · heute 14:00–16:00 · Beispielshop",
         "critical_text": "Heute",
         "progress": 3,
         "progress_max": 4,
@@ -254,7 +254,7 @@ def test_dashboard_and_push_share_combined_ups_and_waste_alerts():
     parcel_alerts = normalized_alerts(namespace["_parcel_alerts"](fake, now))
     assert len(parcel_alerts) == 1
     assert parcel_alerts[0]["fingerprint"] == "parcel:ups:second"
-    assert dashboard_alert_rows(parcel_alerts, lambda _entity: True)[0]["detail"] == "UPS · Abholbereit"
+    assert dashboard_alert_rows(parcel_alerts, lambda _entity: True)[0]["detail"] == "Abholbereit · UPS"
     assert dashboard_alert_rows(
         [{**parcel_alerts[0], "related_entity_id": "sensor.private_content"}],
         lambda entity: entity != "sensor.private_content",

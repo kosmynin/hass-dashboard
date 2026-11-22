@@ -1,3 +1,7 @@
+# Version 23.0.1
+
+- Lange Paketnamen halten sich an die Breite der Meldungsspalte. In der Vorschau stehen Status und Liefertermin vor dem Produktnamen. Das Paket-Pop-up zeigt den vollständigen Namen.
+
 # Version 23.0.0
 
 ## Dashboard und Bedienung
