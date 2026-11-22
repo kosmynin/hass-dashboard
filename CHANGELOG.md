@@ -1,3 +1,8 @@
+# Version 23.1.0
+
+- Unter **Weitere Bereiche → Energie** öffnet sich eine kompakte Übersicht mit Hausverbrauch, PV-Leistung und Ladezustand der Speicher. Der Live-Stromfluss und die Energiebilanz verwenden die Quellen des eingebauten Energie-Dashboards.
+- Das Energie-Pop-up lädt seine Karten beim Öffnen. Ohne konfigurierte Leistungssensoren zeigt es die Energiebilanz und verlinkt das eingebaute Dashboard.
+
 # Version 23.0.1
 
 - Lange Paketnamen halten sich an die Breite der Meldungsspalte. In der Vorschau stehen Status und Liefertermin vor dem Produktnamen. Das Paket-Pop-up zeigt den vollständigen Namen.

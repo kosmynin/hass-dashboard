@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-globalThis.HTMLElement = class { attachShadow() { this.shadowRoot = { activeElement: null, querySelector: () => null, querySelectorAll: () => [] }; return this.shadowRoot; } dispatchEvent() {} };
+globalThis.HTMLElement = class { attachShadow() { this.shadowRoot = { activeElement: null, querySelector: () => null, querySelectorAll: () => [], replaceChildren() {}, append() {} }; return this.shadowRoot; } dispatchEvent() {} };
 globalThis.customElements = { registry: new Map(), get(name) { return this.registry.get(name); }, define(name, value) { this.registry.set(name, value); }, whenDefined() { return Promise.resolve(); } };
 globalThis.window = globalThis;
 const { SmartphoneDashboardStrategy, SmartphoneDashboardStrategyEditor, partitionConflictPatch, applyNotificationOptions, mergeBackendNotifications, detectedRooms, applyRoomOptions, configuredFeatures, parcelSensorEntities, popupContentCards } = await import("../custom_components/smartphone_dashboard/frontend/smartphone-dashboard-strategy.js");
+const { energyPopupCards, loadEnergyPopupCards } = await import("../custom_components/smartphone_dashboard/frontend/energy-popup.js");
 
 const roomHass = {
   states: {
@@ -195,6 +196,77 @@ const navigationHeadingIndex = navigationCards.findIndex((card) => card.name ===
 assert.notEqual(navigationHeadingIndex, -1);
 assert.equal(navigationCards[navigationHeadingIndex + 1].type, "grid");
 assert.equal(navigationCards[navigationHeadingIndex + 1].cards[0].name, "Medien");
+assert.deepEqual(navigationCards[navigationHeadingIndex + 1].cards.find((card) => card.name === "Energie").button_action.tap_action,
+  { action: "navigate", navigation_path: "#energie" });
+const energyPopup = navigationCards.find((card) => card.hash === "#energie");
+assert.deepEqual(energyPopup.cards, [{
+  type: "custom:smartphone-dashboard-deferred-cards",
+  popup_hash: "#energie",
+  card_source: "energy",
+  cards: [],
+}]);
+const disabledEnergyDashboard = await SmartphoneDashboardStrategy.generate(
+  { features: { energy: { enabled: false } } },
+  { states: {}, areas: {}, devices: {}, entities: {}, services: {} },
+);
+assert.equal(disabledEnergyDashboard.views[0].sections[0].cards.some((card) => card.hash === "#energie"), false);
+
+const energyPrefs = {
+  energy_sources: [
+    { type: "battery", stat_soc: "sensor.storage_soc" },
+    { type: "home", stat_rate: "sensor.house_power" },
+    { type: "solar", stat_rate: "sensor.pv_power" },
+    { type: "solar", stat_rate: "sensor.hidden_pv_power" },
+    { type: "grid", power_config: { stat_rate_from: "sensor.grid_import", stat_rate_to: "sensor.grid_export" } },
+  ],
+};
+let energyRequests = 0;
+let currentEnergyPrefs = energyPrefs;
+const energyHass = {
+  config: { version: "2026.11.1" },
+  states: {
+    "sensor.house_power": { state: "480" },
+    "sensor.pv_power": { state: "0" },
+    "sensor.hidden_pv_power": { state: "230" },
+    "sensor.storage_soc": { state: "72" },
+  },
+  entities: {
+    "sensor.hidden_pv_power": { entity_id: "sensor.hidden_pv_power", hidden: true },
+  },
+  async callWS(request) {
+    assert.deepEqual(request, { type: "energy/get_prefs" });
+    energyRequests += 1;
+    return currentEnergyPrefs;
+  },
+};
+const otherwiseInvisible = (entity) => !energyHass.entities[entity]?.hidden;
+const [energyReadings, powerFlow, energyLink] = await loadEnergyPopupCards(energyHass, otherwiseInvisible);
+assert.equal(energyReadings.columns, 2);
+assert.deepEqual(energyReadings.cards.map((card) => card.entity),
+  ["sensor.house_power", "sensor.pv_power", "sensor.storage_soc"]);
+assert.equal(powerFlow.type, "power-sankey");
+assert.equal(powerFlow.collection_key, "energy_dashboard_now");
+assert.equal(powerFlow.layout, "vertical");
+assert.equal(energyLink.button_action.tap_action.navigation_path, "/energy");
+const onlyGridPower = { energy_sources: [energyPrefs.energy_sources.at(-1)] };
+assert.equal(energyPopupCards(onlyGridPower, energyHass, otherwiseInvisible)[0].type, "power-sankey");
+const energyOnly = { energy_sources: [
+  { type: "grid", stat_energy_from: "sensor.grid_energy" },
+  { type: "gas", stat_rate: "sensor.gas_rate" },
+] };
+const [energyOnlyHint, energyBalance] = energyPopupCards(energyOnly, energyHass, otherwiseInvisible);
+assert.match(energyOnlyHint.content, /Leistungssensoren/);
+assert.equal(energyBalance.type, "energy-distribution");
+const olderEnergyHass = { ...energyHass, config: { version: "2025.11.0" } };
+assert.match(energyPopupCards(onlyGridPower, olderEnergyHass, otherwiseInvisible)[0].content, /2025\.12/);
+const fetchErrorCards = await loadEnergyPopupCards({
+  async callWS() { throw new Error("offline"); },
+}, otherwiseInvisible);
+assert.match(fetchErrorCards[0].content, /konnte nicht geladen werden/);
+const missingConfigCards = await loadEnergyPopupCards({
+  async callWS() { throw { code: "not_found" }; },
+}, otherwiseInvisible);
+assert.match(missingConfigCards[0].content, /keine Stromquellen/);
 
 globalThis.location = {
   pathname: "/handy/handy",
@@ -491,6 +563,39 @@ assert.equal(child.hass, null);
 globalThis.location.hash = "#raum-kitchen";
 lazyPopup._onLocationChange();
 assert.equal(child.hass, latestHass);
+
+const originalDocument = globalThis.document;
+const originalCardHelpers = window.loadCardHelpers;
+try {
+  globalThis.document = { createElement() { return { append() {} }; } };
+  window.loadCardHelpers = async () => ({
+    createCardElement(config) { return { config }; },
+  });
+  const lazyEnergy = new DeferredCards();
+  lazyEnergy.isConnected = true;
+  const requestsBeforeOpen = energyRequests;
+  lazyEnergy.setConfig(energyPopup.cards[0]);
+  lazyEnergy.hass = energyHass;
+  assert.equal(energyRequests, requestsBeforeOpen);
+  globalThis.location.hash = "#energie";
+  lazyEnergy._onLocationChange();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(lazyEnergy._cards[1].config.type, "power-sankey");
+  assert.equal(energyRequests, requestsBeforeOpen + 1);
+  globalThis.location.hash = "";
+  lazyEnergy._onLocationChange();
+  assert.equal(lazyEnergy._cards.length, 0);
+  currentEnergyPrefs = energyOnly;
+  globalThis.location.hash = "#energie";
+  lazyEnergy._onLocationChange();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(lazyEnergy._cards[1].config.type, "energy-distribution");
+  assert.equal(energyRequests, requestsBeforeOpen + 2);
+} finally {
+  globalThis.location.hash = "";
+  globalThis.document = originalDocument;
+  window.loadCardHelpers = originalCardHelpers;
+}
 
 const { subscribeAlertStream, SmartphoneDashboardAlerts } = await import("../custom_components/smartphone_dashboard/frontend/notification-cards.js");
 let notify;

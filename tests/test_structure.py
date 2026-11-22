@@ -14,7 +14,7 @@ def test_manifest_and_hacs():
     hacs = json.loads((ROOT / "hacs.json").read_text())
     assert manifest["domain"] == "smartphone_dashboard"
     assert manifest["config_flow"] is True
-    assert manifest["version"] == "23.0.1"
+    assert manifest["version"] == "23.1.0"
     assert hacs["name"] == "Smartphone Dashboard"
     assert hacs["zip_release"] is True
     assert hacs["filename"] == "smartphone_dashboard.zip"
@@ -131,7 +131,7 @@ def test_editor_keeps_entity_multi_selectors_open_while_values_change():
     excluded_handler = strategy[excluded_start:strategy.index('if (feature.key === "printer")', excluded_start)]
     assert "this._render()" not in excluded_handler
     printer_start = strategy.index('"Automatisch erkannte Bambu-Lab-Geräte ausblenden"')
-    excluded_printer_handler = strategy[printer_start:strategy.index('toggle.addEventListener', printer_start)]
+    excluded_printer_handler = strategy[printer_start:strategy.index('if (feature.key === "system")', printer_start)]
     assert "this._render()" not in excluded_printer_handler
 
 def test_loader_recovers_registry_without_reloading_the_dashboard():

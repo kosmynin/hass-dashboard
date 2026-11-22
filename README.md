@@ -93,6 +93,21 @@ als getrennte Meldungen ausgewertet: `ONLINE` bleibt neutral, während etwa
 `REPLACEBATT`, `NOBATT`, `ONBATT` oder `LOWBATT` jeweils eine eigene deutsche
 USV-Meldung erzeugen.
 
+## Energie
+
+**Weitere Bereiche → Energie** zeigt die aktuelle Hausleistung, PV-Leistung,
+den Speicher-Ladestand und den Stromfluss zwischen Netz, PV, Speicher und
+Verbrauchern, soweit diese Werte im Home-Assistant-Energie-Dashboard
+eingerichtet sind. Das Pop-up übernimmt die Quellen beim Öffnen. In den
+Strategy-Einstellungen lässt sich der Bereich ausblenden.
+
+Der [eingebaute Stromfluss](https://www.home-assistant.io/dashboards/energy/#power-flow-sankey-graph)
+benötigt Home Assistant ab 2025.12 und konfigurierte Leistungssensoren in W
+oder kW. Für den Ladestand wird der konfigurierte Speicher-Ladezustand
+verwendet. Sind nur Energiezähler in kWh eingerichtet, zeigt das Pop-up die
+Energiebilanz. Die vollständige Auswertung bleibt über die Schaltfläche
+**Energie-Dashboard öffnen** erreichbar.
+
 ## Migration und Benachrichtigungen
 
 Vorhandene 17 Helfer werden idempotent gelesen und niemals gelöscht. Das Backend

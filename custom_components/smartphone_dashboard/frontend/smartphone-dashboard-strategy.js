@@ -5,8 +5,9 @@
  */
 
 import { ALERT_POPUPS, SmartphoneDashboardAlerts } from "./notification-cards.js";
+import { loadEnergyPopupCards } from "./energy-popup.js";
 
-const STRATEGY_VERSION = "23.0.1";
+const STRATEGY_VERSION = "23.1.0";
 const CONFIG_VERSION = 26;
 
 const HOME_SECTION_LABELS = {
@@ -72,9 +73,7 @@ class SmartphoneDashboardDeferredCards extends HTMLElement {
     if (!config || !Array.isArray(config.cards)) throw new Error("Pop-up-Karten fehlen");
     if (this._config === config) return;
     this._config = config;
-    this._cards = [];
-    this._mounted = false;
-    this.shadowRoot.replaceChildren();
+    this._clearCards();
     this._activateIfNeeded();
   }
 
@@ -90,6 +89,7 @@ class SmartphoneDashboardDeferredCards extends HTMLElement {
 
   disconnectedCallback() {
     for (const event of POPUP_NAVIGATION_EVENTS) window.removeEventListener(event, this._onLocationChange);
+    if (this._config?.card_source === "energy" && this._mounted) this._clearCards();
   }
 
   getCardSize() {
@@ -101,22 +101,37 @@ class SmartphoneDashboardDeferredCards extends HTMLElement {
     return !hash || globalThis.location?.hash === hash;
   }
 
+  _clearCards() {
+    this._cards = [];
+    this._mounted = false;
+    this.shadowRoot.replaceChildren();
+  }
+
   _activateIfNeeded() {
-    if (!this.isConnected || this._mounting || !this._config || !this._isRequested()) return;
+    if (!this.isConnected || !this._config) return;
+    const config = this._config;
+    const energy = config.card_source === "energy";
+    if (!this._isRequested()) {
+      if (energy && this._mounted) this._clearCards();
+      return;
+    }
+    if (this._mounting || (energy && !this._hass)) return;
     if (this._mounted) {
       for (const card of this._cards) card.hass = this._hass;
       return;
     }
     this._mounting = true;
-    const config = this._config;
     const helpersReady = typeof window.loadCardHelpers === "function"
       ? window.loadCardHelpers()
       : Promise.reject(new Error("Home-Assistant-Kartenhelfer sind nicht verfügbar"));
-    void helpersReady.then((helpers) => {
+    const cardsReady = energy
+      ? loadEnergyPopupCards(this._hass, (entityId) => isEntityVisible(this._hass, entityId))
+      : config.cards;
+    void Promise.all([helpersReady, cardsReady]).then(([helpers, configs]) => {
       if (!this.isConnected || this._config !== config || !this._isRequested()) return;
       const container = document.createElement("div");
       container.className = "cards";
-      this._cards = config.cards.map((cardConfig) => {
+      this._cards = configs.map((cardConfig) => {
         const card = helpers.createCardElement(cardConfig);
         if (this._hass) card.hass = this._hass;
         container.append(card);
@@ -125,14 +140,14 @@ class SmartphoneDashboardDeferredCards extends HTMLElement {
       this.shadowRoot.replaceChildren();
       const style = document.createElement("style");
       style.textContent = `
-        :host { display: block; }
-        .cards { display: grid; gap: var(--vertical-stack-card-gap, 8px); }
+        :host { display: block; min-width: 0; }
+        .cards { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--vertical-stack-card-gap, 8px); }
       `;
       this.shadowRoot.append(style, container);
       this._mounted = true;
       this.dispatchEvent(new Event("iron-resize", { bubbles: true, composed: true }));
     }).catch((error) => {
-      if (this._config !== config || !this._isRequested()) return;
+      if (!this.isConnected || this._config !== config || !this._isRequested()) return;
       console.error("Smartphone-Dashboard: Pop-up-Inhalt konnte nicht geladen werden", error);
       this.shadowRoot.innerHTML = `<ha-card>Pop-up-Inhalt konnte nicht geladen werden.</ha-card>`;
       this._mounted = true;
@@ -1487,6 +1502,7 @@ function configurationValidationErrors(config) {
 
 function autoFeatureEntities(hass, key, systemGroups = []) {
   if (key === "media") return entityIds(hass, "media_player");
+  if (key === "energy") return [];
   if (key === "parcels") return parcelSensorEntities(hass);
   if (key === "security") {
     const printerDeviceIds = new Set(autoBambuPrinterIds(hass));
@@ -1570,6 +1586,7 @@ function isPrinterCameraEntity(hass, entityId, knownPrinterDeviceIds = new Set(a
 
 const FEATURE_META = {
   media: ["Medien", "mdi:cast-audio", "#medien"],
+  energy: ["Energie", "mdi:lightning-bolt", "#energie"],
   parcels: ["Pakete", "mdi:package-variant-closed", "#pakete"],
   security: ["Sicherheit", "mdi:shield-home-outline", "#sicherheit"],
   printer: ["3D-Druck", "mdi:printer-3d", "#3ddruck"],
@@ -1668,7 +1685,7 @@ function configuredFeatures(config, hass) {
       Array.isArray(item.excluded_printer_ids) ? item.excluded_printer_ids : [],
     );
     const systemGroups = key === "system" ? normalizedSystemGroups(item.system_groups) : [];
-    const manualEntities = Array.isArray(item.entities)
+    const manualEntities = key !== "energy" && Array.isArray(item.entities)
       ? item.entities.filter((entityId) => existingEntities.has(entityId) && !excluded.has(entityId))
       : [];
     const entityRegistry = registry;
@@ -1871,6 +1888,12 @@ function requestedMediaPlayer(hass) {
 }
 
 function featurePopupCards(item, hass) {
+  if (item.key === "energy") return [{
+    type: "custom:smartphone-dashboard-deferred-cards",
+    popup_hash: item.hash,
+    card_source: "energy",
+    cards: [],
+  }];
   if (item.key === "parcels") return parcelFeatureCards(item, hass);
   if (item.key === "printer") return printerFeatureCards(item, hass);
   if (item.key === "system") return systemFeatureCards(item, hass);
@@ -1907,7 +1930,7 @@ function parcelFeatureCards(item, hass) {
 function applyDynamicFeatures(dashboard, config, hass) {
   const cards = dashboard.views?.[0]?.sections?.[0]?.cards;
   if (!Array.isArray(cards)) return dashboard;
-  const legacyHashes = new Set(["#medien", "#pakete", "#3ddruck", "#info", "#camera_alarm", "#system", "#sicherheit"]);
+  const legacyHashes = new Set(["#medien", "#energie", "#pakete", "#3ddruck", "#info", "#camera_alarm", "#system", "#sicherheit"]);
   const isOldNavigation = (card) => card?.type === "grid" && card.cards?.some((x) =>
     ["Medien", "System", "Alarm", "3D Drucker"].includes(x?.name),
   );
@@ -2025,8 +2048,7 @@ function migrateConfig(config, hass) {
     result.features = Object.fromEntries(
       Object.keys(FEATURE_META).map((key) => [key, {
         enabled: true,
-        auto_discover: true,
-        entities: [],
+        ...(key === "energy" ? {} : { auto_discover: true, entities: [] }),
         ...(key === "printer" ? { printer_ids: [], excluded_printer_ids: [] } : {}),
       }]),
     );
@@ -3259,7 +3281,7 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
       ["show_notifications", "Meldungen", "Batterien, Kontakte und Warnungen anzeigen."],
       ["show_quick_actions", "Schnellaktionen", "Ausgewählte Skripte direkt ausführen."],
       ["show_rooms", "Räume", "Räume öffnen und Hauptlichter steuern."],
-      ["show_navigation", "Weitere Bereiche", "Pakete, Medien, System, Sicherheit und 3D-Druck anzeigen."],
+      ["show_navigation", "Weitere Bereiche", "Pakete, Medien, Energie, System, Sicherheit und 3D-Druck anzeigen."],
     ];
 
     const switchPanel = this.shadowRoot.querySelector("[data-switch-panel]");
@@ -3349,13 +3371,28 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
       const row = document.createElement("div");
       row.className = "person-item";
       const hashListId = `feature-hashes-${feature.key}`;
-      row.innerHTML = `<div class="switch-row"><div class="switch-copy"><div class="switch-title"></div><div class="switch-description"></div></div><ha-switch data-enabled></ha-switch></div><ha-textfield data-name label="Name"></ha-textfield><div data-feature-icon-host></div><label class="native-field">Navigations-Hash<input data-hash type="text" list="${hashListId}"></label><datalist id="${hashListId}"></datalist><div class="field-error" data-hash-error></div><div class="switch-row"><div class="switch-copy"><div class="switch-title">Neue Entitäten automatisch ergänzen</div></div><ha-switch data-auto></ha-switch></div>${feature.key === "security" ? '<div data-master-alarm-host></div>' : ""}${feature.key === "printer" ? '<div data-printer-ids-host></div><label class="select-label">Automatisch erkannte Bambu-Lab Geräte-IDs<textarea class="readonly-list" data-auto-printer-ids rows="3" readonly></textarea></label><div data-excluded-printer-ids-host></div>' : ""}<div data-entities-host></div><label class="select-label">Automatisch erkannte Entitäten<textarea class="readonly-list" data-auto-entities rows="5" readonly></textarea></label><div data-excluded-host></div>`;
+      const energy = feature.key === "energy";
+      const sourceFields = energy
+        ? ""
+        : `<div class="switch-row"><div class="switch-copy"><div class="switch-title">Neue Entitäten automatisch ergänzen</div></div><ha-switch data-auto></ha-switch></div>
+          ${feature.key === "security" ? '<div data-master-alarm-host></div>' : ""}
+          ${feature.key === "printer" ? '<div data-printer-ids-host></div><label class="select-label">Automatisch erkannte Bambu-Lab Geräte-IDs<textarea class="readonly-list" data-auto-printer-ids rows="3" readonly></textarea></label><div data-excluded-printer-ids-host></div>' : ""}
+          <div data-entities-host></div>
+          <label class="select-label">Automatisch erkannte Entitäten<textarea class="readonly-list" data-auto-entities rows="5" readonly></textarea></label>
+          <div data-excluded-host></div>`;
+      row.innerHTML = `<div class="switch-row"><div class="switch-copy"><div class="switch-title"></div><div class="switch-description"></div></div><ha-switch data-enabled></ha-switch></div>
+        <ha-textfield data-name label="Name"></ha-textfield>
+        <div data-feature-icon-host></div>
+        <label class="native-field">Navigations-Hash<input data-hash type="text" list="${hashListId}"></label>
+        <datalist id="${hashListId}"></datalist><div class="field-error" data-hash-error></div>
+        ${sourceFields}`;
       row.querySelector(".switch-title").textContent = feature.name;
       const featureItemCount = feature.entities.length + feature.printer_ids.length;
-      row.querySelector(".switch-description").textContent = `${featureItemCount} Einträge · ${feature.hash}`;
+      row.querySelector(".switch-description").textContent = energy
+        ? "Quellen aus dem Home-Assistant-Energie-Dashboard"
+        : `${featureItemCount} Einträge · ${feature.hash}`;
       const toggle = row.querySelector("[data-enabled]");
       toggle.checked = feature.enabled;
-      const autoToggle = row.querySelector("[data-auto]"); autoToggle.checked = feature.auto_discover;
       const nameField = row.querySelector("[data-name]"); nameField.value = feature.name;
       const hashField = row.querySelector("[data-hash]");
       hashField.value = this._config.features?.[feature.key]?.hash || feature.hash;
@@ -3375,20 +3412,37 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
         return message ? "" : candidate;
       };
       validateHash();
-      row.querySelector("[data-auto-entities]").value = feature.automatic_entities.join("\n");
       const updateFeature = (changes) => this._update("features", {
         ...(this._config.features || {}),
         [feature.key]: { ...(this._config.features?.[feature.key] || {}), ...changes },
       });
       row.querySelector("[data-feature-icon-host]").replaceWith(this._iconSelector("Icon", feature.icon, (value) => updateFeature({ icon: value })));
+      const hashSuggestions = Object.values(FEATURE_META).map((meta) => meta[2]);
+      row.querySelector(`#${hashListId}`).append(...hashSuggestions.map((hash) => { const option = document.createElement("option"); option.value = hash; return option; }));
+      toggle.addEventListener("change", (event) => updateFeature({ enabled: event.currentTarget.checked }));
+      nameField.addEventListener("change", (event) => updateFeature({ name: event.currentTarget.value.trim() }));
+      hashField.addEventListener("input", validateHash);
+      hashField.addEventListener("change", () => {
+        const candidate = validateHash();
+        if (!candidate) return;
+        updateFeature({ hash: candidate });
+        this._render();
+      });
+      if (energy) {
+        featurePanel.appendChild(row);
+        continue;
+      }
+
+      const autoToggle = row.querySelector("[data-auto]");
+      autoToggle.checked = feature.auto_discover;
+      autoToggle.addEventListener("change", (event) => { updateFeature({ auto_discover: event.currentTarget.checked }); this._render(); });
+      row.querySelector("[data-auto-entities]").value = feature.automatic_entities.join("\n");
       if (feature.key === "security") {
         row.querySelector("[data-master-alarm-host]").replaceWith(this._entitySelector(
           "Master-Alarmanlage im Kopfbereich", feature.master_alarm,
           { domain: "alarm_control_panel" }, (value) => updateFeature({ master_alarm: value }),
         ));
       }
-      const hashSuggestions = Object.keys(FEATURE_META).map((key) => FEATURE_META[key][2]);
-      row.querySelector(`#${hashListId}`).append(...hashSuggestions.map((hash) => { const option = document.createElement("option"); option.value = hash; return option; }));
       row.querySelector("[data-entities-host]").replaceWith(this._entitySelector(
         "Manuell hinzugefügte Entitäten", feature.manual_entities, { multiple: true }, (value) => updateFeature({ entities: value }),
       ));
@@ -3412,16 +3466,6 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
           onChange: (value) => updateFeature({ excluded_printer_ids: value }),
         }));
       }
-      toggle.addEventListener("change", (event) => updateFeature({ enabled: event.currentTarget.checked }));
-      autoToggle.addEventListener("change", (event) => { updateFeature({ auto_discover: event.currentTarget.checked }); this._render(); });
-      nameField.addEventListener("change", (event) => updateFeature({ name: event.currentTarget.value.trim() }));
-      hashField.addEventListener("input", validateHash);
-      hashField.addEventListener("change", () => {
-        const candidate = validateHash();
-        if (!candidate) return;
-        updateFeature({ hash: candidate });
-        this._render();
-      });
       if (feature.key === "system") {
         this._renderSystemFeatureSettings(row, feature, updateFeature);
       }
