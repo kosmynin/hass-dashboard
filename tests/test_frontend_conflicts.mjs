@@ -10,7 +10,7 @@ const roomHass = {
   states: {
     "light.kitchen": { state: "off", attributes: { friendly_name: "Küche", supported_color_modes: ["brightness"] } },
     "light.kitchen_onoff": { state: "off", attributes: { friendly_name: "Arbeitslicht", supported_color_modes: ["onoff"] } },
-    "switch.kitchen_socket": { state: "off", attributes: { friendly_name: "Steckdose" } },
+    "switch.kitchen_socket": { entity_id: "switch.kitchen_socket", state: "off", attributes: { friendly_name: "Zwischenstecker Steckdose" } },
     "sensor.air_pm25": { state: "8", attributes: { friendly_name: "Air Quality PM2.5", device_class: "pm25", unit_of_measurement: "µg/m³" } },
     "sensor.air_co2": { state: "620", attributes: { friendly_name: "Air Quality Kohlendioxid", device_class: "carbon_dioxide", unit_of_measurement: "ppm" } },
     "sensor.air_humidity": { state: "48", attributes: { friendly_name: "Air Quality Luftfeuchtigkeit", device_class: "humidity", unit_of_measurement: "%" } },
@@ -22,11 +22,14 @@ const roomHass = {
     kitchen: { area_id: "kitchen", name: "Küche", icon: "mdi:silverware-fork-knife" },
     hidden_room: { area_id: "hidden_room", name: "Versteckter Raum", icon: "mdi:eye-off" },
   },
-  devices: { air_quality: { id: "air_quality", area_id: "kitchen", name: "Air Quality" } },
+  devices: {
+    air_quality: { id: "air_quality", area_id: "kitchen", name: "Air Quality" },
+    socket: { id: "socket", area_id: "kitchen", name: "Zwischenstecker" },
+  },
   entities: {
     kitchen_light: { entity_id: "light.kitchen", area_id: "kitchen" },
     kitchen_onoff: { entity_id: "light.kitchen_onoff", area_id: "kitchen" },
-    kitchen_socket: { entity_id: "switch.kitchen_socket", area_id: "kitchen" },
+    kitchen_socket: { entity_id: "switch.kitchen_socket", area_id: "kitchen", device_id: "socket" },
     kitchen_temperature: { entity_id: "sensor.kitchen_temperature", device_id: "air_quality", original_name: "Temperatur" },
     air_humidity: { entity_id: "sensor.air_humidity", device_id: "air_quality", original_name: "Luftfeuchtigkeit" },
     air_co2: { entity_id: "sensor.air_co2", device_id: "air_quality", original_name: "Kohlendioxid" },
@@ -64,7 +67,25 @@ assert.equal(roomPopupCards.find((card) => card.entity === "light.kitchen").butt
 const onOffLightCard = roomPopupCards.find((card) => card.entity === "light.kitchen_onoff");
 assert.equal(onOffLightCard.button_type, "switch");
 assert.equal("attribute" in onOffLightCard, false);
-assert.equal(roomPopupCards.find((card) => card.entity === "switch.kitchen_socket").button_type, "switch");
+const roomSwitchCard = roomPopupCards.find((card) => card.entity === "switch.kitchen_socket");
+assert.equal(roomSwitchCard.button_type, "switch");
+assert.equal(roomSwitchCard.name, "Steckdose");
+
+const roomNamingHass = {
+  ...roomHass,
+  formatEntityName(state, name) {
+    assert.equal(state, roomHass.states["switch.kitchen_socket"]);
+    assert.deepEqual(name, { type: "entity" });
+    return "Kaffeemaschine";
+  },
+};
+for (const shortSwitchNames of [true, false]) {
+  const generated = await SmartphoneDashboardStrategy.generate({ short_switch_names: shortSwitchNames }, roomNamingHass);
+  const popup = generated.views[0].sections[0].cards.find((card) => card.hash === "#raum-kitchen");
+  const card = popupContentCards(popup).find((item) => item.entity === "switch.kitchen_socket");
+  assert.equal(card.name, shortSwitchNames ? "Kaffeemaschine" : undefined);
+  assert.equal(card.button_type, "switch");
+}
 const sensorGrid = roomPopupCards.find((card) => card.type === "grid");
 const sensorCard = sensorGrid.cards.find((card) => card.entity === "sensor.kitchen_temperature");
 assert.deepEqual(sensorGrid.cards.map((card) => card.entity), [

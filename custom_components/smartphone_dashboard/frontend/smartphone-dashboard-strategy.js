@@ -9,7 +9,7 @@ import { loadEnergyPopupCards } from "./energy-popup.js";
 import { SmartphoneDashboardAgenda } from "./agenda-cards.js";
 import { selectParcels } from "./parcel-selection.js";
 
-const STRATEGY_VERSION = "23.1.2";
+const STRATEGY_VERSION = "23.1.3";
 const CONFIG_VERSION = 26;
 
 const HOME_SECTION_LABELS = {
@@ -563,6 +563,13 @@ function entityDisplayName(hass, entityId) {
   return entityName || entityId.split(".")[1] || entityId;
 }
 
+function roomSwitchName(hass, entityId) {
+  const state = hass.states?.[entityId];
+  const name = state && hass.formatEntityName?.(state, { type: "entity" });
+  return name && name !== state.attributes?.friendly_name
+    ? name
+    : entityDisplayName(hass, entityId);
+}
 
 function normalizeRoomKey(value) {
   return String(value || "")
@@ -1047,7 +1054,7 @@ function lightSupportsBrightness(hass, entityId) {
     Object.prototype.hasOwnProperty.call(attributes, "brightness");
 }
 
-function genericRoomPopup(room, hass) {
+function genericRoomPopup(room, hass, shortSwitchNames) {
   const hidden = new Set(room.hidden_entities || []);
   const entities = entitiesForArea(hass, room.area_id).filter(
     (entityId) => !hidden.has(entityId),
@@ -1144,6 +1151,7 @@ function genericRoomPopup(room, hass) {
       card_type: "button",
       button_type: "switch",
       entity,
+      ...(shortSwitchNames ? { name: roomSwitchName(hass, entity) } : {}),
     })),
   );
   addGroup(
@@ -1282,7 +1290,7 @@ function applyRoomOptions(dashboard, config, hass) {
   const withoutRoomPopups = cards.filter((card) => !legacyHashes.has(card?.hash));
   const insertionIndex = firstLegacyPopup < 0 ? withoutRoomPopups.length : firstLegacyPopup;
   // Bekannte und neue Räume werden vollständig aus der Area Registry erzeugt.
-  const popups = rooms.map((room) => genericRoomPopup(room, hass));
+  const popups = rooms.map((room) => genericRoomPopup(room, hass, config.short_switch_names !== false));
   withoutRoomPopups.splice(insertionIndex, 0, ...popups);
   view.sections[0].cards = withoutRoomPopups;
   return dashboard;
@@ -2010,6 +2018,7 @@ const EDITOR_DEFAULTS = {
   show_quick_actions: true,
   show_rooms: true,
   show_navigation: true,
+  short_switch_names: true,
   dense_section_placement: true,
   max_columns: 1,
   theme: "",
@@ -3142,6 +3151,15 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
 
         <details data-panel="rooms" ${panelOpen("rooms")}>
           <summary><ha-icon icon="mdi:floor-plan"></ha-icon>Räume</summary>
+          <div class="panel">
+            <div class="switch-row">
+              <div class="switch-copy">
+                <div class="switch-title">Gerätenamen bei Schaltern ausblenden</div>
+                <div class="switch-description">Zeigt im Raum-Pop-up nur den Namen der Schalter-Entität.</div>
+              </div>
+              <ha-switch data-switch="short_switch_names" aria-label="Gerätenamen bei Schaltern ausblenden"></ha-switch>
+            </div>
+          </div>
           <div class="panel rooms-panel" data-room-panel></div>
         </details>
 

@@ -1,3 +1,7 @@
+# Version 23.1.3
+
+- Schalter in Raum-Pop-ups zeigen standardmäßig den Entitätsnamen. Unter **Räume** lässt sich **Gerätenamen bei Schaltern ausblenden** ausschalten.
+
 # Version 23.1.2
 
 - Das Energie-Pop-up zeigt zusätzlich zur runden Tagesübersicht den aktuellen Leistungsfluss mit der momentanen Hausleistung. Die native Live-Karte übernimmt die Leistungssensoren aus den Energie-Einstellungen.
