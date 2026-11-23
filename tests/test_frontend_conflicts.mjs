@@ -9,7 +9,7 @@ const { agendaRows, loadCalendarEvents } = await import("../custom_components/sm
 const roomHass = {
   states: {
     "light.kitchen": { state: "off", attributes: { friendly_name: "Küche", supported_color_modes: ["brightness"] } },
-    "light.kitchen_onoff": { state: "off", attributes: { friendly_name: "Arbeitslicht", supported_color_modes: ["onoff"] } },
+    "light.kitchen_onoff": { entity_id: "light.kitchen_onoff", state: "off", attributes: { friendly_name: "Küche Arbeitslicht", supported_color_modes: ["onoff"] } },
     "switch.kitchen_socket": { entity_id: "switch.kitchen_socket", state: "off", attributes: { friendly_name: "Zwischenstecker Steckdose" } },
     "sensor.air_pm25": { state: "8", attributes: { friendly_name: "Air Quality PM2.5", device_class: "pm25", unit_of_measurement: "µg/m³" } },
     "sensor.air_co2": { state: "620", attributes: { friendly_name: "Air Quality Kohlendioxid", device_class: "carbon_dioxide", unit_of_measurement: "ppm" } },
@@ -66,6 +66,7 @@ const roomPopupCards = popupContentCards(roomPopup);
 assert.equal(roomPopupCards.find((card) => card.entity === "light.kitchen").button_type, "slider");
 const onOffLightCard = roomPopupCards.find((card) => card.entity === "light.kitchen_onoff");
 assert.equal(onOffLightCard.button_type, "switch");
+assert.equal(onOffLightCard.name, "Arbeitslicht");
 assert.equal("attribute" in onOffLightCard, false);
 const roomSwitchCard = roomPopupCards.find((card) => card.entity === "switch.kitchen_socket");
 assert.equal(roomSwitchCard.button_type, "switch");
@@ -74,18 +75,42 @@ assert.equal(roomSwitchCard.name, "Steckdose");
 const roomNamingHass = {
   ...roomHass,
   formatEntityName(state, name) {
-    assert.equal(state, roomHass.states["switch.kitchen_socket"]);
     assert.deepEqual(name, { type: "entity" });
-    return "Kaffeemaschine";
+    return state.entity_id === "switch.kitchen_socket" ? "Kaffeemaschine" : state.attributes.friendly_name;
   },
 };
 for (const shortSwitchNames of [true, false]) {
   const generated = await SmartphoneDashboardStrategy.generate({ short_switch_names: shortSwitchNames }, roomNamingHass);
   const popup = generated.views[0].sections[0].cards.find((card) => card.hash === "#raum-kitchen");
-  const card = popupContentCards(popup).find((item) => item.entity === "switch.kitchen_socket");
+  const items = popupContentCards(popup);
+  const card = items.find((item) => item.entity === "switch.kitchen_socket");
   assert.equal(card.name, shortSwitchNames ? "Kaffeemaschine" : undefined);
   assert.equal(card.button_type, "switch");
+  assert.equal(items.find((item) => item.entity === "light.kitchen_onoff").name, shortSwitchNames ? "Arbeitslicht" : undefined);
 }
+
+const individualRoomNames = await SmartphoneDashboardStrategy.generate({
+  short_switch_names: false,
+  rooms: [{ area_id: "kitchen", entity_name_modes: {
+    "light.kitchen_onoff": "entity",
+    "switch.kitchen_socket": "device",
+    "sensor.kitchen_temperature": "device",
+  } }],
+}, roomNamingHass);
+const individualRoomPopup = individualRoomNames.views[0].sections[0].cards.find((card) => card.hash === "#raum-kitchen");
+const individualRoomCards = popupContentCards(individualRoomPopup);
+assert.equal(individualRoomPopup.name, "Küche");
+assert.equal(individualRoomCards.find((card) => card.entity === "light.kitchen_onoff").name, "Arbeitslicht");
+assert.equal(individualRoomCards.find((card) => card.entity === "light.kitchen").name, undefined);
+assert.equal(individualRoomCards.find((card) => card.entity === "switch.kitchen_socket").name, "Zwischenstecker Kaffeemaschine");
+assert.equal(individualRoomCards.find((card) => card.type === "grid").cards[0].custom_fields.title.card.name, "Air Quality Temperatur");
+
+const includeDeviceWithShortDefault = await SmartphoneDashboardStrategy.generate({
+  rooms: [{ area_id: "kitchen", entity_name_modes: { "switch.kitchen_socket": "device" } }],
+}, roomNamingHass);
+const shortNamesPopup = includeDeviceWithShortDefault.views[0].sections[0].cards.find((card) => card.hash === "#raum-kitchen");
+assert.equal(popupContentCards(shortNamesPopup).find((card) => card.entity === "switch.kitchen_socket").name,
+  "Zwischenstecker Kaffeemaschine");
 const sensorGrid = roomPopupCards.find((card) => card.type === "grid");
 const sensorCard = sensorGrid.cards.find((card) => card.entity === "sensor.kitchen_temperature");
 assert.deepEqual(sensorGrid.cards.map((card) => card.entity), [

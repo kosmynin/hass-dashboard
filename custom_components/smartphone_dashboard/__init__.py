@@ -208,6 +208,12 @@ def _valid_config(value: dict[str, Any]) -> dict[str, Any]:
             if light and (not isinstance(light, str) or not re.fullmatch(r"light\.[a-z0-9_]+", light)): raise vol.Invalid("main_light ist ungültig")
             hidden = room.get("hidden_entities", [])
             if not isinstance(hidden, list) or any(not isinstance(item, str) or not entity_id.fullmatch(item) for item in hidden): raise vol.Invalid("hidden_entities ist ungültig")
+            name_modes = room.get("entity_name_modes", {})
+            if not isinstance(name_modes, dict) or any(
+                not entity_id.fullmatch(key) or mode not in ("entity", "device")
+                for key, mode in name_modes.items()
+            ):
+                raise vol.Invalid("entity_name_modes ist ungültig")
     if "home_sections" in value and any(not isinstance(item, str) for item in value["home_sections"]): raise vol.Invalid("home_sections enthält ungültige Einträge")
     def validate_entity_arrays(item: Any) -> None:
         if isinstance(item, dict):

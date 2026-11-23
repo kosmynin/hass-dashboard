@@ -1,3 +1,7 @@
+# Version 23.1.4
+
+- In den Raumeinstellungen lässt sich die Namensanzeige pro Entität wählen. Die Voreinstellung für kurze Namen greift auch bei Leuchten.
+
 # Version 23.1.3
 
 - Schalter in Raum-Pop-ups zeigen standardmäßig den Entitätsnamen. Unter **Räume** lässt sich **Gerätenamen bei Schaltern ausblenden** ausschalten.

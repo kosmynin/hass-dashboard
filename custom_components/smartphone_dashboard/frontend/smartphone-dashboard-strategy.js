@@ -9,7 +9,7 @@ import { loadEnergyPopupCards } from "./energy-popup.js";
 import { SmartphoneDashboardAgenda } from "./agenda-cards.js";
 import { selectParcels } from "./parcel-selection.js";
 
-const STRATEGY_VERSION = "23.1.3";
+const STRATEGY_VERSION = "23.1.4";
 const CONFIG_VERSION = 26;
 
 const HOME_SECTION_LABELS = {
@@ -545,7 +545,7 @@ function isEntityVisible(hass, entityId, registry = entityRegistryMap(hass)) {
     state.attributes?.hidden !== true;
 }
 
-function entityDisplayName(hass, entityId) {
+function entityDisplayName(hass, entityId, formattedName) {
   const index = dashboardEntityIndex(hass);
   const entry = index.registry.get(entityId);
   const device = index.deviceById.get(entry?.device_id);
@@ -554,7 +554,7 @@ function entityDisplayName(hass, entityId) {
   const areaName = String(area?.name || "").trim();
   const deviceName = String(device?.name_by_user || device?.name || "").trim();
   const friendlyName = String(hass?.states?.[entityId]?.attributes?.friendly_name || "").trim();
-  let entityName = String(entry?.name || entry?.original_name || friendlyName || entityId.split(".")[1] || entityId).trim();
+  let entityName = String(formattedName || entry?.name || entry?.original_name || friendlyName || entityId.split(".")[1] || entityId).trim();
   for (const prefix of [deviceName, areaName].filter(Boolean)) {
     if (entityName.toLocaleLowerCase("de-DE").startsWith(`${prefix.toLocaleLowerCase("de-DE")} `)) {
       entityName = entityName.slice(prefix.length).trim();
@@ -563,13 +563,29 @@ function entityDisplayName(hass, entityId) {
   return entityName || entityId.split(".")[1] || entityId;
 }
 
-function roomSwitchName(hass, entityId) {
+function roomEntityName(hass, entityId, mode, defaultShort) {
+  if (mode !== "entity" && mode !== "device" && !defaultShort) return undefined;
   const state = hass.states?.[entityId];
+  const friendly = state?.attributes?.friendly_name;
   const name = state && hass.formatEntityName?.(state, { type: "entity" });
-  return name && name !== state.attributes?.friendly_name
-    ? name
-    : entityDisplayName(hass, entityId);
+  const short = entityDisplayName(hass, entityId, name !== friendly ? name : undefined);
+  if (mode !== "device") return short;
+
+  const index = dashboardEntityIndex(hass);
+  const device = index.deviceById.get(index.registry.get(entityId)?.device_id);
+  const deviceName = (device?.name_by_user || device?.name || "").trim();
+  if (!deviceName) return friendly || short;
+  return deviceName.toLocaleLowerCase("de-DE") === short.toLocaleLowerCase("de-DE")
+    ? short
+    : `${deviceName} ${short}`;
 }
+
+const ROOM_ENTITY_NAME_OPTIONS = [
+  ["", "Standard"],
+  ["entity", "Nur Entitätsname"],
+  ["device", "Mit Gerätenamen"],
+];
+const ROOM_NAMED_DOMAINS = new Set(["light", "switch", "climate", "media_player", "cover", "fan", "camera"]);
 
 function normalizeRoomKey(value) {
   return String(value || "")
@@ -1066,6 +1082,10 @@ function genericRoomPopup(room, hass, shortSwitchNames) {
   const covers = entities.filter((entityId) => entityId.startsWith("cover."));
   const fans = entities.filter((entityId) => entityId.startsWith("fan."));
   const cameras = entities.filter((entityId) => entityId.startsWith("camera."));
+  const nameOption = (entity, defaultShort = false) => {
+    const name = roomEntityName(hass, entity, room.entity_name_modes?.[entity], defaultShort);
+    return name ? { name } : {};
+  };
   const sensorMetricRank = (entityId) => {
     const attributes = hass?.states?.[entityId]?.attributes || {};
     const deviceClass = String(attributes.device_class || "").toLowerCase();
@@ -1139,6 +1159,7 @@ function genericRoomPopup(room, hass, shortSwitchNames) {
         card_type: "button",
         button_type: dimmable ? "slider" : "switch",
         entity,
+        ...nameOption(entity, shortSwitchNames),
         ...(dimmable ? { show_attribute: true, attribute: "brightness" } : {}),
       };
     }),
@@ -1151,7 +1172,7 @@ function genericRoomPopup(room, hass, shortSwitchNames) {
       card_type: "button",
       button_type: "switch",
       entity,
-      ...(shortSwitchNames ? { name: roomSwitchName(hass, entity) } : {}),
+      ...nameOption(entity, shortSwitchNames),
     })),
   );
   addGroup(
@@ -1161,6 +1182,7 @@ function genericRoomPopup(room, hass, shortSwitchNames) {
       type: "custom:bubble-card",
       card_type: "climate",
       entity,
+      ...nameOption(entity),
     })),
   );
   addGroup(
@@ -1170,16 +1192,17 @@ function genericRoomPopup(room, hass, shortSwitchNames) {
       type: "custom:bubble-card",
       card_type: "media-player",
       entity,
+      ...nameOption(entity),
     })),
   );
   addGroup("Abdeckungen", "mdi:blinds", covers.map((entity) => ({
-    type: "custom:bubble-card", card_type: "cover", entity,
+    type: "custom:bubble-card", card_type: "cover", entity, ...nameOption(entity),
   })));
   addGroup("Lüfter", "mdi:fan", fans.map((entity) => ({
-    type: "custom:bubble-card", card_type: "button", button_type: "switch", entity,
+    type: "custom:bubble-card", card_type: "button", button_type: "switch", entity, ...nameOption(entity),
   })));
   addGroup("Kameras", "mdi:cctv", cameras.map((entity) => ({
-    type: "picture-entity", entity, camera_view: "live", show_name: true, show_state: false,
+    type: "picture-entity", entity, camera_view: "live", show_name: true, show_state: false, ...nameOption(entity),
   })));
   if (sensors.length) {
     cards.push({
@@ -1196,7 +1219,7 @@ function genericRoomPopup(room, hass, shortSwitchNames) {
         const appearance = sensorAppearance(entity);
         return graphSensorCard(entity, hass, {
           ...appearance,
-          name: entityDisplayName(hass, entity),
+          ...nameOption(entity, true),
         });
       }),
     });
@@ -2720,6 +2743,8 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
       }
 
       for (const entityId of entityIds) {
+        const row = document.createElement("div");
+        row.className = "room-entity-setting";
         const label = document.createElement("label");
         label.className = "entity-row";
         const checkbox = document.createElement("input");
@@ -2739,7 +2764,32 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
           });
         });
         label.append(checkbox, copy);
-        body.appendChild(label);
+        row.appendChild(label);
+
+        const domain = entityId.split(".")[0];
+        const sensorUnit = this._hass.states[entityId]?.attributes?.unit_of_measurement;
+        if (ROOM_NAMED_DOMAINS.has(domain) || (domain === "sensor" && sensorUnit)) {
+          const select = document.createElement("select");
+          select.setAttribute("aria-label", `Namensanzeige für ${friendlyName}`);
+          for (const [value, title] of ROOM_ENTITY_NAME_OPTIONS) {
+            const option = document.createElement("option");
+            option.value = value;
+            option.textContent = title;
+            select.appendChild(option);
+          }
+          select.value = room.entity_name_modes?.[entityId] ?? "";
+          select.addEventListener("change", (event) => {
+            const mode = event.currentTarget.value;
+            this._updateRoom(room.area_id, (currentRoom) => {
+              const names = { ...currentRoom.entity_name_modes };
+              if (mode) names[entityId] = mode;
+              else delete names[entityId];
+              return { entity_name_modes: names };
+            });
+          });
+          row.appendChild(select);
+        }
+        body.appendChild(row);
       }
 
       expand.addEventListener("click", () => {
@@ -3067,6 +3117,9 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
         .entity-title { margin-top: 4px; font-weight: 600; }
         .entity-row { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; line-height: 1.35; }
         .entity-row input { margin-top: 2px; accent-color: var(--primary-color); }
+        .room-entity-setting { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; }
+        .room-entity-setting .entity-row { flex: 1 1 15rem; min-width: 0; overflow-wrap: anywhere; }
+        .room-entity-setting select { width: auto; max-width: 100%; min-height: 36px; padding: 6px 8px; font-size: 13px; }
         textarea { width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid var(--divider-color); border-radius: 8px; color: var(--primary-text-color); background: var(--card-background-color); font: 12px monospace; }
         .data-actions { display: flex; flex-wrap: wrap; gap: 8px; }
         .data-actions button { border: 0; border-radius: 8px; padding: 10px 12px; color: white; background: var(--primary-color); cursor: pointer; }
@@ -3154,10 +3207,10 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
           <div class="panel">
             <div class="switch-row">
               <div class="switch-copy">
-                <div class="switch-title">Gerätenamen bei Schaltern ausblenden</div>
-                <div class="switch-description">Zeigt im Raum-Pop-up nur den Namen der Schalter-Entität.</div>
+                <div class="switch-title">Kurze Namen für Licht und Schalter</div>
+                <div class="switch-description">Gilt für Entitäten mit der Namensauswahl „Standard“.</div>
               </div>
-              <ha-switch data-switch="short_switch_names" aria-label="Gerätenamen bei Schaltern ausblenden"></ha-switch>
+              <ha-switch data-switch="short_switch_names" aria-label="Kurze Namen für Licht und Schalter"></ha-switch>
             </div>
           </div>
           <div class="panel rooms-panel" data-room-panel></div>

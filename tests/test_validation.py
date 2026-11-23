@@ -39,3 +39,15 @@ def test_malformed_known_feature_shapes_are_rejected():
 def test_valid_forward_compatible_feature_data_survives():
     value = {"features": {"printer": {"enabled": True, "auto_discover": False, "printer_ids": ["device_1"], "future": {"finite": 2}}}}
     assert validate(value) is value
+
+
+def test_room_entity_name_modes_are_validated():
+    value = {
+        "rooms": [{
+            "area_id": "kitchen",
+            "entity_name_modes": {"light.worktop": "entity", "switch.socket": "device"},
+        }],
+    }
+    assert validate(value) is value
+    for modes in ([], {"light.worktop": "short"}, {"worktop": "entity"}):
+        assert rejected({"rooms": [{"area_id": "kitchen", "entity_name_modes": modes}]})
