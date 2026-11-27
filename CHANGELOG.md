@@ -1,3 +1,8 @@
+# Version 23.1.7
+
+- Das Energie-Pop-up zeigt die Home Flow Card auch dann, wenn ihr Modul erst nach dem Öffnen geladen wird. Falls es weiterhin die native Karte verwendet, zeigt es den Grund an.
+- Eine PV-Quelle mit Tageszähler und ohne Leistungssensor blendet den Live-Stromfluss für Netz und Akku nicht mehr aus. Das Pop-up erkennt auch übersetzte PV-Eingänge und behält die gemessene PV-Gesamtleistung, wenn für die einzelnen Eingänge nur Ertragszähler verfügbar sind.
+
 # Version 23.1.6
 
 - Unter **Räume** prüft der Dashboard-Editor unbekannte Bereichs-IDs und kann ihre gespeicherten Verweise entfernen.

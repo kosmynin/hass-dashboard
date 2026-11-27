@@ -104,10 +104,14 @@ die entsprechende Tagesbilanz in kWh. Der Akku-Ladestand bleibt aktuell. Die
 Tageswerte für PV-Eingänge und Geräte kommen aus den Recorder-Statistiken.
 
 Für die Hausgrafik installiere die
-[Home Flow Card](https://cards.flixlix.com/home-flow-card/installation) über HACS.
+[Home Flow Card](https://cards.flixlix.com/home-flow-card/installation) über den
+Home-Assistant-Marketplace (ab 2026.11) oder HACS.
 Die Strategy erkennt die geladene Karte automatisch. Falls die Karte fehlt oder
 mehrere getrennte Quellen desselben Typs konfiguriert sind, zeigt das Pop-up
-die [nativen Energiekarten](https://www.home-assistant.io/dashboards/energy/).
+die [nativen Energiekarten](https://www.home-assistant.io/dashboards/energy/)
+und den Grund dafür.
+Solarquellen mit einem Energiezähler und ohne Leistungssensor erscheinen nur
+unter **Heute**. Vorhandene Netz- und Speicherwerte bleiben in **Live** sichtbar.
 Konfigurierte Wasser- und Gaszähler sind ebenfalls erreichbar.
 
 Für die Live-Rangliste braucht jeder gewünschte Einzelverbraucher einen

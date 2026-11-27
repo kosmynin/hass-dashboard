@@ -2,6 +2,8 @@ import { energyRows, loadDailyEnergy } from "./energy-popup.js";
 
 const REFRESH_INTERVAL = 5 * 60 * 1000;
 const PERIODS = ["live", "today"];
+const HOME_FLOW_READY = "smartphone-dashboard-home-flow-ready";
+let watchingHomeFlow = false;
 
 const styles = `
   :host { display: block; min-width: 0; color: var(--primary-text-color); }
@@ -24,6 +26,8 @@ const styles = `
   h3 { margin: 0; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
   .scope, .status { color: var(--secondary-text-color); font-size: 13px; }
   .status { margin: 8px 0 0; }
+  .flow-status { margin: 0; padding: 0 4px; }
+  .flow-status a { color: var(--primary-color); }
   ul { list-style: none; padding: 0; margin: 4px 0 0; }
   li { display: grid; gap: 4px; padding: 6px 0; }
   li + li { border-top: 1px solid var(--divider-color); }
@@ -44,6 +48,9 @@ class SmartphoneDashboardEnergy extends HTMLElement {
     this._period = "live";
     this._cards = [];
     this._mountId = 0;
+    this._onHomeFlowReady = () => {
+      if (this._config?.views[this._period].homeFlow) void this._mountFlow();
+    };
   }
 
   setConfig(config) {
@@ -63,10 +70,16 @@ class SmartphoneDashboardEnergy extends HTMLElement {
   }
 
   connectedCallback() {
+    window.addEventListener(HOME_FLOW_READY, this._onHomeFlowReady);
+    if (!watchingHomeFlow && !customElements.get("home-flow-card")) {
+      watchingHomeFlow = true;
+      void customElements.whenDefined("home-flow-card").then(() => window.dispatchEvent(new Event(HOME_FLOW_READY)));
+    }
     if (this._config) this._build();
   }
 
   disconnectedCallback() {
+    window.removeEventListener(HOME_FLOW_READY, this._onHomeFlowReady);
     this._mountId++;
     this._cards = [];
     this._dailyRequest = undefined;
@@ -134,7 +147,8 @@ class SmartphoneDashboardEnergy extends HTMLElement {
         this._cards.push(card);
       };
       let flowCard;
-      if (view.homeFlow && customElements.get("home-flow-card")) {
+      const homeFlowLoaded = Boolean(customElements.get("home-flow-card"));
+      if (view.homeFlow && homeFlowLoaded) {
         try {
           flowCard = helpers.createCardElement(view.homeFlow);
           if (flowCard.localName === "hui-error-card") flowCard = undefined;
@@ -143,7 +157,23 @@ class SmartphoneDashboardEnergy extends HTMLElement {
           flowCard = undefined;
         }
       }
-      if (!flowCard && view.flow) appendCard(this._flow, helpers.createCardElement(view.flow));
+      if (!flowCard && view.flow) {
+        const status = document.createElement("p");
+        status.className = "status flow-status";
+        if (!homeFlowLoaded) {
+          status.innerHTML = 'Das Modul der Home Flow Card ist noch nicht geladen. <a href="https://cards.flixlix.com/home-flow-card/installation#verify-the-install" target="_blank" rel="noopener noreferrer">Lovelace-Ressource prüfen</a>';
+        } else {
+          status.textContent = view.homeFlowReason || "Die Home Flow Card konnte mit dieser Konfiguration nicht geöffnet werden.";
+        }
+        this._flow.append(status);
+        appendCard(this._flow, helpers.createCardElement(view.flow));
+      }
+      if (flowCard && view.homeFlowNotice) {
+        const status = document.createElement("p");
+        status.className = "status flow-status";
+        status.textContent = view.homeFlowNotice;
+        this._flow.append(status);
+      }
       if (!flowCard && this._config.battery) appendCard(this._flow, helpers.createCardElement(this._config.battery));
       // The native daily distribution already includes water and gas.
       if (this._period === "live" || flowCard) {
@@ -238,7 +268,8 @@ class SmartphoneDashboardEnergy extends HTMLElement {
           status.textContent = "Die eingerichteten Leistungssensoren sind nicht sichtbar, nicht verfügbar oder liefern keine unterstützte Einheit.";
         } else if (!configured) {
           status.textContent = kind === "loads" ? "Keine passenden Einzelverbraucher in den Energie-Einstellungen." :
-            today ? "Keine Ertragszähler für PV-Eingänge verfügbar." : "Keine PV-Leistungssensoren verfügbar.";
+            today ? "Keine sichtbaren PV-Ertragszähler gefunden. Prüfe die Energie-Entitäten deines Wechselrichters." :
+              "Keine sichtbaren PV-Leistungssensoren gefunden. Prüfe die PV-Eingänge am Gerät oder die Solarquellen in den Energie-Einstellungen.";
         } else if (today && this._dailyRequest) {
           status.textContent = "Tageswerte werden geladen …";
         } else if (today && this._dailyError) {
