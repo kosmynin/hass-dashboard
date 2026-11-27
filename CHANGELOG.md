@@ -1,3 +1,8 @@
+# Version 23.1.8
+
+- Die Hausgrafik zeigt die gemessene PV-Gesamtleistung bei mehreren PV-Eingängen. Ein passender Sensor wird automatisch erkannt oder lässt sich im Dashboard-Editor unter **Weitere Bereiche → Energie** auswählen. Die Einzelwerte bleiben in der PV-Liste.
+- **Heute** verwendet die native Energiebilanz in kWh, damit reine Leistungskarten wie Home Flow Card v0.3.2 keine Tagesenergiewerte als Leistung darstellen.
+
 # Version 23.1.7
 
 - Das Energie-Pop-up zeigt die Home Flow Card auch dann, wenn ihr Modul erst nach dem Öffnen geladen wird. Falls es weiterhin die native Karte verwendet, zeigt es den Grund an.

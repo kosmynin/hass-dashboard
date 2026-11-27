@@ -235,6 +235,10 @@ def _valid_config(value: dict[str, Any]) -> dict[str, Any]:
         if "master_alarm" in feature:
             master_alarm = feature["master_alarm"]
             if not isinstance(master_alarm, str) or (master_alarm and not re.fullmatch(r"alarm_control_panel\.[a-z0-9_]+", master_alarm)): raise vol.Invalid(f"{feature_name}.master_alarm ist ungültig")
+        if feature_name == "energy" and "pv_total" in feature:
+            pv_total = feature["pv_total"]
+            if not isinstance(pv_total, str) or (pv_total and not re.fullmatch(r"sensor\.[a-z0-9_]+", pv_total)):
+                raise vol.Invalid("energy.pv_total erwartet eine Sensor-Entitäts-ID")
         for list_key in ("printer_ids", "excluded_printer_ids"):
             if list_key in feature and (not isinstance(feature[list_key], list) or any(not isinstance(item, str) or not re.fullmatch(r"[a-zA-Z0-9_-]{1,128}", item) for item in feature[list_key])): raise vol.Invalid(f"{list_key} ist ungültig")
         if "system_colors" in feature:

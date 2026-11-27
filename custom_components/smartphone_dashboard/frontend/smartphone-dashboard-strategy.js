@@ -10,7 +10,7 @@ import { SmartphoneDashboardEnergy } from "./energy-overview.js";
 import { SmartphoneDashboardAgenda } from "./agenda-cards.js";
 import { selectParcels } from "./parcel-selection.js";
 
-const STRATEGY_VERSION = "23.1.7";
+const STRATEGY_VERSION = "23.1.8";
 const CONFIG_VERSION = 26;
 
 const HOME_SECTION_LABELS = {
@@ -130,7 +130,7 @@ class SmartphoneDashboardDeferredCards extends HTMLElement {
       ? window.loadCardHelpers()
       : Promise.reject(new Error("Home-Assistant-Kartenhelfer sind nicht verfügbar"));
     const cardsReady = energy
-      ? loadEnergyPopupCards(this._hass, (entityId) => isEntityVisible(this._hass, entityId))
+      ? loadEnergyPopupCards(this._hass, (entityId) => isEntityVisible(this._hass, entityId), config.pv_total)
       : config.cards;
     void Promise.all([helpersReady, cardsReady]).then(([helpers, configs]) => {
       if (!this.isConnected || this._config !== config || !this._isRequested()) return;
@@ -1414,6 +1414,10 @@ function normalizedNavigationHash(value, fallback) {
 
 function configurationValidationErrors(config) {
   const errors = [];
+  const pvTotal = config?.features?.energy?.pv_total;
+  if (pvTotal !== undefined && (typeof pvTotal !== "string" || (pvTotal && !/^sensor\.[a-z0-9_]+$/.test(pvTotal)))) {
+    errors.push("Energie · PV-Gesamtleistung erwartet eine Sensor-Entitäts-ID.");
+  }
   const hashes = [];
   for (const [key, meta] of Object.entries(FEATURE_META)) {
     const raw = String(config?.features?.[key]?.hash || "").trim();
@@ -1684,6 +1688,7 @@ function configuredFeatures(config, hass) {
       excluded_printer_ids: [...excludedPrinters],
       system_groups: systemGroups,
       system_colors: key === "system" ? normalizedSystemColors(item.system_colors) : {},
+      ...(key === "energy" && item.pv_total && { pv_total: item.pv_total }),
       master_alarm: key === "security"
         ? securityMasterAlarm(item.master_alarm, entities, hass)
         : "",
@@ -1844,6 +1849,7 @@ function featurePopupCards(item, hass) {
     type: "custom:smartphone-dashboard-deferred-cards",
     popup_hash: item.hash,
     card_source: "energy",
+    ...(item.pv_total && { pv_total: item.pv_total }),
     cards: [],
   }];
   if (item.key === "parcels") return parcelFeatureCards(item, hass);
@@ -3399,7 +3405,7 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
       const hashListId = `feature-hashes-${feature.key}`;
       const energy = feature.key === "energy";
       const sourceFields = energy
-        ? ""
+        ? '<div data-pv-total-host></div><p class="hint">Ohne Auswahl wird ein passender PV-Gesamtsensor automatisch erkannt.</p>'
         : `<div class="switch-row"><div class="switch-copy"><div class="switch-title">Neue Entitäten automatisch ergänzen</div></div><ha-switch data-auto></ha-switch></div>
           ${feature.key === "security" ? '<div data-master-alarm-host></div>' : ""}
           ${feature.key === "printer" ? '<div data-printer-ids-host></div><label class="select-label">Automatisch erkannte Bambu-Lab Geräte-IDs<textarea class="readonly-list" data-auto-printer-ids rows="3" readonly></textarea></label><div data-excluded-printer-ids-host></div>' : ""}
@@ -3455,6 +3461,10 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
         this._render();
       });
       if (energy) {
+        row.querySelector("[data-pv-total-host]").replaceWith(this._entitySelector(
+          "PV-Gesamtleistung für die Hausgrafik", feature.pv_total || "",
+          { domain: "sensor", device_class: "power" }, (value) => updateFeature({ pv_total: value }),
+        ));
         featurePanel.appendChild(row);
         continue;
       }

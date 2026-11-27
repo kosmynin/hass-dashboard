@@ -158,14 +158,16 @@ class SmartphoneDashboardEnergy extends HTMLElement {
         }
       }
       if (!flowCard && view.flow) {
-        const status = document.createElement("p");
-        status.className = "status flow-status";
-        if (!homeFlowLoaded) {
-          status.innerHTML = 'Das Modul der Home Flow Card ist noch nicht geladen. <a href="https://cards.flixlix.com/home-flow-card/installation#verify-the-install" target="_blank" rel="noopener noreferrer">Lovelace-Ressource prüfen</a>';
-        } else {
-          status.textContent = view.homeFlowReason || "Die Home Flow Card konnte mit dieser Konfiguration nicht geöffnet werden.";
+        if (this._period === "live") {
+          const status = document.createElement("p");
+          status.className = "status flow-status";
+          if (!homeFlowLoaded) {
+            status.innerHTML = 'Das Modul der Home Flow Card ist noch nicht geladen. <a href="https://cards.flixlix.com/home-flow-card/installation#verify-the-install" target="_blank" rel="noopener noreferrer">Lovelace-Ressource prüfen</a>';
+          } else {
+            status.textContent = view.homeFlowReason || "Die Home Flow Card konnte mit dieser Konfiguration nicht geöffnet werden.";
+          }
+          this._flow.append(status);
         }
-        this._flow.append(status);
         appendCard(this._flow, helpers.createCardElement(view.flow));
       }
       if (flowCard && view.homeFlowNotice) {
@@ -176,7 +178,7 @@ class SmartphoneDashboardEnergy extends HTMLElement {
       }
       if (!flowCard && this._config.battery) appendCard(this._flow, helpers.createCardElement(this._config.battery));
       // The native daily distribution already includes water and gas.
-      if (this._period === "live" || flowCard) {
+      if (this._period === "live") {
         for (const config of view.extra) appendCard(this._utilities, helpers.createCardElement(config));
         this._utilityDetails.hidden = !view.extra.length;
         this._utilityDetails.open = !view.flow;
