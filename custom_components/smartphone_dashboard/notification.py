@@ -1,6 +1,7 @@
 """Local notification evaluation and serialized delivery."""
 from __future__ import annotations
 import asyncio
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 import fnmatch
 import hashlib
@@ -52,6 +53,7 @@ from .notification_core import (
     parcel_content_label,
     parcel_sort_key,
     parse_mobile_action,
+    same_appliance_device,
     ups_alert_conditions,
     valid_nina_glob,
     waste_collection_details,
@@ -104,6 +106,14 @@ LEGACY_TO_CONFIG = {
     "input_text.smartphone_abfall_sensoren": "waste_entities", "input_text.smartphone_usv_sensoren": "ups_entities",
     "input_text.smartphone_nina_muster": "nina_entities",
 }
+
+@dataclass
+class _ApplianceSource:
+    device: Any
+    kind: str
+    area_id: str | None
+    states: list[tuple[Any, str]]
+
 
 class NotificationCoordinator:
     def __init__(self, hass: HomeAssistant, manager: ConfigManager, entry: ConfigEntry) -> None:
@@ -753,7 +763,9 @@ class NotificationCoordinator:
             return []
         entity_registry = er.async_get(self.hass)
         device_registry = dr.async_get(self.hass)
-        grouped: dict[str, list[tuple[Any, Any, str]]] = {}
+        grouped: dict[str, list[tuple[Any, str]]] = {}
+        device_ids: dict[str, str] = {}
+        child_ids: dict[str, list[str]] = {}
         for state in self.hass.states.async_all():
             entity_entry = entity_registry.async_get(state.entity_id)
             if not entity_entry or not entity_entry.device_id:
@@ -766,33 +778,61 @@ class NotificationCoordinator:
                 entity_entry.original_name,
                 str(state.attributes.get("friendly_name") or ""),
             ))).casefold()
-            grouped.setdefault(entity_entry.device_id, []).append((state, entity_entry, descriptor))
+            device_id = entity_entry.device_id
+            if device_id not in device_ids:
+                device = device_registry.async_get(device_id)
+                parent_id = getattr(device, "parent_device_id", None)
+                device_ids[device_id] = parent_id or device_id
+                if parent_id:
+                    child_ids.setdefault(parent_id, []).append(device_id)
+            grouped.setdefault(device_ids[device_id], []).append((state, descriptor))
 
-        now = dt_util.now()
-        entries: list[dict[str, object]] = []
-        active_device_ids: set[str] = set()
-        for device_id, candidates in grouped.items():
+        appliance_groups: list[list[_ApplianceSource]] = []
+        for device_id, candidates in sorted(grouped.items()):
             device = device_registry.async_get(device_id)
             if device is None:
                 continue
             device_name = str(device.name_by_user or device.name or "").strip()
             device_descriptor = " ".join(filter(None, (
                 device_name, device.model, device.manufacturer,
-                *(descriptor for _, _, descriptor in candidates),
+                *(descriptor for _, descriptor in candidates),
             )))
             kind = appliance_kind(device_descriptor)
             if not kind:
                 continue
+            area_id = dr.async_get_effective_area_id(self.hass, device)
+            source = _ApplianceSource(device, kind, area_id, candidates)
+            matches = [
+                group for group in appliance_groups
+                if group[0].kind == kind and all(
+                    same_appliance_device(device, other.device, same_area=area_id == other.area_id)
+                    for other in group
+                )
+            ]
+            if len(matches) == 1:
+                matches[0].append(source)
+            else:
+                appliance_groups.append([source])
 
+        now = dt_util.now()
+        entries: list[dict[str, object]] = []
+        active_device_ids: set[str] = set()
+        for group in appliance_groups:
+            primary = group[0]
+            device_id = primary.device.id
+            device_name = str(primary.device.name_by_user or primary.device.name or "").strip()
+            candidates = [state for source in group for state in source.states]
             status_candidates: list[tuple[int, Any, str, str]] = []
-            for state, _entry, descriptor in candidates:
+            for state, descriptor in candidates:
                 if re.search(r"door|t[üu]r|lock|remote|child|warning|alarm|progress|fortschritt|remaining|restzeit|finish.?time|end.?time", descriptor):
                     continue
                 phase = appliance_phase(state.state)
                 if not phase:
                     continue
                 score = 0
-                if re.search(r"operation|operating|machine.?state|program.?state|status|zustand|betrieb", descriptor):
+                if re.search(r"operation|operating|machine.?state|program.?state", descriptor):
+                    score += 150
+                elif re.search(r"status|zustand|betrieb", descriptor):
                     score += 100
                 elif re.search(r"activity|phase|power|state", descriptor):
                     score += 50
@@ -846,7 +886,7 @@ class NotificationCoordinator:
                     program = status_state.attributes[key]
                     break
 
-            for state, _entry, descriptor in candidates:
+            for state, descriptor in candidates:
                 if progress is None and re.search(r"progress|fortschritt|percent|percentage", descriptor):
                     try:
                         value = float(state.state.replace(",", "."))
@@ -877,19 +917,24 @@ class NotificationCoordinator:
                 observed_total_minutes=self._appliance_remaining_baselines.get(device_id),
             )
 
-            area_id = dr.async_get_effective_area_id(self.hass, device)
+            area_id = next((source.area_id for source in group if source.area_id), None)
             popup = f"raum-{area_id}" if area_id else ""
             url = dashboard_popup_url(popup) if popup else "/handy/handy"
-            entries.append(appliance_activity_presentation(
+            entry = appliance_activity_presentation(
                 device_id,
                 device_name,
-                kind,
+                primary.kind,
                 status_state.state,
                 program=program,
                 progress=progress,
                 remaining_minutes=remaining,
                 url=url,
-            ))
+            )
+            entry["device_aliases"] = sorted(
+                {source.device.id for source in group[1:]} |
+                {child_id for source in group for child_id in child_ids.get(source.device.id, ())}
+            )
+            entries.append(entry)
             active_device_ids.add(device_id)
         self._appliance_remaining_baselines = {
             device_id: baseline
@@ -1053,6 +1098,17 @@ class NotificationCoordinator:
             digests = digest_map.setdefault(recipient, {})
             tags = tag_map.setdefault(recipient, {})
             started = started_map.setdefault(recipient, {})
+
+            # Keep an existing activity when a child or duplicate registry entry
+            # becomes part of the physical device group.
+            for device_id, entry in desired.items():
+                if device_id in tags:
+                    continue
+                alias = next((item for item in entry.get("device_aliases", []) if item in tags), None)
+                if alias is not None:
+                    tags[device_id] = tags.pop(alias)
+                    digests.pop(alias, None)
+                    started[device_id] = started.pop(alias, now_epoch)
 
             for device_id in set(tags) - set(desired):
                 tag = tags[device_id]

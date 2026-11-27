@@ -1,8 +1,12 @@
 import ast
+import asyncio
 import runpy
+import time
+from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 CORE = runpy.run_path(str(Path(__file__).parents[1] / "custom_components/smartphone_dashboard/notification_core.py"))
 pending_fingerprints = CORE["pending_fingerprints"]
 retained_fingerprints = CORE["retained_fingerprints"]
@@ -525,6 +529,115 @@ def test_appliance_live_activity_normalizes_integrations_and_throttles_progress(
     assert data["url"].endswith("#raum-kueche")
     assert data["silent"] is True
     assert data["push"]["sound"] == "none"
+
+
+def test_same_appliance_uses_registry_identity_and_keeps_distinct_devices():
+    common = {
+        "name": "Geschirrspülmaschine", "name_by_user": None,
+        "manufacturer": "Bosch", "model": "SMV", "connections": set(),
+        "serial_number": None,
+    }
+    left = SimpleNamespace(**common, identifiers={("home_connect", "one")})
+    alias = SimpleNamespace(**common, identifiers={("mqtt", "dishwasher")})
+    other = SimpleNamespace(**common, identifiers={("home_connect", "two")})
+    matches = CORE["same_appliance_device"]
+    assert matches(left, alias, same_area=True)
+    assert not matches(left, alias, same_area=False)
+    assert not matches(left, other, same_area=True)
+    alias.identifiers = left.identifiers
+    assert matches(left, alias, same_area=False)
+    alias.identifiers = {("mqtt", "dishwasher")}
+    left.serial_number = alias.serial_number = "serial-one"
+    assert matches(left, alias, same_area=False)
+    other.serial_number = "serial-two"
+    assert not matches(left, other, same_area=True)
+
+
+def test_duplicate_dishwasher_sources_share_one_activity_and_clear_old_tags():
+    path = Path(__file__).parents[1] / "custom_components/smartphone_dashboard/notification.py"
+    tree = ast.parse(path.read_text())
+    source = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "_ApplianceSource")
+    coordinator = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "NotificationCoordinator")
+    methods = [node for node in coordinator.body if getattr(node, "name", None) in {
+        "_active_appliance_entries", "_sync_appliance_live_activities",
+    }]
+    now = datetime(2026, 11, 27, 12, tzinfo=timezone.utc)
+    common = {
+        "name": "Geschirrspülmaschine", "name_by_user": None,
+        "manufacturer": "Bosch", "model": "SMV", "connections": set(),
+        "area_id": "kitchen",
+    }
+    devices = {
+        "a": SimpleNamespace(**common, id="a", serial_number="one", identifiers={("home_connect", "one")}),
+        "b": SimpleNamespace(**common, id="b", serial_number=None, identifiers={("mqtt", "dishwasher")}),
+        "child": SimpleNamespace(id="child", parent_device_id="a"),
+    }
+    registry = {}
+    states = []
+    for entity_id, device_id, state in (
+        ("sensor.dishwasher_operation_state", "a", "Run"),
+        ("binary_sensor.dishwasher_running", "b", "on"),
+        ("sensor.dishwasher_progress", "child", "55"),
+    ):
+        registry[entity_id] = SimpleNamespace(device_id=device_id, name=None, original_name=None)
+        states.append(SimpleNamespace(entity_id=entity_id, state=state, attributes={}))
+    namespace = {
+        **CORE, "Any": Any, "dataclass": dataclass, "time": time,
+        "LIVE_ACTIVITY_RENEW_AFTER": 7 * 3600,
+        "dt_util": SimpleNamespace(now=lambda: now),
+        "er": SimpleNamespace(async_get=lambda _hass: SimpleNamespace(async_get=registry.get)),
+        "dr": SimpleNamespace(
+            async_get=lambda _hass: SimpleNamespace(async_get=devices.get),
+            async_get_effective_area_id=lambda _hass, device: device.area_id,
+        ),
+    }
+    exec(compile(ast.Module(body=[source, *methods], type_ignores=[]), str(path), "exec"), namespace)
+    sent = []
+
+    async def notify(recipient, service, payload):
+        sent.append(payload)
+
+    fake = SimpleNamespace(
+        hass=SimpleNamespace(states=SimpleNamespace(async_all=lambda: states)),
+        manager=SimpleNamespace(data={}),
+        _dashboard_entity_enabled=lambda *_args, **_kwargs: True,
+        _appliance_remaining_baselines={},
+        _async_notify=notify,
+        _retry_count={},
+        _retry_after={},
+    )
+    active_entries = namespace["_active_appliance_entries"]
+    entries = active_entries(fake)
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry["entity_id"] == "a"
+    assert entry["device_aliases"] == ["b", "child"]
+    assert entry["progress"] == 55
+
+    recipient = "notify.mobile_app_test"
+    start = now.timestamp()
+    primary_tag = appliance_live_activity_tag("a")
+    duplicate_tag = appliance_live_activity_tag("b")
+    tags = {recipient: {"a": primary_tag, "b": duplicate_tag}}
+    digests = {recipient: {"a": entry["digest"], "b": "old"}}
+    started = {recipient: {"a": start, "b": start}}
+    sync = namespace["_sync_appliance_live_activities"]
+    asyncio.run(sync(fake, entries, [recipient], digests, tags, started, [], set(), start))
+    assert sent == [{"message": "clear_notification", "data": {"tag": duplicate_tag}}]
+    assert tags == {recipient: {"a": primary_tag}}
+    assert started == {recipient: {"a": start}}
+
+    sent.clear()
+    tags = {recipient: {"child": duplicate_tag}}
+    digests = {recipient: {"child": "old"}}
+    started = {recipient: {"child": start}}
+    asyncio.run(sync(fake, entries, [recipient], digests, tags, started, [], set(), start))
+    assert len(sent) == 1 and sent[0]["data"]["tag"] == duplicate_tag
+    assert tags == {recipient: {"a": duplicate_tag}}
+
+    states[0].state = "Finished"
+    assert active_entries(fake) == []
+
 
 def test_waste_collection_details_support_default_and_dated_attributes():
     details = waste_collection_details(

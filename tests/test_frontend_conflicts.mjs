@@ -3,7 +3,7 @@ globalThis.HTMLElement = class { attachShadow() { this.shadowRoot = { activeElem
 globalThis.customElements = { registry: new Map(), get(name) { return this.registry.get(name); }, define(name, value) { this.registry.set(name, value); }, whenDefined() { return Promise.resolve(); } };
 globalThis.window = globalThis;
 const { SmartphoneDashboardStrategy, SmartphoneDashboardStrategyEditor, partitionConflictPatch, applyNotificationOptions, mergeBackendNotifications, detectedRooms, applyRoomOptions, configuredFeatures, parcelSensorEntities, popupContentCards } = await import("../custom_components/smartphone_dashboard/frontend/smartphone-dashboard-strategy.js");
-const { energyPopupCards, loadEnergyPopupCards } = await import("../custom_components/smartphone_dashboard/frontend/energy-popup.js");
+const { energyPopupCards, energyRows, loadDailyEnergy, loadEnergyPopupCards } = await import("../custom_components/smartphone_dashboard/frontend/energy-popup.js");
 const { agendaRows, loadCalendarEvents } = await import("../custom_components/smartphone_dashboard/frontend/agenda-cards.js");
 
 const roomHass = {
@@ -291,23 +291,27 @@ const energyHass = {
   },
 };
 const isEnergyVisible = (entity) => !energyHass.entities[entity]?.hidden;
-const [energyDistribution, energyReadings, livePower, energyLink] = await loadEnergyPopupCards(energyHass, isEnergyVisible);
+const [energyOverview, energyLink] = await loadEnergyPopupCards(energyHass, isEnergyVisible);
+assert.equal(energyOverview.type, "custom:smartphone-dashboard-energy");
+const { live, today } = energyOverview.views;
+const energyDistribution = today.flow;
 assert.deepEqual(energyDistribution, {
   type: "energy-distribution",
   title: "Energieverteilung",
   collection_key: "energy_smartphone_dashboard",
 });
-assert.equal(energyReadings.columns, 2);
-assert.deepEqual(energyReadings.cards.map((card) => card.entity),
-  ["sensor.house_power", "sensor.pv_power", "sensor.storage_soc", "sensor.water_flow", "sensor.gas_flow"]);
-assert.deepEqual(livePower, {
+assert.deepEqual(live.extra.map((card) => card.entity), ["sensor.water_flow", "sensor.gas_flow"]);
+assert.deepEqual(today.extra.map((card) => card.type), ["energy-water-graph", "energy-gas-graph"]);
+assert.equal(energyOverview.battery.entity, "sensor.storage_soc");
+assert.deepEqual(live.flow, {
   type: "power-sankey",
   title: "Aktueller Leistungsfluss",
   collection_key: "energy_dashboard_now",
   layout: "vertical",
   show_values: true,
-  max_devices: 5,
+  max_devices: 3,
 });
+assert.equal(live.homeFlow, null);
 assert.equal(energyLink.button_action.tap_action.navigation_path, "/energy");
 const waterMeter = { type: "water", stat_energy_from: "sensor.water_total" };
 const gasMeter = { type: "gas", stat_energy_from: "sensor.gas_total" };
@@ -327,17 +331,107 @@ const batteryPower = { type: "battery", power_config: {
 } };
 const firstLiveVersion = { config: { version: "2025.12.0" }, states: {} };
 for (const source of [gridPower, batteryPower]) {
-  assert.deepEqual(
-    energyPopupCards({ energy_sources: [source] }, firstLiveVersion, isEnergyVisible),
-    [energyDistribution, livePower, energyLink],
-  );
+  const [overview] = energyPopupCards({ energy_sources: [source] }, firstLiveVersion, isEnergyVisible);
+  assert.deepEqual(overview.views.live.flow, live.flow);
+  assert.equal(overview.views.live.homeFlow, null);
 }
 const onlyEnergyTotals = energyPopupCards({
   energy_sources: [gridMeter, { ...gasMeter, stat_rate: "sensor.gas_flow" }],
 }, firstLiveVersion, isEnergyVisible);
-assert.equal(onlyEnergyTotals[0].type, "energy-distribution");
-assert.match(onlyEnergyTotals[1].content, /Leistungssensoren/);
-assert.match(energyPopupCards({ energy_sources: [gridPower] }, olderEnergyHass, isEnergyVisible)[1].content, /2025\.12/);
+assert.deepEqual(onlyEnergyTotals[0].views.today.flow, energyDistribution);
+assert.match(onlyEnergyTotals[0].views.live.flow.content, /Leistungssensoren/);
+assert.match(energyPopupCards({ energy_sources: [gridPower] }, olderEnergyHass)[0].views.live.flow.content, /2025\.12/);
+
+const reading = (state, unit) => ({ state: String(state), attributes: { unit_of_measurement: unit } });
+const measuredHass = {
+  config: { version: "2026.11.1", time_zone: "Europe/Berlin" },
+  devices: { stream: { manufacturer: "EcoFlow", model: "STREAM Ultra" } },
+  entities: {
+    "sensor.battery_power": { device_id: "stream", translation_key: "battery_power" },
+    "sensor.battery_soc": { device_id: "stream", original_name: "Battery SOC" },
+    "sensor.solar_total": { device_id: "stream" },
+    "sensor.stream_pv1_power": { device_id: "stream" },
+    "sensor.stream_pv1_energy": { device_id: "stream" },
+    "sensor.stream_pv2_power": { device_id: "stream" },
+    "sensor.battery_charge": { device_id: "stream" },
+    "sensor.stream_pv3_power": { device_id: "stream", hidden_by: "user" },
+  },
+  states: {
+    "sensor.grid_power": reading(1.16, "kW"),
+    "sensor.battery_power": reading(-240, "W"),
+    "sensor.battery_soc": reading(67, "%"),
+    "sensor.solar_total": reading(560, "W"),
+    "sensor.stream_pv1_power": reading(200, "W"),
+    "sensor.stream_pv1_energy": reading(20.3, "kWh"),
+    "sensor.stream_pv2_power": reading(160, "W"),
+    "sensor.stream_pv3_power": reading(120, "W"),
+    "sensor.dishwasher_power": reading(0.96, "kW"),
+    "sensor.dryer_power": reading(620, "W"),
+    "sensor.office_power": reading(250, "W"),
+    "sensor.fridge_power": reading(130, "W"),
+    "sensor.disabled_power": reading("unavailable", "W"),
+  },
+};
+const measuredPrefs = {
+  energy_sources: [
+    { type: "grid", stat_energy_from: "sensor.grid_import", stat_energy_to: "sensor.grid_export", stat_rate: "sensor.grid_power" },
+    { type: "solar", stat_rate: "sensor.solar_total", stat_energy_from: "sensor.solar_energy" },
+    { type: "battery", stat_energy_from: "sensor.battery_discharge", stat_energy_to: "sensor.battery_charge",
+      power_config: { stat_rate_inverted: "sensor.battery_power" } },
+  ],
+  device_consumption: [
+    { name: "Kühlschrank", stat_rate: "sensor.fridge_power" },
+    { name: "Trockner", stat_rate: "sensor.dryer_power", stat_consumption: "external:dryer_energy" },
+    { name: "Büro-PC", stat_rate: "sensor.office_power" },
+    { name: "Geschirrspüler", stat_rate: "sensor.dishwasher_power", stat_consumption: "external:dishwasher_energy" },
+    { name: "Ausgefallen", stat_rate: "sensor.disabled_power" },
+    { name: "Kühlschrank (doppelt)", stat_rate: "sensor.fridge_power" },
+  ],
+};
+const [measuredOverview] = energyPopupCards(measuredPrefs, measuredHass, (id) =>
+  id in measuredHass.states && !measuredHass.entities[id]?.hidden_by,
+);
+assert.equal(measuredOverview.views.live.homeFlow.type, "custom:home-flow-card");
+assert.deepEqual(measuredOverview.views.live.homeFlow.battery, {
+  entity: "sensor.battery_power", invert_state: true, name: "STREAM Ultra", state_of_charge: "sensor.battery_soc",
+});
+assert.deepEqual(measuredOverview.views.today.homeFlow.battery.entity, {
+  consumption: "sensor.battery_discharge", production: "sensor.battery_charge",
+});
+assert.equal(measuredOverview.views.today.homeFlow.mode, "energy");
+assert.equal(measuredOverview.views.today.homeFlow.energy_entities, undefined);
+const [detectedBattery] = energyPopupCards({ energy_sources: [
+  { type: "battery", stat_energy_to: "sensor.battery_charge" },
+] }, measuredHass);
+assert.deepEqual(detectedBattery.views.live.homeFlow.battery, measuredOverview.views.live.homeFlow.battery);
+assert.deepEqual(measuredOverview.solar, [
+  { name: "PV 1", power: "sensor.stream_pv1_power", energy: "sensor.stream_pv1_energy" },
+  { name: "PV 2", power: "sensor.stream_pv2_power" },
+]);
+assert.deepEqual(energyRows(measuredOverview.loads, measuredHass, "live", {}, 3).map(({ name, value }) => [name, value]), [
+  ["Geschirrspüler", 960], ["Trockner", 620], ["Büro-PC", 250],
+]);
+const requestStats = [];
+const dailyRows = [...measuredOverview.loads, ...measuredOverview.solar];
+const statsHass = { ...measuredHass, async callWS(request) {
+  requestStats.push(request);
+  return {
+    "sensor.stream_pv1_energy": [{ change: 0.5 }, { change: null }, { change: 0.75 }],
+    "external:dryer_energy": [{ change: 1 }, { change: 1.5 }],
+    "external:dishwasher_energy": [{ change: 0 }],
+  };
+} };
+// The UTC offset at midnight differs from that in the afternoon on this date.
+const dailyStats = await loadDailyEnergy(statsHass, dailyRows, new Date("2026-03-29T12:00:00Z"));
+assert.deepEqual(requestStats[0], {
+  type: "recorder/statistics_during_period", start_time: "2026-03-28T23:00:00.000Z",
+  end_time: "2026-03-29T12:00:00.000Z", statistic_ids: ["external:dryer_energy", "external:dishwasher_energy", "sensor.stream_pv1_energy"],
+  period: "5minute", types: ["change"], units: { energy: "kWh" },
+});
+assert.deepEqual(energyRows(measuredOverview.loads, measuredHass, "today", dailyStats, 3).map(({ value }) => value), [2.5]);
+assert.deepEqual(energyRows(measuredOverview.solar, measuredHass, "today", dailyStats).map(({ value }) => value), [1.25]);
+assert.equal(dailyStats["external:dishwasher_energy"], 0);
+
 const fetchErrorCards = await loadEnergyPopupCards({
   async callWS() { throw new Error("offline"); },
 }, isEnergyVisible);
@@ -668,6 +762,7 @@ assert.equal(
   "function",
 );
 assert.equal(typeof replacementRegistry.get("smartphone-dashboard-deferred-cards").prototype.setConfig, "function");
+assert.equal(typeof replacementRegistry.get("smartphone-dashboard-energy").prototype.setConfig, "function");
 assert.equal(typeof replacementRegistry.get("smartphone-dashboard-notification-controls").prototype.setConfig, "function");
 assert.equal(typeof replacementRegistry.get("smartphone-dashboard-agenda").prototype.setConfig, "function");
 globalThis.setTimeout = nativeSetTimeout;
@@ -704,13 +799,13 @@ try {
   globalThis.location.hash = "#energie";
   lazyEnergy._onLocationChange();
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.deepEqual(lazyEnergy._cards.map((card) => card.config), [energyDistribution, energyReadings, livePower, energyLink]);
+  assert.deepEqual(lazyEnergy._cards.map((card) => card.config), [energyOverview, energyLink]);
   const updatedEnergyHass = {
     ...energyHass,
     states: { ...energyHass.states, "sensor.house_power": { state: "615" } },
   };
   lazyEnergy.hass = updatedEnergyHass;
-  assert.equal(lazyEnergy._cards[2].hass, updatedEnergyHass);
+  assert.equal(lazyEnergy._cards[0].hass, updatedEnergyHass);
   assert.equal(energyRequests, requestsBeforeOpen + 1);
   globalThis.location.hash = "";
   lazyEnergy._onLocationChange();
@@ -721,6 +816,53 @@ try {
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.deepEqual(lazyEnergy._cards.map((card) => card.config), [energyDistribution, energyLink]);
   assert.equal(energyRequests, requestsBeforeOpen + 2);
+
+  const EnergyCard = replacementRegistry.get("smartphone-dashboard-energy");
+  const overview = new EnergyCard();
+  function testNode() {
+    return {
+      children: [],
+      events: {},
+      dataset: {},
+      style: {},
+      append(...children) { this.children.push(...children); },
+      replaceChildren(...children) { this.children = children; },
+      querySelector(selector) { return (this.nodes ??= {})[selector] ??= testNode(); },
+      setAttribute(key, value) { this[key] = value; },
+      addEventListener(event, listener) { this.events[event] = listener; },
+    };
+  }
+  globalThis.document.createElement = testNode;
+  const buttons = [testNode(), testNode()];
+  overview.shadowRoot = { ...testNode(), querySelectorAll() { return buttons; } };
+  overview.hass = statsHass;
+  overview.setConfig(measuredOverview);
+  overview.isConnected = true;
+  overview.connectedCallback();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(buttons[0]["aria-pressed"], "true");
+  assert.equal(overview._flow.children[0].config.type, "power-sankey");
+  assert.equal(overview._details.children[0].dataset.kind, "loads");
+  assert.equal(requestStats.length, 1);
+
+  const firstFlowCard = globalThis.customElements.get("home-flow-card");
+  if (!firstFlowCard) globalThis.customElements.define("home-flow-card", class {});
+  try {
+    buttons[1].events.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(buttons[1]["aria-pressed"], "true");
+    assert.equal(overview._flow.children[0].config.mode, "energy");
+    assert.equal(overview._details.children[0].dataset.kind, "solar");
+    assert.equal(requestStats.length, 2);
+    buttons[0].events.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(overview._flow.children[0].config.mode, "power");
+    assert.equal(requestStats.length, 2);
+  } finally {
+    overview.isConnected = false;
+    overview.disconnectedCallback();
+    if (!firstFlowCard) globalThis.customElements.registry.delete("home-flow-card");
+  }
 } finally {
   globalThis.location.hash = "";
   globalThis.document = originalDocument;

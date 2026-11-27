@@ -786,6 +786,41 @@ def appliance_kind(descriptor: object) -> str:
     )
     return next((kind for kind, pattern in patterns if re.search(pattern, value)), "")
 
+def same_appliance_device(left, right, *, same_area: bool) -> bool:
+    """Match registry entries for one appliance without collapsing distinct devices."""
+    def normalized(value: object) -> str:
+        return " ".join(str(value or "").casefold().split())
+
+    left_ids = left.identifiers
+    right_ids = right.identifiers
+    left_connections = left.connections
+    right_connections = right.connections
+    if left_ids & right_ids or left_connections & right_connections:
+        return True
+
+    left_serial = normalized(left.serial_number)
+    right_serial = normalized(right.serial_number)
+    left_maker = normalized(left.manufacturer)
+    right_maker = normalized(right.manufacturer)
+    same_maker = not left_maker or not right_maker or left_maker == right_maker
+    unknown_serials = {"", "0", "unknown", "unavailable", "none", "n/a"}
+    if left_serial not in unknown_serials and right_serial not in unknown_serials:
+        return same_maker and left_serial == right_serial
+
+    # Two IDs in the same namespace identify separate appliances.
+    for first, second in ((left_ids, right_ids), (left_connections, right_connections)):
+        if {kind for kind, _ in first} & {kind for kind, _ in second}:
+            return False
+
+    left_name = normalized(left.name_by_user or left.name)
+    right_name = normalized(right.name_by_user or right.name)
+    left_model = normalized(left.model)
+    right_model = normalized(right.model)
+    return (
+        same_area and bool(left_name) and left_name == right_name and same_maker
+        and (not left_model or not right_model or left_model == right_model)
+    )
+
 def appliance_phase(value: object) -> str:
     """Normalize common integration-specific operation states."""
     state = re.sub(r"[^a-z0-9äöü]+", " ", str(value or "").casefold()).strip()

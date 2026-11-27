@@ -97,21 +97,28 @@ USV-Meldung erzeugen.
 
 ## Energie
 
-**Weitere Bereiche → Energie** zeigt die heutige Bilanz mit der eingebauten
-Karte [Energieverteilung](https://www.home-assistant.io/dashboards/energy/#energy-distribution).
-Sie übernimmt die Strom-, Wasser- und Gasquellen aus dem Home-Assistant-Energie-Dashboard.
-Wasser und Gas erscheinen automatisch, sobald dort die jeweiligen Zähler
-eingerichtet sind. Verfügbare Messwerte für Hausleistung, PV-Leistung,
-Speicher-Ladestand sowie Wasser- und Gasdurchfluss stehen darunter.
+**Weitere Bereiche → Energie** übernimmt die Quellen und Einzelverbraucher aus
+den Home-Assistant-Energie-Einstellungen. **Live** zeigt den Stromfluss, die
+drei aktuell größten Verbraucher und die Leistung je PV-Eingang. **Heute** zeigt
+die entsprechende Tagesbilanz in kWh. Der Akku-Ladestand bleibt aktuell. Die
+Tageswerte für PV-Eingänge und Geräte kommen aus den Recorder-Statistiken.
 
-Der [aktuelle Leistungsfluss](https://www.home-assistant.io/dashboards/energy/#power-flow-sankey-graph)
-zeigt die momentane Hausleistung sowie die Flüsse zwischen Netz, PV, Speicher
-und Verbrauchern mit ihren Leistungswerten. Dafür braucht Home Assistant ab
-2025.12 mindestens einen Leistungssensor (W oder kW) in den Energie-Einstellungen.
+Für die Hausgrafik installiere die
+[Home Flow Card](https://cards.flixlix.com/home-flow-card/installation) über HACS.
+Die Strategy erkennt die geladene Karte automatisch. Falls die Karte fehlt oder
+mehrere getrennte Quellen desselben Typs konfiguriert sind, zeigt das Pop-up
+die [nativen Energiekarten](https://www.home-assistant.io/dashboards/energy/).
+Konfigurierte Wasser- und Gaszähler sind ebenfalls erreichbar.
 
-Das Pop-up übernimmt die Quellen beim Öffnen. Über **Energie-Dashboard öffnen**
-ist die vollständige Auswertung erreichbar. In den Strategy-Einstellungen
-lässt sich der Bereich ausblenden.
+Für die Live-Rangliste braucht jeder gewünschte Einzelverbraucher einen
+Leistungssensor in den Energie-Einstellungen. Verfügbare Einzelsensoren der
+EcoFlow STREAM Ultra werden als PV-Eingänge erkannt. Aktiviere die
+[Ertragszähler je PV-Eingang](https://github.com/shuette42/ecoflow-energy-ha/blob/main/documentation/entities/stream.md#sensors---energy-dashboard)
+in Home Assistant, wenn deine EcoFlow-Integration sie bereitstellt. Jeder
+Eingang zeigt den gemessenen Ertrag der dort angeschlossenen Module.
+
+Über **Energie-Dashboard öffnen** gelangst du zur vollständigen Auswertung.
+In den Strategy-Einstellungen lässt sich der Bereich ausblenden.
 
 ## Migration und Benachrichtigungen
 

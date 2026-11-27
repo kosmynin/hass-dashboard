@@ -6,10 +6,11 @@
 
 import { ALERT_POPUPS, SmartphoneDashboardAlerts } from "./notification-cards.js";
 import { loadEnergyPopupCards } from "./energy-popup.js";
+import { SmartphoneDashboardEnergy } from "./energy-overview.js";
 import { SmartphoneDashboardAgenda } from "./agenda-cards.js";
 import { selectParcels } from "./parcel-selection.js";
 
-const STRATEGY_VERSION = "23.1.4";
+const STRATEGY_VERSION = "23.1.5";
 const CONFIG_VERSION = 26;
 
 const HOME_SECTION_LABELS = {
@@ -3530,6 +3531,7 @@ function registerDashboardComponents(registry) {
   for (const [tag, component] of [
     ["smartphone-dashboard-strategy-editor", SmartphoneDashboardStrategyEditor],
     ["smartphone-dashboard-deferred-cards", SmartphoneDashboardDeferredCards],
+    ["smartphone-dashboard-energy", SmartphoneDashboardEnergy],
     ["smartphone-dashboard-notification-controls", SmartphoneDashboardNotificationControls],
     ["smartphone-dashboard-alerts", SmartphoneDashboardAlerts],
     ["smartphone-dashboard-agenda", SmartphoneDashboardAgenda],

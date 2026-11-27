@@ -1,3 +1,8 @@
+# Version 23.1.5
+
+- Das Energie-Pop-up wechselt zwischen Live-Leistung und Tagesertrag. Es zeigt die drei größten Verbraucher, PV-Eingänge und den Akkufluss. Wenn die Home Flow Card geladen ist und zu den konfigurierten Quellen passt, zeigt sie den Stromfluss als Hausgrafik.
+- Ein Haushaltsgerät erhält eine Live Activity, wenn es über mehrere Home-Assistant-Geräteeinträge erkannt wird. Überzählige gespeicherte Aktivitäten werden beendet.
+
 # Version 23.1.4
 
 - In den Raumeinstellungen lässt sich die Namensanzeige pro Entität wählen. Die Voreinstellung für kurze Namen greift auch bei Leuchten.
