@@ -10,7 +10,7 @@ import { SmartphoneDashboardEnergy } from "./energy-overview.js";
 import { SmartphoneDashboardAgenda } from "./agenda-cards.js";
 import { selectParcels } from "./parcel-selection.js";
 
-const STRATEGY_VERSION = "23.1.5";
+const STRATEGY_VERSION = "23.1.6";
 const CONFIG_VERSION = 26;
 
 const HOME_SECTION_LABELS = {
@@ -2399,6 +2399,21 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
     this._update("rooms", rooms);
   }
 
+  async _removeMissingRooms(areaIds) {
+    const config = this._config;
+    const areas = await this._hass.callWS({ type: "config/area_registry/list" });
+    if (this._disposed || config !== this._config) return false;
+    if (!Array.isArray(areas) || areas.some((area) => typeof area?.area_id !== "string")) {
+      throw new Error("Bereichsliste ist ungültig");
+    }
+    const knownIds = new Set(areas.map((area) => area.area_id));
+    const missingIds = new Set(areaIds.filter((id) => !knownIds.has(id)));
+    const rooms = config.rooms.filter((room) => !missingIds.has(room?.area_id));
+    if (rooms.length === config.rooms.length) return false;
+    this._update("rooms", rooms);
+    return true;
+  }
+
   _updatePerson(entityId, changes) {
     const persons = detectedPersons(this._hass, this._config.persons).map((person) =>
       person.entity === entityId ? { ...person, ...changes } : person,
@@ -2678,6 +2693,35 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
 
   _renderRooms(container) {
     const rooms = detectedRooms(this._hass, this._config.rooms);
+    if (this._hass?.areas && Array.isArray(this._config.rooms)) {
+      const { areaById } = dashboardEntityIndex(this._hass);
+      const missingIds = [...new Set(this._config.rooms
+        .map((room) => room?.area_id).filter((id) => id && !areaById.has(id)))];
+      if (missingIds.length) {
+        const cleanup = document.createElement("div");
+        cleanup.innerHTML = `
+          <p class="hint"></p>
+          <button type="button">Veraltete Bereiche entfernen</button>
+          <p class="hint" role="status"></p>
+        `;
+        cleanup.querySelector("p").textContent =
+          `Die Bereichs-IDs ${missingIds.join(", ")} sind unbekannt. Speichere anschließend das Dashboard.`;
+        const button = cleanup.querySelector("button");
+        const status = cleanup.querySelector("[role=status]");
+        button.addEventListener("click", async () => {
+          button.disabled = true;
+          try {
+            if (await this._removeMissingRooms(missingIds)) this._render();
+            else status.textContent = "Keine Einträge entfernt. Prüfe die aktuelle Bereichsliste.";
+          } catch {
+            status.textContent = "Die Home-Assistant-Bereichsliste konnte nicht geprüft werden.";
+          } finally {
+            button.disabled = false;
+          }
+        });
+        container.appendChild(cleanup);
+      }
+    }
 
     if (!rooms.length) {
       const empty = document.createElement("p");

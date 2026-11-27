@@ -1,3 +1,8 @@
+# Version 23.1.6
+
+- Unter **Räume** prüft der Dashboard-Editor unbekannte Bereichs-IDs und kann ihre gespeicherten Verweise entfernen.
+- Die Live-Verbraucherliste unterstützt weitere Leistungseinheiten und erklärt, wenn eingerichtete Sensoren für die Liste ausgeblendet sind oder ihre Einheit fehlt. Die Home Flow Card kann den Hausverbrauch aus den Quellen berechnen, wenn für das Haus nur ein Energiezähler konfiguriert ist.
+
 # Version 23.1.5
 
 - Das Energie-Pop-up wechselt zwischen Live-Leistung und Tagesertrag. Es zeigt die drei größten Verbraucher, PV-Eingänge und den Akkufluss. Wenn die Home Flow Card geladen ist und zu den konfigurierten Quellen passt, zeigt sie den Stromfluss als Hausgrafik.

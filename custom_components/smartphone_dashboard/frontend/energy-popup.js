@@ -1,6 +1,6 @@
 const ELECTRICITY_TYPES = new Set(["grid", "solar", "battery", "home"]);
 const ENERGY_SOURCE_TYPES = new Set([...ELECTRICITY_TYPES, "water", "gas"]);
-const POWER_FACTORS = { W: 1, kW: 1000, MW: 1000000 };
+const POWER_FACTORS = { µW: 1e-6, mW: 1e-3, W: 1, kW: 1e3, MW: 1e6, GW: 1e9, TW: 1e12 };
 const COLLECTION_KEY = "energy_smartphone_dashboard";
 const HOME_FLOW_TYPE = "home-flow-card";
 
@@ -98,6 +98,7 @@ function homeFlowConfig(sources, hass, period, batteryLabel, batterySoc) {
     // whenever individual sources cannot be represented without dropping data.
     if (nodes[type]) return null;
     const node = homeFlowNode(source, hass, period);
+    if (!node.entity && type === "home" && period === "live" && !source.stat_rate) continue;
     if (!node.entity) return null;
     nodes[type] = {
       ...node,
@@ -211,8 +212,8 @@ function energyPopupCards(prefs, hass, isVisible = (entity) => Boolean(hass.stat
     title: type === "water" ? "Wasser heute" : "Gas heute",
     collection_key: COLLECTION_KEY,
   }));
-  const loads = (Array.isArray(prefs.device_consumption) ? prefs.device_consumption : [])
-    .filter((device) => device)
+  const devicesConfigured = (Array.isArray(prefs.device_consumption) ? prefs.device_consumption : []).filter(Boolean);
+  const loads = devicesConfigured
     .map(({ stat_rate, stat_consumption, name }) => ({
       name: name || entityName(hass, stat_consumption || stat_rate),
       power: visible(stat_rate) ? powerEntity(hass, stat_rate) : undefined,
@@ -225,6 +226,7 @@ function energyPopupCards(prefs, hass, isVisible = (entity) => Boolean(hass.stat
       live: {
         flow: electricity.length ? nativeLiveFlow(electricity, hass.config?.version) : null,
         homeFlow: homeFlowConfig(liveSources, hass, "live", batteryLabel, batterySoc),
+        loadSensorsConfigured: devicesConfigured.some((device) => Boolean(device.stat_rate)),
         extra: utilityReadings,
       },
       today: {

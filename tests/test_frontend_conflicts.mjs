@@ -45,6 +45,23 @@ const sanitizedRooms = detectedRooms(roomHass, [{
 }]);
 assert.equal(sanitizedRooms[0].main_light, "light.kitchen");
 assert.deepEqual(sanitizedRooms[0].hidden_entities, []);
+const retainedRoom = { area_id: "kitchen", icon: "mdi:chef-hat", enabled: false, hidden_entities: ["sensor.kitchen_temperature"] };
+const restoredRoom = { area_id: "restored_area", main_light: "light.living_room" };
+const removedRoom = { area_id: "obsolete_area" };
+const roomRepairEditor = new SmartphoneDashboardStrategyEditor();
+const roomRepairChanges = [];
+roomRepairEditor._config = { rooms: [restoredRoom, removedRoom, retainedRoom], title: "Handy" };
+roomRepairEditor._hass = { async callWS(message) {
+  assert.deepEqual(message, { type: "config/area_registry/list" });
+  return [{ area_id: "kitchen" }, { area_id: "restored_area" }];
+} };
+roomRepairEditor._update = (key, value) => { roomRepairChanges.push([key, value]); };
+assert.equal(await roomRepairEditor._removeMissingRooms(["obsolete_area", "restored_area"]), true);
+assert.deepEqual(roomRepairChanges, [["rooms", [restoredRoom, retainedRoom]]]);
+assert.equal(await roomRepairEditor._removeMissingRooms(["restored_area"]), false);
+roomRepairEditor._hass = { async callWS() { return null; } };
+await assert.rejects(roomRepairEditor._removeMissingRooms(["obsolete_area"]), /Bereichsliste ist ungültig/);
+assert.equal(roomRepairChanges.length, 1);
 const roomDashboard = { views: [{ sections: [{ cards: [
   { type: "custom:bubble-card", card_type: "separator", name: "Räume" },
   { type: "grid", columns: 2, cards: [] },
@@ -354,6 +371,7 @@ const measuredHass = {
     "sensor.stream_pv1_energy": { device_id: "stream" },
     "sensor.stream_pv2_power": { device_id: "stream" },
     "sensor.battery_charge": { device_id: "stream" },
+    "sensor.hidden_power": { hidden_by: "user" },
     "sensor.stream_pv3_power": { device_id: "stream", hidden_by: "user" },
   },
   states: {
@@ -367,9 +385,10 @@ const measuredHass = {
     "sensor.stream_pv3_power": reading(120, "W"),
     "sensor.dishwasher_power": reading(0.96, "kW"),
     "sensor.dryer_power": reading(620, "W"),
-    "sensor.office_power": reading(250, "W"),
+    "sensor.office_power": reading(250000, "mW"),
     "sensor.fridge_power": reading(130, "W"),
     "sensor.disabled_power": reading("unavailable", "W"),
+    "sensor.hidden_power": reading(1800, "W"),
   },
 };
 const measuredPrefs = {
@@ -378,6 +397,7 @@ const measuredPrefs = {
     { type: "solar", stat_rate: "sensor.solar_total", stat_energy_from: "sensor.solar_energy" },
     { type: "battery", stat_energy_from: "sensor.battery_discharge", stat_energy_to: "sensor.battery_charge",
       power_config: { stat_rate_inverted: "sensor.battery_power" } },
+    { type: "home", stat_energy_to: "sensor.home_energy" },
   ],
   device_consumption: [
     { name: "Kühlschrank", stat_rate: "sensor.fridge_power" },
@@ -385,6 +405,7 @@ const measuredPrefs = {
     { name: "Büro-PC", stat_rate: "sensor.office_power" },
     { name: "Geschirrspüler", stat_rate: "sensor.dishwasher_power", stat_consumption: "external:dishwasher_energy" },
     { name: "Ausgefallen", stat_rate: "sensor.disabled_power" },
+    { name: "Ausgeblendet", stat_rate: "sensor.hidden_power" },
     { name: "Kühlschrank (doppelt)", stat_rate: "sensor.fridge_power" },
   ],
 };
@@ -392,6 +413,8 @@ const [measuredOverview] = energyPopupCards(measuredPrefs, measuredHass, (id) =>
   id in measuredHass.states && !measuredHass.entities[id]?.hidden_by,
 );
 assert.equal(measuredOverview.views.live.homeFlow.type, "custom:home-flow-card");
+assert.equal(measuredOverview.views.live.homeFlow.home, undefined);
+assert.equal(measuredOverview.views.live.loadSensorsConfigured, true);
 assert.deepEqual(measuredOverview.views.live.homeFlow.battery, {
   entity: "sensor.battery_power", invert_state: true, name: "STREAM Ultra", state_of_charge: "sensor.battery_soc",
 });
@@ -399,6 +422,7 @@ assert.deepEqual(measuredOverview.views.today.homeFlow.battery.entity, {
   consumption: "sensor.battery_discharge", production: "sensor.battery_charge",
 });
 assert.equal(measuredOverview.views.today.homeFlow.mode, "energy");
+assert.equal(measuredOverview.views.today.homeFlow.home.entity, "sensor.home_energy");
 assert.equal(measuredOverview.views.today.homeFlow.energy_entities, undefined);
 const [detectedBattery] = energyPopupCards({ energy_sources: [
   { type: "battery", stat_energy_to: "sensor.battery_charge" },

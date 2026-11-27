@@ -234,7 +234,9 @@ class SmartphoneDashboardEnergy extends HTMLElement {
       } else {
         const status = document.createElement("p");
         status.className = "status";
-        if (!configured) {
+        if (!configured && kind === "loads" && !today && this._config.views.live.loadSensorsConfigured) {
+          status.textContent = "Die eingerichteten Leistungssensoren sind nicht sichtbar, nicht verfügbar oder liefern keine unterstützte Einheit.";
+        } else if (!configured) {
           status.textContent = kind === "loads" ? "Keine passenden Einzelverbraucher in den Energie-Einstellungen." :
             today ? "Keine Ertragszähler für PV-Eingänge verfügbar." : "Keine PV-Leistungssensoren verfügbar.";
         } else if (today && this._dailyRequest) {
