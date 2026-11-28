@@ -49,7 +49,7 @@ class SmartphoneDashboardEnergy extends HTMLElement {
     this._cards = [];
     this._mountId = 0;
     this._onHomeFlowReady = () => {
-      if (this._config?.views[this._period].homeFlow) void this._mountFlow();
+      if (this.isConnected && this._period === "live" && this._config?.views?.live?.homeFlow) void this._mountFlow();
     };
   }
 
@@ -134,6 +134,7 @@ class SmartphoneDashboardEnergy extends HTMLElement {
   async _mountFlow() {
     const mountId = ++this._mountId;
     const view = this._config.views[this._period];
+    const live = this._period === "live";
     this._cards = [];
     this._flow.replaceChildren();
     this._utilities.replaceChildren();
@@ -150,15 +151,19 @@ class SmartphoneDashboardEnergy extends HTMLElement {
       const homeFlowLoaded = Boolean(customElements.get("home-flow-card"));
       if (view.homeFlow && homeFlowLoaded) {
         try {
-          flowCard = helpers.createCardElement(view.homeFlow);
-          if (flowCard.localName === "hui-error-card") flowCard = undefined;
-          else appendCard(this._flow, flowCard);
-        } catch {
-          flowCard = undefined;
+          const card = helpers.createCardElement(view.homeFlow);
+          if (card.localName === "hui-error-card") {
+            console.warn("Smartphone-Dashboard: Home Flow Card konnte nicht erstellt werden", card.error);
+          } else {
+            appendCard(this._flow, card);
+            flowCard = card;
+          }
+        } catch (error) {
+          console.warn("Smartphone-Dashboard: Home Flow Card konnte nicht geöffnet werden", error);
         }
       }
       if (!flowCard && view.flow) {
-        if (this._period === "live") {
+        if (live) {
           const status = document.createElement("p");
           status.className = "status flow-status";
           if (!homeFlowLoaded) {
@@ -178,7 +183,7 @@ class SmartphoneDashboardEnergy extends HTMLElement {
       }
       if (!flowCard && this._config.battery) appendCard(this._flow, helpers.createCardElement(this._config.battery));
       // The native daily distribution already includes water and gas.
-      if (this._period === "live") {
+      if (live) {
         for (const config of view.extra) appendCard(this._utilities, helpers.createCardElement(config));
         this._utilityDetails.hidden = !view.extra.length;
         this._utilityDetails.open = !view.flow;

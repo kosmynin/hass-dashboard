@@ -1,3 +1,8 @@
+# Version 23.1.9
+
+- Ein manuell gewählter PV-Gesamtsensor bleibt auch bei ausgeblendeter Entität als Quelle der Hausgrafik verfügbar.
+- Quellen mit reinen Tageswerten blockieren die Live-Hausgrafik nicht mehr. Die Strategy wertet auch separat konfigurierte Lade- und Entladesensoren des Speichers aus und benennt Fehler beim Laden der Home Flow Card genauer.
+
 # Version 23.1.8
 
 - Die Hausgrafik zeigt die gemessene PV-Gesamtleistung bei mehreren PV-Eingängen. Ein passender Sensor wird automatisch erkannt oder lässt sich im Dashboard-Editor unter **Weitere Bereiche → Energie** auswählen. Die Einzelwerte bleiben in der PV-Liste.

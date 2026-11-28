@@ -10,7 +10,7 @@ import { SmartphoneDashboardEnergy } from "./energy-overview.js";
 import { SmartphoneDashboardAgenda } from "./agenda-cards.js";
 import { selectParcels } from "./parcel-selection.js";
 
-const STRATEGY_VERSION = "23.1.8";
+const STRATEGY_VERSION = "23.1.9";
 const CONFIG_VERSION = 26;
 
 const HOME_SECTION_LABELS = {

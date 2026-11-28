@@ -111,6 +111,8 @@ Bei mehreren PV-Eingängen desselben Geräts kann ein erkannter PV-Gesamtsensor
 den Wert für die Hausgrafik liefern. Unter **Weitere Bereiche → Energie** lässt sich
 der Leistungssensor für **PV-Gesamtleistung für die Hausgrafik** auch auswählen.
 Die Auswahl ändert keine Quellen im Home-Assistant-Energie-Dashboard.
+Ein bewusst ausgewählter Sensor kann als Messquelle für die Hausgrafik dienen,
+auch wenn seine Entität in Home Assistant ausgeblendet ist.
 Wenn die Karte oder eine passende Messung fehlt, zeigt das Pop-up den Grund
 zusammen mit der nativen Live-Karte.
 

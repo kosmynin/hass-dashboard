@@ -425,7 +425,7 @@ const [energyOnlySolar] = energyPopupCards({ energy_sources: measuredPrefs.energ
 assert.equal(energyOnlySolar.views.live.homeFlow.type, "custom:home-flow-card");
 assert.equal(energyOnlySolar.views.live.homeFlow.grid.entity, "sensor.grid_power");
 assert.equal(energyOnlySolar.views.live.homeFlow.solar, undefined);
-assert.match(energyOnlySolar.views.live.homeFlowNotice, /Solarquellen ohne Leistungssensor/);
+assert.match(energyOnlySolar.views.live.homeFlowNotice, /ohne Leistungssensor.*\(PV\)/);
 assert.equal(energyOnlySolar.views.today.flow.type, "energy-distribution");
 const [detectedBattery] = energyPopupCards({ energy_sources: [
   { type: "battery", stat_energy_to: "sensor.battery_charge" },
@@ -462,7 +462,7 @@ const [splitBattery] = energyPopupCards({ energy_sources: [
   { type: "battery", stat_energy_from_solar: "sensor.solar_charge", stat_energy_to_home: "sensor.battery_to_home" },
 ] }, measuredHass);
 assert.equal(splitBattery.views.today.flow.type, "energy-distribution");
-assert.match(splitBattery.views.live.homeFlowReason, /Leistungsmessung/);
+assert.match(splitBattery.views.live.homeFlowReason, /ohne Leistungssensor.*\(Speicher\)/);
 const [solarWithoutPortPower] = energyPopupCards({ energy_sources: [
   { type: "solar", stat_rate: "sensor.solar_meter_power" },
 ] }, { ...translatedPv, states: { ...translatedPv.states, "sensor.panel_watts": undefined } });
@@ -493,6 +493,26 @@ assert.equal(separateDevices.views.live.homeFlow, null);
 assert.match(separateDevices.views.live.homeFlowReason, /mehrere getrennte Quellen/);
 const [selectedTotal] = energyPopupCards(separatePvPrefs, separateDevicesHass, undefined, "sensor.manual_pv_power");
 assert.equal(selectedTotal.views.live.homeFlow.solar.entity, "sensor.manual_pv_power");
+const [invalidTotal] = energyPopupCards(separatePvPrefs, separateDevicesHass, undefined, "sensor.stream_pv1_energy");
+assert.match(invalidTotal.views.live.homeFlowReason, /keine unterstützte Leistungseinheit/);
+const [withEnergyOnlyMeters] = energyPopupCards({ energy_sources: [
+  ...separatePvPrefs.energy_sources,
+  { type: "grid", stat_energy_from: "external:second_grid_energy" },
+  { type: "battery", stat_energy_to: "external:second_battery_energy" },
+] }, separatePvHass, undefined, totalPower);
+assert.equal(withEnergyOnlyMeters.views.live.homeFlow.solar.entity, totalPower);
+assert.match(withEnergyOnlyMeters.views.live.homeFlowNotice, /Netz, Speicher/);
+const directionalBattery = { type: "battery", power_config: {
+  stat_rate_from_solar: "sensor.battery_charging_power", stat_rate_to_home: "sensor.battery_discharging_power",
+} };
+const [withDirectionalBattery] = energyPopupCards({ energy_sources: [directionalBattery] }, {
+  ...measuredHass, states: { ...measuredHass.states,
+    "sensor.battery_charging_power": reading(250, "W"), "sensor.battery_discharging_power": reading(0, "W"),
+  },
+});
+assert.deepEqual(withDirectionalBattery.views.live.homeFlow.battery.entity, {
+  consumption: "sensor.battery_discharging_power", production: "sensor.battery_charging_power",
+});
 assert.deepEqual(energyRows(measuredOverview.loads, measuredHass, "live", {}, 3).map(({ name, value }) => [name, value]), [
   ["Geschirrspüler", 960], ["Trockner", 620], ["Büro-PC", 250],
 ]);
@@ -901,6 +921,31 @@ try {
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.deepEqual(lazyEnergy._cards.map((card) => card.config), [energyDistribution, energyLink]);
   assert.equal(energyRequests, requestsBeforeOpen + 2);
+
+  globalThis.location.hash = "";
+  const hiddenTotalHass = {
+    ...separateDevicesHass,
+    entities: { ...separateDevicesHass.entities, "sensor.manual_pv_power": { hidden: true } },
+    async callWS(request) {
+      if (request.type === "smartphone_dashboard/config/display") return { config: {} };
+      assert.equal(request.type, "energy/get_prefs");
+      return separatePvPrefs;
+    },
+  };
+  const dashboardWithTotal = await SmartphoneDashboardStrategy.generate(
+    { features: { energy: { pv_total: "sensor.manual_pv_power" } } }, hiddenTotalHass,
+  );
+  const popupWithTotal = dashboardWithTotal.views[0].sections[0].cards.find((card) => card.hash === "#energie");
+  const deferredWithTotal = new DeferredCards();
+  deferredWithTotal.isConnected = true;
+  deferredWithTotal.setConfig(popupWithTotal.cards[0]);
+  deferredWithTotal.hass = hiddenTotalHass;
+  globalThis.location.hash = "#energie";
+  deferredWithTotal._onLocationChange();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const selectedOverview = deferredWithTotal._cards[0].config;
+  assert.equal(selectedOverview.views.live.homeFlow.solar.entity, "sensor.manual_pv_power");
+  assert.equal(selectedOverview.solar.some((row) => row.power === "sensor.manual_pv_power"), false);
 
   const EnergyCard = replacementRegistry.get("smartphone-dashboard-energy");
   const overview = new EnergyCard();
