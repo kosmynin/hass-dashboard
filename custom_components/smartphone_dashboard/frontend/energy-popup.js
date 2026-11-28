@@ -47,9 +47,13 @@ function hasLivePower(source) {
   );
 }
 
-function nativeLiveFlow(sources, version) {
+function supportsSankey(version, firstMonth) {
   const [year, month] = String(version ?? "").split(".").map(Number);
-  if (!(year > 2025 || (year === 2025 && month >= 12))) {
+  return year > 2025 || (year === 2025 && month >= firstMonth);
+}
+
+function nativeLiveFlow(sources, version) {
+  if (!supportsSankey(version, 12)) {
     return hint("Das native Live-Diagramm ist ab Home Assistant 2025.12 verfügbar.");
   }
   return sources.flatMap(livePowerSources).some(hasLivePower) ? {
@@ -105,6 +109,10 @@ function homeFlowNode(source, hass) {
   const config = source.power_config ?? {};
   const netPower = power(source.stat_rate);
   const inverted = power(config.stat_rate_inverted);
+  // Home Assistant publishes a separate normalized meter for inverted inputs.
+  if (type === "battery" && config.stat_rate_inverted && netPower && netPower !== config.stat_rate_inverted) {
+    return { entity: netPower };
+  }
   if (inverted) return { entity: inverted, invert_state: true };
   if (config.stat_rate_inverted) return { entity: netPower };
   if (type === "battery") {
@@ -119,10 +127,13 @@ function homeFlowNode(source, hass) {
   if (config.stat_rate_from || config.stat_rate_to) {
     return { entity: powerDirections(config.stat_rate_from, config.stat_rate_to, power) || netPower };
   }
-  return { entity: power(config.stat_rate) || netPower };
+  const entity = power(config.stat_rate) || netPower;
+  // EcoFlow Cloud's STREAM Ultra Power Battery sensor is positive while charging.
+  const ecoFlowRawPower = type === "battery" && /[._]stream_ultra(?:_[a-z0-9]+)*_power_battery$/.test(entity ?? "");
+  return { entity, ...(ecoFlowRawPower && { invert_state: true }) };
 }
 
-function homeFlowConfig(sources, hass, batteryLabel, batterySoc, solarTotal) {
+function homeFlowConfig(sources, hass, batteryLabel, batterySoc, solarTotal, reverseBattery) {
   const nodes = {};
   const missingLiveSources = new Set();
   const ambiguous = new Set();
@@ -150,6 +161,15 @@ function homeFlowConfig(sources, hass, batteryLabel, batterySoc, solarTotal) {
     if (meters.size === 1) nodes[type] = meters.values().next().value;
     else ambiguous.add(SOURCE_LABELS[type]);
   }
+  if (nodes.battery && reverseBattery) {
+    const battery = nodes.battery;
+    if (typeof battery.entity === "string") {
+      battery.invert_state = !battery.invert_state;
+    } else {
+      const { consumption, production } = battery.entity;
+      battery.entity = { ...(production && { consumption: production }), ...(consumption && { production: consumption }) };
+    }
+  }
   const notice = [
     missingLiveSources.size && `Quellen ohne Leistungssensor oder mit ungeeigneter Einheit fehlen in der Hausgrafik (${[...missingLiveSources].join(", ")}).`,
     ambiguous.size && `Mehrere getrennte Quellen für ${[...ambiguous].join(", ")} stehen im nativen Leistungsfluss.`,
@@ -162,8 +182,6 @@ function homeFlowConfig(sources, hass, batteryLabel, batterySoc, solarTotal) {
     card: {
       type: "custom:" + HOME_FLOW_TYPE,
       kilo_decimals: 2,
-      animate_numbers: false,
-      disable_dots: true,
       ...nodes,
     },
     notice,
@@ -252,7 +270,7 @@ function solarDetails(sources, hass, visibleStatistic, entries, devices, battery
   return result.filter((row) => row.power || row.energy);
 }
 
-function energyPopupCards(prefs, hass, isVisible = (entity) => Boolean(hass.states?.[entity]), configuredSolarTotal, manualInputs = []) {
+function energyPopupCards(prefs, hass, isVisible = (entity) => Boolean(hass.states?.[entity]), configuredSolarTotal, manualInputs = [], reverseBattery = false) {
   const sources = (Array.isArray(prefs?.energy_sources) ? prefs.energy_sources : [])
     .filter((source) => ENERGY_SOURCE_TYPES.has(source?.type));
   const dashboardLink = openEnergyDashboard();
@@ -311,21 +329,13 @@ function energyPopupCards(prefs, hass, isVisible = (entity) => Boolean(hass.stat
   const utilityReadings = [...new Map(utilities.filter((source) => visible(source.stat_rate)).map((source) => [
     source.stat_rate, { type: "tile", entity: source.stat_rate, name: source.type === "water" ? "Wasser" : "Gas" },
   ])).values()];
-  const devicesConfigured = (Array.isArray(prefs.device_consumption) ? prefs.device_consumption : []).filter(Boolean);
-  const loads = devicesConfigured
-    .map(({ stat_rate, stat_consumption, name }) => ({
-      name: name || entityName(hass, stat_consumption || stat_rate),
-      power: visible(stat_rate) ? powerEntity(hass, stat_rate) : undefined,
-      energy: visibleStatistic(stat_consumption) ? stat_consumption : undefined,
-    }))
-    .filter((row) => row.power || row.energy);
   let solarTotalIssue;
   if (configuredSolarTotal && !selectedTotal) {
     solarTotalIssue = hass.states?.[configuredSolarTotal]
       ? "Der ausgewählte PV-Gesamtsensor liefert keine unterstützte Leistungseinheit."
       : "Der ausgewählte PV-Gesamtsensor ist in Home Assistant nicht verfügbar.";
   }
-  const liveHomeFlow = homeFlowConfig(liveSources, hass, batteryLabel, batterySoc, solarTotal);
+  const liveHomeFlow = homeFlowConfig(liveSources, hass, batteryLabel, batterySoc, solarTotal, reverseBattery);
   return [{
     type: "custom:smartphone-dashboard-energy",
     views: {
@@ -334,22 +344,29 @@ function energyPopupCards(prefs, hass, isVisible = (entity) => Boolean(hass.stat
         homeFlow: liveHomeFlow.card,
         homeFlowReason: [solarTotalIssue, liveHomeFlow.reason].filter(Boolean).join(" "),
         homeFlowNotice: [solarTotalIssue, liveHomeFlow.notice].filter(Boolean).join(" "),
-        loadSensorsConfigured: devicesConfigured.some((device) => Boolean(device.stat_rate)),
         extra: utilityReadings,
       },
       today: {
-        flow: nativeToday,
+        distribution: nativeToday,
+        flow: electricity.length && supportsSankey(hass.config?.version, 8) ? {
+          type: "energy-sankey",
+          title: "Energiefluss heute",
+          collection_key: COLLECTION_KEY,
+          layout: "vertical",
+          show_values: true,
+          max_devices: 3,
+        } : null,
       },
     },
     battery: batterySoc ? { type: "tile", entity: batterySoc, name: batteryLabel + " · Ladestand", color: "green" } : null,
-    loads,
     solar,
   }, dashboardLink];
 }
 
-async function loadEnergyPopupCards(hass, isVisible, configuredSolarTotal, manualInputs) {
+async function loadEnergyPopupCards(hass, isVisible, { pv_total, pv_inputs, reverse_battery_flow } = {}) {
   try {
-    return energyPopupCards(await requestEnergy(hass, { type: "energy/get_prefs" }), hass, isVisible, configuredSolarTotal, manualInputs);
+    return energyPopupCards(await requestEnergy(hass, { type: "energy/get_prefs" }), hass, isVisible,
+      pv_total, pv_inputs, reverse_battery_flow === true);
   } catch (error) {
     if (error?.code === "not_found") return energyPopupCards(null, hass, isVisible);
     return [
@@ -396,20 +413,12 @@ async function loadDailyEnergy(hass, rows, now = new Date()) {
   }));
 }
 
-function energyRows(rows, hass, period, daily, limit) {
+function energyRows(rows, hass, period, daily) {
   const current = period === "live";
-  const values = rows.flatMap((row) => {
+  return rows.flatMap((row) => {
     if (!current) return Number.isFinite(daily[row.energy]) ? [{ ...row, value: daily[row.energy] }] : [];
-    const value = powerWatts(hass.states?.[row.power]);
-    if (Number.isFinite(value)) return [{ ...row, value }];
-    return !limit && row.power ? [{ ...row, value: null }] : [];
+    return row.power ? [{ ...row, value: powerWatts(hass.states?.[row.power]) ?? null }] : [];
   });
-  if (!limit) return values;
-  const ranked = new Map();
-  for (const row of values) {
-    if (row.value > 0) ranked.set(current ? row.power : row.energy, row);
-  }
-  return [...ranked.values()].sort((a, b) => b.value - a.value || a.name.localeCompare(b.name)).slice(0, limit);
 }
 
 export { energyPopupCards, energyRows, loadDailyEnergy, loadEnergyPopupCards };

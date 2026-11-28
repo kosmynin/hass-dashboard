@@ -246,6 +246,8 @@ def _valid_config(value: dict[str, Any]) -> dict[str, Any]:
             pv_total = feature["pv_total"]
             if not isinstance(pv_total, str) or (pv_total and not re.fullmatch(r"sensor\.[a-z0-9_]+", pv_total)):
                 raise vol.Invalid("energy.pv_total erwartet eine Sensor-Entitäts-ID")
+        if feature_name == "energy" and "reverse_battery_flow" in feature and not isinstance(feature["reverse_battery_flow"], bool):
+            raise vol.Invalid("energy.reverse_battery_flow erwartet einen Wahrheitswert")
         if feature_name == "energy" and "pv_inputs" in feature:
             pv_inputs = feature["pv_inputs"]
             if not isinstance(pv_inputs, list) or any(

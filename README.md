@@ -125,11 +125,10 @@ Assistant diese Funktion als nicht verfügbar aufführt.
 
 ## Energie
 
-**Weitere Bereiche → Energie** übernimmt die Quellen und Einzelverbraucher aus
+**Weitere Bereiche → Energie** übernimmt die Quellen aus
 den Home-Assistant-Energie-Einstellungen. **Jetzt** zeigt von oben nach unten
 die Home Flow Card, den nativen **Aktuellen Leistungsfluss** und die einzelnen
-**PV-Eingänge**. Darunter stehen die drei aktuell größten Verbraucher.
-Die Tageswerte für PV-Eingänge und Geräte kommen aus den Recorder-Statistiken.
+**PV-Eingänge**. Die Tageswerte für PV-Eingänge kommen aus den Recorder-Statistiken.
 
 Für die Hausgrafik installiere die
 [Home Flow Card](https://cards.flixlix.com/home-flow-card/installation) über den
@@ -144,13 +143,15 @@ auch wenn seine Entität in Home Assistant ausgeblendet ist.
 Fehlende oder getrennte Messquellen lassen die übrigen Quellen der Hausgrafik
 sichtbar. Der native Leistungsfluss zeigt die im Energie-Dashboard erfassten
 Quellen zusätzlich.
+Unter **Weitere Bereiche → Energie** lässt sich die **Akku-Richtung in der
+Hausgrafik umkehren**, falls der Leistungssensor Laden und Entladen mit
+umgekehrtem Vorzeichen meldet.
 
-**Heute** zeigt die native Energiebilanz in kWh, einschließlich konfigurierter
-Wasser- und Gaszähler. So bleiben auch Home Flow Card v0.3.2 und andere
-Versionen ohne Anzeige für Tagesenergie kompatibel.
+**Heute** zeigt die native Energieverteilung einschließlich konfigurierter
+Wasser- und Gaszähler. Darunter zeigt der **Energiefluss heute** die Wege der
+Energie in kWh. Anschließend folgen die PV-Erträge je Eingang.
 
-Für die Live-Rangliste braucht jeder gewünschte Einzelverbraucher einen
-Leistungssensor in den Energie-Einstellungen. Vorhandene Einzelsensoren der
+Vorhandene Einzelsensoren der
 EcoFlow STREAM Ultra erscheinen auch dann als PV-Eingänge, wenn sie in Home
 Assistant ausgeblendet sind. Über **Zusätzliche PV-Module (Leistung)** kannst
 du weitere Sensoren ergänzen. Aktiviere die

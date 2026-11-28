@@ -326,11 +326,20 @@ const isEnergyVisible = (entity) => !energyHass.entities[entity]?.hidden;
 const [energyOverview, energyLink] = await loadEnergyPopupCards(energyHass, isEnergyVisible);
 assert.equal(energyOverview.type, "custom:smartphone-dashboard-energy");
 const { live, today } = energyOverview.views;
-const energyDistribution = today.flow;
+const energyDistribution = today.distribution;
 assert.deepEqual(energyDistribution, {
   type: "energy-distribution",
   title: "Energieverteilung",
   collection_key: "energy_smartphone_dashboard",
+});
+const dailyFlow = today.flow;
+assert.deepEqual(dailyFlow, {
+  type: "energy-sankey",
+  title: "Energiefluss heute",
+  collection_key: energyDistribution.collection_key,
+  layout: "vertical",
+  show_values: true,
+  max_devices: 3,
 });
 assert.deepEqual(live.extra.map((card) => card.entity), ["sensor.water_flow", "sensor.gas_flow"]);
 assert.equal(energyOverview.battery.entity, "sensor.storage_soc");
@@ -369,9 +378,14 @@ for (const source of [gridPower, batteryPower]) {
 const onlyEnergyTotals = energyPopupCards({
   energy_sources: [gridMeter, { ...gasMeter, stat_rate: "sensor.gas_flow" }],
 }, firstLiveVersion, isEnergyVisible);
-assert.deepEqual(onlyEnergyTotals[0].views.today.flow, energyDistribution);
+assert.deepEqual(onlyEnergyTotals[0].views.today, { distribution: energyDistribution, flow: dailyFlow });
 assert.match(onlyEnergyTotals[0].views.live.flow.content, /Leistungssensoren/);
 assert.match(energyPopupCards({ energy_sources: [gridPower] }, olderEnergyHass)[0].views.live.flow.content, /2025\.12/);
+assert.deepEqual(energyPopupCards({ energy_sources: [gridMeter] }, olderEnergyHass)[0].views.today, {
+  distribution: energyDistribution, flow: null,
+});
+const firstDailyVersion = { ...olderEnergyHass, config: { version: "2025.8.0" } };
+assert.deepEqual(energyPopupCards({ energy_sources: [gridMeter] }, firstDailyVersion)[0].views.today.flow, dailyFlow);
 
 const reading = (state, unit) => ({ state: String(state), attributes: { unit_of_measurement: unit } });
 const measuredHass = {
@@ -428,12 +442,12 @@ const [measuredOverview] = energyPopupCards(measuredPrefs, measuredHass, (id) =>
 );
 assert.equal(measuredOverview.views.live.homeFlow.type, "custom:home-flow-card");
 assert.equal(measuredOverview.views.live.homeFlow.home, undefined);
-assert.equal(measuredOverview.views.live.loadSensorsConfigured, true);
+assert.equal("loads" in measuredOverview, false);
 assert.deepEqual(measuredOverview.views.live.homeFlow.battery, {
   entity: "sensor.battery_power", invert_state: true, name: "STREAM Ultra", state_of_charge: "sensor.battery_soc",
 });
 assert.equal(measuredOverview.views.today.homeFlow, undefined);
-assert.deepEqual(measuredOverview.views.today.flow, energyDistribution);
+assert.deepEqual(measuredOverview.views.today, { distribution: energyDistribution, flow: dailyFlow });
 const [energyOnlySolar] = energyPopupCards({ energy_sources: measuredPrefs.energy_sources.map((source) =>
   source.type === "solar" ? { type: "solar", stat_energy_from: "sensor.solar_energy" } : source,
 ) }, measuredHass);
@@ -441,7 +455,7 @@ assert.equal(energyOnlySolar.views.live.homeFlow.type, "custom:home-flow-card");
 assert.equal(energyOnlySolar.views.live.homeFlow.grid.entity, "sensor.grid_power");
 assert.equal(energyOnlySolar.views.live.homeFlow.solar, undefined);
 assert.match(energyOnlySolar.views.live.homeFlowNotice, /ohne Leistungssensor.*\(PV\)/);
-assert.equal(energyOnlySolar.views.today.flow.type, "energy-distribution");
+assert.equal(energyOnlySolar.views.today.flow.type, "energy-sankey");
 const [detectedBattery] = energyPopupCards({ energy_sources: [
   { type: "battery", stat_energy_to: "sensor.battery_charge" },
 ] }, measuredHass);
@@ -477,7 +491,7 @@ assert.equal(energyRows(translatedOverview.solar, translatedPv, "live", {})[0].v
 const [splitBattery] = energyPopupCards({ energy_sources: [
   { type: "battery", stat_energy_from_solar: "sensor.solar_charge", stat_energy_to_home: "sensor.battery_to_home" },
 ] }, measuredHass);
-assert.equal(splitBattery.views.today.flow.type, "energy-distribution");
+assert.equal(splitBattery.views.today.flow.type, "energy-sankey");
 assert.match(splitBattery.views.live.homeFlowReason, /ohne Leistungssensor.*\(Speicher\)/);
 const [solarWithoutPortPower] = energyPopupCards({ energy_sources: [
   { type: "solar", stat_rate: "sensor.solar_meter_power" },
@@ -502,7 +516,7 @@ assert.deepEqual(automaticTotal.views.live.homeFlow.solar, { entity: totalPower,
 assert.deepEqual(automaticTotal.solar.map(({ power }) => power), [
   "sensor.stream_pv1_power", "sensor.stream_pv2_power", "sensor.stream_pv3_power",
 ]);
-assert.equal(automaticTotal.views.today.flow.type, "energy-distribution");
+assert.equal(automaticTotal.views.today.flow.type, "energy-sankey");
 const separateDevicesHass = { ...separatePvHass, entities: { ...separatePvHass.entities,
   "sensor.stream_pv2_power": { device_id: "other_inverter" },
 } };
@@ -557,29 +571,50 @@ const [withDirectionalBattery] = energyPopupCards({ energy_sources: [directional
 assert.deepEqual(withDirectionalBattery.views.live.homeFlow.battery.entity, {
   consumption: "sensor.battery_discharging_power", production: "sensor.battery_charging_power",
 });
-assert.deepEqual(energyRows(measuredOverview.loads, measuredHass, "live", {}, 3).map(({ name, value }) => [name, value]), [
-  ["Geschirrspüler", 960], ["Trockner", 620], ["Büro-PC", 250],
-]);
+const batteryStates = {
+  ...measuredHass.states,
+  "sensor.normalized_battery": reading(240, "W"),
+  "sensor.battery_charging_power": reading(250, "W"),
+  "sensor.battery_discharging_power": reading(0, "W"),
+};
+const [normalizedBattery] = energyPopupCards({ energy_sources: [{
+  type: "battery",
+  stat_rate: "sensor.normalized_battery",
+  power_config: { stat_rate_inverted: "sensor.battery_power" },
+}] }, { ...measuredHass, states: batteryStates });
+assert.equal(normalizedBattery.views.live.homeFlow.battery.entity, "sensor.normalized_battery");
+assert.equal(normalizedBattery.views.live.homeFlow.battery.invert_state, undefined);
+const rawStreamPower = "sensor.example_stream_ultra_power_battery";
+const [rawStreamBattery] = energyPopupCards({
+  energy_sources: [{ type: "battery", stat_rate: rawStreamPower, power_config: { stat_rate: rawStreamPower } }],
+}, { ...measuredHass, states: { ...batteryStates, [rawStreamPower]: reading(420, "W") } });
+assert.equal(rawStreamBattery.views.live.homeFlow.battery.entity, rawStreamPower);
+assert.equal(rawStreamBattery.views.live.homeFlow.battery.invert_state, true);
+const [reversedSingle] = energyPopupCards(measuredPrefs, measuredHass, undefined, undefined, [], true);
+assert.equal(reversedSingle.views.live.homeFlow.battery.invert_state, false);
+const [reversedSplit] = energyPopupCards({ energy_sources: [directionalBattery] }, {
+  ...measuredHass, states: batteryStates,
+}, undefined, undefined, [], true);
+assert.deepEqual(reversedSplit.views.live.homeFlow.battery.entity, {
+  consumption: "sensor.battery_charging_power", production: "sensor.battery_discharging_power",
+});
+assert.deepEqual(reversedSingle.views.live.flow, measuredOverview.views.live.flow);
 const requestStats = [];
-const dailyRows = [...measuredOverview.loads, ...measuredOverview.solar];
+const dailyRows = measuredOverview.solar;
 const statsHass = { ...measuredHass, async callWS(request) {
   requestStats.push(request);
   return {
     "sensor.stream_pv1_energy": [{ change: 0.5 }, { change: null }, { change: 0.75 }],
-    "external:dryer_energy": [{ change: 1 }, { change: 1.5 }],
-    "external:dishwasher_energy": [{ change: 0 }],
   };
 } };
 // The UTC offset at midnight differs from that in the afternoon on this date.
 const dailyStats = await loadDailyEnergy(statsHass, dailyRows, new Date("2026-03-29T12:00:00Z"));
 assert.deepEqual(requestStats[0], {
   type: "recorder/statistics_during_period", start_time: "2026-03-28T23:00:00.000Z",
-  end_time: "2026-03-29T12:00:00.000Z", statistic_ids: ["external:dryer_energy", "external:dishwasher_energy", "sensor.stream_pv1_energy"],
+  end_time: "2026-03-29T12:00:00.000Z", statistic_ids: ["sensor.stream_pv1_energy"],
   period: "5minute", types: ["change"], units: { energy: "kWh" },
 });
-assert.deepEqual(energyRows(measuredOverview.loads, measuredHass, "today", dailyStats, 3).map(({ value }) => value), [2.5]);
 assert.deepEqual(energyRows(measuredOverview.solar, measuredHass, "today", dailyStats).map(({ value }) => value), [1.25]);
-assert.equal(dailyStats["external:dishwasher_energy"], 0);
 
 const fetchErrorCards = await loadEnergyPopupCards({
   async callWS() { throw new Error("offline"); },
@@ -977,7 +1012,7 @@ try {
     },
   };
   const dashboardWithTotal = await SmartphoneDashboardStrategy.generate(
-    { features: { energy: { pv_total: "sensor.manual_pv_power", pv_inputs: ["sensor.extra_module"] } } },
+    { features: { energy: { pv_total: "sensor.manual_pv_power", pv_inputs: ["sensor.extra_module"], reverse_battery_flow: true } } },
     hiddenTotalHass,
   );
   const popupWithTotal = dashboardWithTotal.views[0].sections[0].cards.find((card) => card.hash === "#energie");
@@ -990,6 +1025,7 @@ try {
   await new Promise((resolve) => setTimeout(resolve, 0));
   const selectedOverview = deferredWithTotal._cards[0].config;
   assert.equal(selectedOverview.views.live.homeFlow.solar.entity, "sensor.manual_pv_power");
+  assert.equal(selectedOverview.views.live.homeFlow.battery.invert_state, false);
   assert.equal(selectedOverview.solar.some((row) => row.power === "sensor.manual_pv_power"), false);
   assert.equal(selectedOverview.solar.some((row) => row.power === "sensor.extra_module"), true);
 
@@ -1032,6 +1068,7 @@ try {
   assert.match(overview._flow.children[0].innerHTML, /Lovelace-Ressource prüfen/);
   assert.equal(overview._cards[0].config.type, "power-sankey");
   assert.equal(overview._details.children[0].dataset.kind, "solar");
+  assert.equal(overview._details.children.length, 1);
   assert.equal(requestStats.length, 1);
 
   const firstFlowCard = globalThis.customElements.get("home-flow-card");
@@ -1045,8 +1082,10 @@ try {
     buttons[1].events.click();
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.equal(buttons[1]["aria-pressed"], "true");
-    assert.equal(overview._flow.children[0].config.type, "energy-distribution");
+    assert.deepEqual(overview._flow.children.map((card) => card.config.type), ["energy-distribution", "energy-sankey"]);
     assert.equal(overview._details.children[0].dataset.kind, "solar");
+    assert.equal(overview._details.children.length, 1);
+    assert.deepEqual(requestStats.at(-1).statistic_ids, ["sensor.stream_pv1_energy"]);
     assert.equal(requestStats.length, 2);
     buttons[0].events.click();
     await new Promise((resolve) => setTimeout(resolve, 0));

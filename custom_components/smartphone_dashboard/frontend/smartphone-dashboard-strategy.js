@@ -10,7 +10,7 @@ import { SmartphoneDashboardEnergy } from "./energy-overview.js";
 import { SmartphoneDashboardAgenda } from "./agenda-cards.js";
 import { selectParcels } from "./parcel-selection.js";
 
-const STRATEGY_VERSION = "23.2.0";
+const STRATEGY_VERSION = "23.2.1";
 const CONFIG_VERSION = 26;
 
 const HOME_SECTION_LABELS = {
@@ -130,7 +130,7 @@ class SmartphoneDashboardDeferredCards extends HTMLElement {
       ? window.loadCardHelpers()
       : Promise.reject(new Error("Home-Assistant-Kartenhelfer sind nicht verfügbar"));
     const cardsReady = energy
-      ? loadEnergyPopupCards(this._hass, (entityId) => isEntityVisible(this._hass, entityId), config.pv_total, config.pv_inputs)
+      ? loadEnergyPopupCards(this._hass, (entityId) => isEntityVisible(this._hass, entityId), config)
       : config.cards;
     void Promise.all([helpersReady, cardsReady]).then(([helpers, configs]) => {
       if (!this.isConnected || this._config !== config || !this._isRequested()) return;
@@ -1709,6 +1709,7 @@ function configuredFeatures(config, hass) {
       system_colors: key === "system" ? normalizedSystemColors(item.system_colors) : {},
       ...(key === "energy" && item.pv_total && { pv_total: item.pv_total }),
       ...(key === "energy" && Array.isArray(item.pv_inputs) && { pv_inputs: item.pv_inputs }),
+      ...(key === "energy" && item.reverse_battery_flow === true && { reverse_battery_flow: true }),
       master_alarm: key === "security"
         ? securityMasterAlarm(item.master_alarm, entities, hass)
         : "",
@@ -1871,6 +1872,7 @@ function featurePopupCards(item, hass) {
     card_source: "energy",
     ...(item.pv_total && { pv_total: item.pv_total }),
     ...(item.pv_inputs?.length && { pv_inputs: item.pv_inputs }),
+    ...(item.reverse_battery_flow && { reverse_battery_flow: true }),
     cards: [],
   }];
   if (item.key === "parcels") return parcelFeatureCards(item, hass);
@@ -3448,7 +3450,11 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
       const hashListId = `feature-hashes-${feature.key}`;
       const energy = feature.key === "energy";
       const sourceFields = energy
-        ? '<div data-pv-total-host></div><div data-pv-inputs-host></div>'
+        ? `<div data-pv-total-host></div><div data-pv-inputs-host></div>
+            <div class="switch-row">
+              <div class="switch-copy"><div class="switch-title">Akku-Richtung in der Hausgrafik umkehren</div></div>
+              <ha-switch data-reverse-battery aria-label="Akku-Richtung in der Hausgrafik umkehren"></ha-switch>
+            </div>`
         : `<div class="switch-row"><div class="switch-copy"><div class="switch-title">Neue Entitäten automatisch ergänzen</div></div><ha-switch data-auto></ha-switch></div>
           ${feature.key === "security" ? '<div data-master-alarm-host></div>' : ""}
           ${feature.key === "printer" ? '<div data-printer-ids-host></div><label class="select-label">Automatisch erkannte Bambu-Lab Geräte-IDs<textarea class="readonly-list" data-auto-printer-ids rows="3" readonly></textarea></label><div data-excluded-printer-ids-host></div>' : ""}
@@ -3504,6 +3510,9 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
         this._render();
       });
       if (energy) {
+        const reverseBattery = row.querySelector("[data-reverse-battery]");
+        reverseBattery.checked = feature.reverse_battery_flow === true;
+        reverseBattery.addEventListener("change", (event) => updateFeature({ reverse_battery_flow: event.currentTarget.checked }));
         row.querySelector("[data-pv-total-host]").replaceWith(this._entitySelector(
           "PV-Gesamtleistung für die Hausgrafik", feature.pv_total || "",
           { domain: "sensor", device_class: "power" }, (value) => updateFeature({ pv_total: value }),

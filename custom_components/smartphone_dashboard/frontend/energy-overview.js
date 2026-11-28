@@ -176,6 +176,7 @@ class SmartphoneDashboardEnergy extends HTMLElement {
         }
         (flowCard ? this._extras : this._flow).append(status);
       }
+      if (view.distribution) appendCard(this._flow, helpers.createCardElement(view.distribution));
       if (view.flow) appendCard(this._flow, helpers.createCardElement(view.flow));
       if (this._config.battery && (!flowCard || !view.homeFlow.battery?.state_of_charge)) {
         appendCard(this._extras, helpers.createCardElement(this._config.battery));
@@ -205,7 +206,7 @@ class SmartphoneDashboardEnergy extends HTMLElement {
       this._refreshTimer = setTimeout(() => this._refreshDaily(), delay);
       return;
     }
-    const rows = [...this._config.loads, ...this._config.solar];
+    const rows = this._config.solar;
     if (!rows.some((row) => row.energy)) return;
     const request = loadDailyEnergy(this._hass, rows);
     this._dailyRequest = request;
@@ -229,65 +230,53 @@ class SmartphoneDashboardEnergy extends HTMLElement {
   }
 
   _renderDetails() {
-    if (!this.isConnected || !this._details || !this._hass) return;
+    if (!this.isConnected || !this._details || !this._hass || !this._config.views.live.flow) return;
     const today = this._period === "today";
-    const { loads, solar } = this._config;
-    if (!this._config.views.live.flow) return;
-    const groups = [
-      ["solar", today ? "PV-Ertrag je Eingang" : "PV-Eingänge", solar, undefined],
-      ["loads", "Größte Verbraucher", loads, 3],
-    ].map(([kind, title, rows, limit]) => ({
-      kind, title, rows: energyRows(rows, this._hass, this._period, this._daily || {}, limit),
-      configured: rows.some((row) => today ? row.energy : row.power),
-    }));
-    const signature = JSON.stringify([this._period, groups, this._dailyError, Boolean(this._dailyRequest)]);
+    const { solar } = this._config;
+    const rows = energyRows(solar, this._hass, this._period, this._daily || {});
+    const configured = solar.some((row) => today ? row.energy : row.power);
+    const signature = JSON.stringify([this._period, rows, configured, this._dailyError, Boolean(this._dailyRequest)]);
     if (signature === this._signature) return;
     this._signature = signature;
-    const locale = this._hass.locale?.language ?? "de";
-    const formatter = new Intl.NumberFormat(locale, {
+    const formatter = new Intl.NumberFormat(this._hass.locale?.language ?? "de", {
       minimumFractionDigits: today ? 2 : 0, maximumFractionDigits: today ? 2 : 0,
     });
-    const cards = groups.map(({ kind, title, rows, configured }) => {
-      const card = document.createElement("ha-card");
-      card.dataset.kind = kind;
-      card.innerHTML = '<div class="heading"><h3></h3><span class="scope"></span></div>';
-      card.querySelector("h3").textContent = title;
-      card.querySelector(".scope").textContent = today ? "Heute" : "Jetzt";
-      if (rows.length) {
-        const list = document.createElement("ul");
-        const max = Math.max(0, ...rows.map(({ value }) => value));
-        for (const { name, value } of rows) {
-          const row = document.createElement("li");
-          row.innerHTML = '<div class="row"><span class="name"></span><span class="value"></span></div><div class="track" aria-hidden="true"><div class="bar"></div></div>';
-          row.querySelector(".name").textContent = name;
-          row.querySelector(".value").textContent = value === null
-            ? "Nicht verfügbar" : formatter.format(value) + (today ? " kWh" : " W");
-          row.querySelector(".bar").style.width = (max ? Math.max(0, value) / max * 100 : 0) + "%";
-          list.append(row);
-        }
-        card.append(list);
-      } else {
-        const status = document.createElement("p");
-        status.className = "status";
-        if (!configured && kind === "loads" && !today && this._config.views.live.loadSensorsConfigured) {
-          status.textContent = "Die eingerichteten Leistungssensoren sind nicht sichtbar, nicht verfügbar oder liefern keine unterstützte Einheit.";
-        } else if (!configured) {
-          status.textContent = kind === "loads" ? "Keine passenden Einzelverbraucher in den Energie-Einstellungen." :
-            today ? "Keine sichtbaren PV-Ertragszähler gefunden. Prüfe die Energie-Entitäten deines Wechselrichters." :
-              "Keine PV-Leistungssensoren gefunden. Wähle bei Bedarf die Module in den Dashboard-Einstellungen unter Energie aus.";
-        } else if (today && this._dailyRequest) {
-          status.textContent = "Tageswerte werden geladen …";
-        } else if (today && this._dailyError) {
-          status.textContent = "Tageswerte konnten nicht geladen werden.";
-        } else {
-          status.textContent = today ? "Für heute liegen noch keine positiven Messwerte vor." :
-            kind === "loads" ? "Kein aktueller Verbrauch messbar." : "Aktuell sind keine Messwerte verfügbar.";
-        }
-        card.append(status);
+
+    const card = document.createElement("ha-card");
+    card.dataset.kind = "solar";
+    card.innerHTML = '<div class="heading"><h3></h3><span class="scope"></span></div>';
+    card.querySelector("h3").textContent = today ? "PV-Ertrag je Eingang" : "PV-Eingänge";
+    card.querySelector(".scope").textContent = today ? "Heute" : "Jetzt";
+    if (rows.length) {
+      const list = document.createElement("ul");
+      const max = Math.max(0, ...rows.map(({ value }) => value));
+      for (const { name, value } of rows) {
+        const row = document.createElement("li");
+        row.innerHTML = '<div class="row"><span class="name"></span><span class="value"></span></div><div class="track" aria-hidden="true"><div class="bar"></div></div>';
+        row.querySelector(".name").textContent = name;
+        row.querySelector(".value").textContent = value === null
+          ? "Nicht verfügbar" : formatter.format(value) + (today ? " kWh" : " W");
+        row.querySelector(".bar").style.width = (max ? Math.max(0, value) / max * 100 : 0) + "%";
+        list.append(row);
       }
-      return card;
-    });
-    this._details.replaceChildren(...cards);
+      card.append(list);
+    } else {
+      const status = document.createElement("p");
+      status.className = "status";
+      if (!configured) {
+        status.textContent = today
+          ? "Keine sichtbaren PV-Ertragszähler gefunden. Prüfe die Energie-Entitäten deines Wechselrichters."
+          : "Keine PV-Leistungssensoren gefunden. Wähle bei Bedarf die Module in den Dashboard-Einstellungen unter Energie aus.";
+      } else if (today && this._dailyRequest) {
+        status.textContent = "Tageswerte werden geladen …";
+      } else if (today && this._dailyError) {
+        status.textContent = "Tageswerte konnten nicht geladen werden.";
+      } else {
+        status.textContent = today ? "Für heute liegen noch keine Messwerte vor." : "Aktuell sind keine Messwerte verfügbar.";
+      }
+      card.append(status);
+    }
+    this._details.replaceChildren(card);
   }
 
   _notifyResize() {

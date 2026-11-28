@@ -1,3 +1,9 @@
+# Version 23.2.1
+
+- Unter **Energie → Heute** folgt auf die Energieverteilung der native Tagesenergiefluss in kWh. Die Karte **Größte Verbraucher** entfällt in beiden Ansichten.
+- Die Home Flow Card animiert die Flussrichtung und die Messwerte.
+- Die Hausgrafik berücksichtigt die Polarität des EcoFlow-STREAM-Ultra-Akkus. Unter **Weitere Bereiche → Energie** kann die Richtung bei Bedarf manuell umgekehrt werden.
+
 # Version 23.2.0
 
 - **Energie → Jetzt** zeigt die Home Flow Card, den nativen Leistungsfluss und danach die einzelnen PV-Eingänge. Fehlende Messquellen blenden die Hausgrafik nicht mehr vollständig aus. Die PV-Liste zeigt auch ausgeblendete Eingänge des Wechselrichters. Weitere Module lassen sich im Dashboard-Editor ergänzen.
