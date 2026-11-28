@@ -10,7 +10,7 @@ import { SmartphoneDashboardEnergy } from "./energy-overview.js";
 import { SmartphoneDashboardAgenda } from "./agenda-cards.js";
 import { selectParcels } from "./parcel-selection.js";
 
-const STRATEGY_VERSION = "23.2.1";
+const STRATEGY_VERSION = "23.2.2";
 const CONFIG_VERSION = 26;
 
 const HOME_SECTION_LABELS = {
@@ -301,7 +301,7 @@ const NOTIFICATION_HELPERS = {
 const BACKEND_NOTIFICATION_KEYS = [
   ...Object.keys(NOTIFICATION_HELPERS), "waste_days", "notification_media", "notification_parcels", "notification_appliances",
 ];
-const EDITOR_NOTIFICATION_KEYS = [...BACKEND_NOTIFICATION_KEYS, "notification_doorbell", "doorbell_recipients"];
+const EDITOR_NOTIFICATION_KEYS = [...BACKEND_NOTIFICATION_KEYS, "notification_doorbell", "doorbell_recipients", "doorbell_camera"];
 
 class SmartphoneDashboardStrategy extends HTMLElement {
   static async getConfigElement() {
@@ -1429,6 +1429,10 @@ function configurationValidationErrors(config) {
   if (phones !== undefined && (typeof phones !== "string" || csv(phones).some((id) => !/^notify\.mobile_app_[a-z0-9_]+$/.test(id)))) {
     errors.push("Für die Türklingel bitte Companion-Handys auswählen.");
   }
+  const doorbellCamera = config?.doorbell_camera;
+  if (doorbellCamera !== undefined && (typeof doorbellCamera !== "string" || (doorbellCamera && !/^camera\.[a-z0-9_]+$/.test(doorbellCamera)))) {
+    errors.push("Für das Livebild der Türklingel bitte eine Kamera auswählen.");
+  }
   const pvTotal = config?.features?.energy?.pv_total;
   if (pvTotal !== undefined && (typeof pvTotal !== "string" || (pvTotal && !/^sensor\.[a-z0-9_]+$/.test(pvTotal)))) {
     errors.push("Energie · PV-Gesamtleistung erwartet eine Sensor-Entitäts-ID.");
@@ -2088,6 +2092,7 @@ const EDITOR_DEFAULTS = {
   notification_appliances: true,
   notification_doorbell: false,
   doorbell_recipients: "",
+  doorbell_camera: "",
   battery_threshold: 6,
   contact_minutes: 15,
   co2_threshold: 1000,
@@ -3274,7 +3279,9 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
                 <ha-switch data-switch="notification_doorbell" aria-label="Reolink-Türklingel"></ha-switch>
               </div>
               <div data-doorbell-phones></div>
-              <p class="hint">Bei leerer Auswahl klingeln die oben ausgewählten Companion-Handys. <a href="https://www.home-assistant.io/integrations/reolink/#two-way-audio" target="_blank" rel="noopener noreferrer">Gegensprechen einrichten</a></p>`
+              <p class="hint">Bei leerer Handy-Auswahl klingeln die oben ausgewählten Companion-Handys.</p>
+              <div data-doorbell-camera></div>
+              <p class="hint">Hier kannst du z. B. die Frigate-Kamera auswählen. Die Auswahl gilt für alle Klingelmeldungen. Ohne Auswahl wird die Kamera der jeweiligen Reolink-Türklingel verwendet. Gegensprechen einrichten für <a href="https://www.home-assistant.io/integrations/reolink/#two-way-audio" target="_blank" rel="noopener noreferrer">Reolink</a> oder <a href="https://docs.frigate.video/configuration/live/#two-way-talk" target="_blank" rel="noopener noreferrer">Frigate</a>.</p>`
               : '<p class="hint">Die Reolink-Türklingel wird im primären Dashboard mit backend_key: default eingerichtet.</p>'}
             <div data-battery-selector-host></div>
             <div data-frost-selector-host></div>
@@ -3406,6 +3413,10 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
         onChange: saveNotificationList("doorbell_recipients"),
       }));
     }
+    this.shadowRoot.querySelector("[data-doorbell-camera]")?.replaceWith(this._entitySelector(
+      "Kamera für das Klingel-Livebild", this._effectiveSetting("doorbell_camera"),
+      { domain: "camera" }, (value) => void this._updateNotificationSetting("doorbell_camera", value),
+    ));
     this.shadowRoot.querySelector("[data-battery-selector-host]").replaceWith(this._entitySelector(
       "Ausgeschlossene Batteriesensoren", notificationList("battery_exclusions"),
       { domain: "sensor", device_class: "battery", multiple: true }, saveNotificationList("battery_exclusions"),

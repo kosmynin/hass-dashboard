@@ -100,11 +100,14 @@ USV-Meldung erzeugen.
 1. Im primären Dashboard unter **Benachrichtigungen & Synchronisierung** die
    **Reolink-Türklingel** einschalten. Unter **Handys für die Türklingel** die
    gewünschten Companion-Handys auswählen. Bei leerer Auswahl gelten die
-   allgemeinen mobilen Push-Empfänger.
+   allgemeinen mobilen Push-Empfänger. Wenn das Bild aus Frigate kommt, unter
+   **Kamera für das Klingel-Livebild** die Frigate-Kamera wählen. Diese Auswahl
+   gilt für alle Klingelmeldungen. Ohne verfügbare Auswahl sucht das Dashboard
+   an der auslösenden Reolink-Türklingel nach einem sichtbaren Live-Stream.
 2. Auf jedem Handy Mitteilungen mit Ton für Home Assistant erlauben. Am iPhone
    zusätzlich **Zeitkritische Mitteilungen** erlauben, wenn die Klingel während
    eines Fokus durchkommen soll. Ein Tastendruck löst pro Handy eine Mitteilung
-   aus. Tippen öffnet das Livebild der zugehörigen Kamera. Die Klingeltaste erkennt das
+   aus. Tippen öffnet das Livebild. Die Klingeltaste erkennt das
    Dashboard am **Besucher**-Sensor der Reolink-Integration, auch nach einer
    Umbenennung. [Reolink-Sensoren in Home Assistant](https://www.home-assistant.io/integrations/reolink/#binary-sensors)
 3. Für Gegensprechen in Home Assistant ab **2026.11** unter **Einstellungen →
@@ -114,6 +117,10 @@ USV-Meldung erzeugen.
    unterstützen und der Stream über WebRTC laufen. Im Browser HTTPS verwenden.
    Die iOS-Companion-App ab 2026.10.3 unterstützt auch lokales HTTP.
    [Reolink-Einstellungen](https://www.home-assistant.io/integrations/reolink/#two-way-audio) · [Kamera und Mikrofon](https://www.home-assistant.io/integrations/camera/#talking-through-a-camera)
+
+Für Gegensprechen über Frigate braucht der Stream einen Audio-Rückkanal und
+WebRTC. Frigate dokumentiert dafür die Einrichtung mit go2rtc und der
+Advanced Camera Card. [Frigate Live View](https://docs.frigate.video/configuration/live/#two-way-talk)
 
 Für einen Anruf mit **Annehmen** auf dem iPhone-Sperrbildschirm auf jedem
 iPhone in der **Reolink-App → Türklingel → Einstellungen → Push-Mitteilungen**

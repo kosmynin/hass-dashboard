@@ -163,4 +163,18 @@ def test_visitor_ring_reaches_each_phone_once_and_opens_only_the_ringing_camera(
         assert "actions" not in payload["data"]
         assert payload["data"]["url"] == f"/?more-info-entity-id={visitor_id}"
 
+        settings["doorbell_camera"] = "camera.frigate_entrance"
+        states["camera.frigate_entrance"] = state("idle")
+        press(at=NOW + timedelta(minutes=2))
+        await asyncio.gather(*tasks)
+        data = deliveries[-1][1]["data"]
+        assert data["url"] == data["clickAction"] == "/?more-info-entity-id=camera.frigate_entrance"
+        assert data["actions"][0]["uri"] == data["url"]
+
+        states["camera.frigate_entrance"] = state("unavailable")
+        states["camera.front"] = state("idle")
+        press(at=NOW + timedelta(minutes=3))
+        await asyncio.gather(*tasks)
+        assert deliveries[-1][1]["data"]["url"] == camera_url
+
     asyncio.run(check())

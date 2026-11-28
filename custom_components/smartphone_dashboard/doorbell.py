@@ -20,9 +20,16 @@ def is_doorbell_press(old: State | None, new: State | None) -> bool:
 
 
 def doorbell_camera(
-    entries: Iterable[RegistryEntry], get_state: Callable[[str], State | None]
+    entries: Iterable[RegistryEntry],
+    get_state: Callable[[str], State | None],
+    preferred: str = "",
 ) -> str | None:
-    """Choose a live Reolink stream from the ringing device, preferring Fluent."""
+    """Use the selected camera or find an available Reolink stream."""
+    if isinstance(preferred, str) and preferred.startswith("camera."):
+        state = get_state(preferred)
+        if state and state.state not in ("unknown", "unavailable"):
+            return preferred
+
     profiles = ("sub", "ext", "main")
     candidates = []
     for entry in entries:

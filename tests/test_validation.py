@@ -47,6 +47,10 @@ def test_doorbell_accepts_only_companion_recipients_and_a_boolean_switch():
     for invalid in (True, ["notify.mobile_app_phone"], "notify.everyone", "notify.mobile_app_"):
         assert rejected({"doorbell_recipients": invalid})
     assert rejected({"notification_doorbell": "on"})
+    assert validate({"doorbell_camera": ""})
+    assert validate({"doorbell_camera": "camera.frigate_entrance"})
+    for invalid in (True, None, "binary_sensor.visitor", "camera.front&extra=value"):
+        assert rejected({"doorbell_camera": invalid})
 
 
 def test_room_entity_name_modes_are_validated():

@@ -1,3 +1,7 @@
+# Version 23.2.2
+
+- Unter **Benachrichtigungen & Synchronisierung** lässt sich die Kamera für das Klingel-Livebild wählen, etwa aus Frigate. Der Reolink-Besuchersensor löst weiterhin die Klingelmeldung aus. Ist die gewählte Kamera nicht verfügbar, sucht das Dashboard nach einem verfügbaren Reolink-Stream der Türklingel.
+
 # Version 23.2.1
 
 - Unter **Energie → Heute** folgt auf die Energieverteilung der native Tagesenergiefluss in kWh. Die Karte **Größte Verbraucher** entfällt in beiden Ansichten.

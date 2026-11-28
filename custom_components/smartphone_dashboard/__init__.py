@@ -189,6 +189,10 @@ def _valid_config(value: dict[str, Any]) -> dict[str, Any]:
             for item in recipients.split(",") if item.strip()
         ):
             raise vol.Invalid("Für die Türklingel bitte Companion-Handys auswählen")
+    if "doorbell_camera" in value:
+        camera = value["doorbell_camera"]
+        if not isinstance(camera, str) or (camera and not re.fullmatch(r"camera\.[a-z0-9_]+", camera)):
+            raise vol.Invalid("Für das Livebild der Türklingel bitte eine Kamera auswählen")
     for key in ("persons", "rooms", "quick_actions", "home_sections"):
         if key in value and not isinstance(value[key], list): raise vol.Invalid(f"{key} muss eine Liste sein")
     entity_id = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")

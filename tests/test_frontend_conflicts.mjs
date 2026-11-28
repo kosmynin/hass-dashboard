@@ -20,6 +20,8 @@ assert.equal(synchronizationStatus({ ...doorbellSettings, doorbell_recipients: "
 assert.match(synchronizationStatus({ ...doorbellSettings, doorbell_recipients: "notify.mobile_app_missing" }, doorbellHass).detail, /mobile_app_missing/);
 assert.equal(configurationValidationErrors(doorbellSettings).length, 0);
 assert.ok(configurationValidationErrors({ ...doorbellSettings, doorbell_recipients: "notify.household" }).length);
+assert.equal(configurationValidationErrors({ ...doorbellSettings, doorbell_camera: "camera.frigate_entrance" }).length, 0);
+assert.ok(configurationValidationErrors({ ...doorbellSettings, doorbell_camera: "binary_sensor.visitor" }).length);
 
 const roomHass = {
   states: {

@@ -217,7 +217,7 @@ class NotificationCoordinator:
         ))
         if not recipients:
             return
-        camera_id = None
+        camera_entries = ()
         device = None
         if visitor.device_id:
             previous = self._last_doorbell_press.get(visitor.device_id)
@@ -226,9 +226,10 @@ class NotificationCoordinator:
                 return
             self._last_doorbell_press[visitor.device_id] = (entity_id, pressed_at)
             device = dr.async_get(self.hass).async_get(visitor.device_id)
-            camera_id = doorbell_camera(
-                er.async_entries_for_device(registry, visitor.device_id), self.hass.states.get
-            )
+            camera_entries = er.async_entries_for_device(registry, visitor.device_id)
+        camera_id = doorbell_camera(
+            camera_entries, self.hass.states.get, strategy.get("doorbell_camera", "")
+        )
         name = (device.name_by_user or device.name) if device else ""
         payload = doorbell_payload(entity_id, name, camera_id)
         press_key = f"doorbell:{entity_id}:{pressed_at.isoformat()}"
