@@ -95,34 +95,65 @@ als getrennte Meldungen ausgewertet: `ONLINE` bleibt neutral, während etwa
 `REPLACEBATT`, `NOBATT`, `ONBATT` oder `LOWBATT` jeweils eine eigene deutsche
 USV-Meldung erzeugen.
 
+## Reolink-Türklingel
+
+1. Im primären Dashboard unter **Benachrichtigungen & Synchronisierung** die
+   **Reolink-Türklingel** einschalten. Unter **Handys für die Türklingel** die
+   gewünschten Companion-Handys auswählen. Bei leerer Auswahl gelten die
+   allgemeinen mobilen Push-Empfänger.
+2. Auf jedem Handy Mitteilungen mit Ton für Home Assistant erlauben. Am iPhone
+   zusätzlich **Zeitkritische Mitteilungen** erlauben, wenn die Klingel während
+   eines Fokus durchkommen soll. Ein Tastendruck löst pro Handy eine Mitteilung
+   aus. Tippen öffnet das Livebild der zugehörigen Kamera. Die Klingeltaste erkennt das
+   Dashboard am **Besucher**-Sensor der Reolink-Integration, auch nach einer
+   Umbenennung. [Reolink-Sensoren in Home Assistant](https://www.home-assistant.io/integrations/reolink/#binary-sensors)
+3. Für Gegensprechen in Home Assistant ab **2026.11** unter **Einstellungen →
+   System → Labs** die Zwei-Wege-Audio-Vorschau aktivieren und in den Optionen
+   der Reolink-Integration **RTSP** wählen. Im Livebild **Sprechen starten**
+   antippen und den Mikrofonzugriff erlauben. Das Modell muss Gegensprechen
+   unterstützen und der Stream über WebRTC laufen. Im Browser HTTPS verwenden.
+   Die iOS-Companion-App ab 2026.10.3 unterstützt auch lokales HTTP.
+   [Reolink-Einstellungen](https://www.home-assistant.io/integrations/reolink/#two-way-audio) · [Kamera und Mikrofon](https://www.home-assistant.io/integrations/camera/#talking-through-a-camera)
+
+Für einen Anruf mit **Annehmen** auf dem iPhone-Sperrbildschirm auf jedem
+iPhone in der **Reolink-App → Türklingel → Einstellungen → Push-Mitteilungen**
+die Option **Incoming call from Doorbell** aktivieren. Wer diesen Anruf nutzt,
+kann den Dashboard-Klingelton ausgeschaltet lassen. Die Reolink-App ermöglicht
+das Gegensprechen auch bei der **Video Doorbell (Battery)**, für die Home
+Assistant diese Funktion als nicht verfügbar aufführt.
+[Türklingelanruf einrichten](https://support.reolink.com/articles/30334226363161-How-to-Call-Reolink-Doorbell/) · [Modellunterstützung](https://works-with.home-assistant.io/certified-products/)
+
 ## Energie
 
 **Weitere Bereiche → Energie** übernimmt die Quellen und Einzelverbraucher aus
-den Home-Assistant-Energie-Einstellungen. **Live** zeigt den Stromfluss, die
-drei aktuell größten Verbraucher und die Leistung je PV-Eingang. **Heute** zeigt
-die entsprechende Tagesbilanz in kWh. Der Akku-Ladestand bleibt aktuell. Die
-Tageswerte für PV-Eingänge und Geräte kommen aus den Recorder-Statistiken.
+den Home-Assistant-Energie-Einstellungen. **Jetzt** zeigt von oben nach unten
+die Home Flow Card, den nativen **Aktuellen Leistungsfluss** und die einzelnen
+**PV-Eingänge**. Darunter stehen die drei aktuell größten Verbraucher.
+Die Tageswerte für PV-Eingänge und Geräte kommen aus den Recorder-Statistiken.
 
 Für die Hausgrafik installiere die
 [Home Flow Card](https://cards.flixlix.com/home-flow-card/installation) über den
 Home-Assistant-Marketplace (ab 2026.11) oder HACS.
-Die Strategy erkennt die Karte automatisch und verwendet sie unter **Live**.
+Die Strategy erkennt die Karte automatisch und verwendet sie unter **Jetzt**.
 Bei mehreren PV-Eingängen desselben Geräts kann ein erkannter PV-Gesamtsensor
 den Wert für die Hausgrafik liefern. Unter **Weitere Bereiche → Energie** lässt sich
 der Leistungssensor für **PV-Gesamtleistung für die Hausgrafik** auch auswählen.
 Die Auswahl ändert keine Quellen im Home-Assistant-Energie-Dashboard.
 Ein bewusst ausgewählter Sensor kann als Messquelle für die Hausgrafik dienen,
 auch wenn seine Entität in Home Assistant ausgeblendet ist.
-Wenn die Karte oder eine passende Messung fehlt, zeigt das Pop-up den Grund
-zusammen mit der nativen Live-Karte.
+Fehlende oder getrennte Messquellen lassen die übrigen Quellen der Hausgrafik
+sichtbar. Der native Leistungsfluss zeigt die im Energie-Dashboard erfassten
+Quellen zusätzlich.
 
 **Heute** zeigt die native Energiebilanz in kWh, einschließlich konfigurierter
 Wasser- und Gaszähler. So bleiben auch Home Flow Card v0.3.2 und andere
 Versionen ohne Anzeige für Tagesenergie kompatibel.
 
 Für die Live-Rangliste braucht jeder gewünschte Einzelverbraucher einen
-Leistungssensor in den Energie-Einstellungen. Verfügbare Einzelsensoren der
-EcoFlow STREAM Ultra werden als PV-Eingänge erkannt. Aktiviere die
+Leistungssensor in den Energie-Einstellungen. Vorhandene Einzelsensoren der
+EcoFlow STREAM Ultra erscheinen auch dann als PV-Eingänge, wenn sie in Home
+Assistant ausgeblendet sind. Über **Zusätzliche PV-Module (Leistung)** kannst
+du weitere Sensoren ergänzen. Aktiviere die
 [Ertragszähler je PV-Eingang](https://github.com/shuette42/ecoflow-energy-ha/blob/main/documentation/entities/stream.md#sensors---energy-dashboard)
 in Home Assistant, wenn deine EcoFlow-Integration sie bereitstellt. Jeder
 Eingang zeigt den gemessenen Ertrag der dort angeschlossenen Module.

@@ -176,12 +176,19 @@ def _valid_config(value: dict[str, Any]) -> dict[str, Any]:
         "notification_batteries", "notification_contacts", "notification_co2",
         "notification_waste", "notification_ups", "notification_frost",
         "notification_nina", "notification_parcels", "notification_media",
-        "notification_appliances", "short_switch_names",
+        "notification_appliances", "notification_doorbell", "short_switch_names",
     )
     for key in boolean_keys:
         if key in value and not isinstance(value[key], bool): raise vol.Invalid(f"{key} muss ein Wahrheitswert sein")
     if "nina_entities" in value and (not isinstance(value["nina_entities"], str) or not re.fullmatch(r"binary_sensor\.[a-zA-Z0-9_]+\*[a-zA-Z0-9_]*", value["nina_entities"])): raise vol.Invalid("nina_entities ist ungültig")
     if "notification_recipients" in value and any(not re.fullmatch(r"notify\.[a-z0-9_]+", item.strip()) for item in str(value["notification_recipients"]).split(",") if item.strip()): raise vol.Invalid("Notify-Dienst ist ungültig")
+    if "doorbell_recipients" in value:
+        recipients = value["doorbell_recipients"]
+        if not isinstance(recipients, str) or any(
+            not re.fullmatch(r"notify\.mobile_app_[a-z0-9_]+", item.strip())
+            for item in recipients.split(",") if item.strip()
+        ):
+            raise vol.Invalid("Für die Türklingel bitte Companion-Handys auswählen")
     for key in ("persons", "rooms", "quick_actions", "home_sections"):
         if key in value and not isinstance(value[key], list): raise vol.Invalid(f"{key} muss eine Liste sein")
     entity_id = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
@@ -239,6 +246,13 @@ def _valid_config(value: dict[str, Any]) -> dict[str, Any]:
             pv_total = feature["pv_total"]
             if not isinstance(pv_total, str) or (pv_total and not re.fullmatch(r"sensor\.[a-z0-9_]+", pv_total)):
                 raise vol.Invalid("energy.pv_total erwartet eine Sensor-Entitäts-ID")
+        if feature_name == "energy" and "pv_inputs" in feature:
+            pv_inputs = feature["pv_inputs"]
+            if not isinstance(pv_inputs, list) or any(
+                not isinstance(item, str) or not re.fullmatch(r"sensor\.[a-z0-9_]+", item)
+                for item in pv_inputs
+            ):
+                raise vol.Invalid("energy.pv_inputs erwartet eine Liste von Sensor-Entitäts-IDs")
         for list_key in ("printer_ids", "excluded_printer_ids"):
             if list_key in feature and (not isinstance(feature[list_key], list) or any(not isinstance(item, str) or not re.fullmatch(r"[a-zA-Z0-9_-]{1,128}", item) for item in feature[list_key])): raise vol.Invalid(f"{list_key} ist ungültig")
         if "system_colors" in feature:

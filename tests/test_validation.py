@@ -41,6 +41,14 @@ def test_valid_forward_compatible_feature_data_survives():
     assert validate(value) is value
 
 
+def test_doorbell_accepts_only_companion_recipients_and_a_boolean_switch():
+    for phones in ("", "notify.mobile_app_first, notify.mobile_app_second"):
+        assert validate({"notification_doorbell": True, "doorbell_recipients": phones})
+    for invalid in (True, ["notify.mobile_app_phone"], "notify.everyone", "notify.mobile_app_"):
+        assert rejected({"doorbell_recipients": invalid})
+    assert rejected({"notification_doorbell": "on"})
+
+
 def test_room_entity_name_modes_are_validated():
     value = {
         "rooms": [{

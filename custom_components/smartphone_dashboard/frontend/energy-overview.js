@@ -94,12 +94,13 @@ class SmartphoneDashboardEnergy extends HTMLElement {
       <style>${styles}</style>
       <div class="overview">
         <div class="period" role="group" aria-label="Zeitraum">
-          <button type="button" aria-controls="energy-content">Live</button>
+          <button type="button" aria-controls="energy-content">Jetzt</button>
           <button type="button" aria-controls="energy-content">Heute</button>
         </div>
         <div class="overview" id="energy-content">
           <div class="flow"></div>
           <div class="detail-cards"></div>
+          <div class="detail-cards extra"></div>
           <details hidden><summary>Wasser und Gas</summary><div class="utilities"></div></details>
         </div>
       </div>
@@ -107,6 +108,7 @@ class SmartphoneDashboardEnergy extends HTMLElement {
     this._buttons = [...this.shadowRoot.querySelectorAll("button")];
     this._flow = this.shadowRoot.querySelector(".flow");
     this._details = this.shadowRoot.querySelector(".detail-cards");
+    this._extras = this.shadowRoot.querySelector(".extra");
     this._utilityDetails = this.shadowRoot.querySelector("details");
     this._utilities = this.shadowRoot.querySelector(".utilities");
     this._utilityDetails.addEventListener("toggle", () => this._notifyResize());
@@ -137,6 +139,7 @@ class SmartphoneDashboardEnergy extends HTMLElement {
     const live = this._period === "live";
     this._cards = [];
     this._flow.replaceChildren();
+    this._extras.replaceChildren();
     this._utilities.replaceChildren();
     this._utilityDetails.hidden = true;
     try {
@@ -162,26 +165,21 @@ class SmartphoneDashboardEnergy extends HTMLElement {
           console.warn("Smartphone-Dashboard: Home Flow Card konnte nicht geöffnet werden", error);
         }
       }
-      if (!flowCard && view.flow) {
-        if (live) {
-          const status = document.createElement("p");
-          status.className = "status flow-status";
-          if (!homeFlowLoaded) {
-            status.innerHTML = 'Das Modul der Home Flow Card ist noch nicht geladen. <a href="https://cards.flixlix.com/home-flow-card/installation#verify-the-install" target="_blank" rel="noopener noreferrer">Lovelace-Ressource prüfen</a>';
-          } else {
-            status.textContent = view.homeFlowReason || "Die Home Flow Card konnte mit dieser Konfiguration nicht geöffnet werden.";
-          }
-          this._flow.append(status);
-        }
-        appendCard(this._flow, helpers.createCardElement(view.flow));
-      }
-      if (flowCard && view.homeFlowNotice) {
+      if (live && ((!flowCard && view.flow) || (flowCard && view.homeFlowNotice))) {
         const status = document.createElement("p");
         status.className = "status flow-status";
-        status.textContent = view.homeFlowNotice;
-        this._flow.append(status);
+        if (flowCard) status.textContent = view.homeFlowNotice;
+        else if (!homeFlowLoaded) {
+          status.innerHTML = 'Das Modul der Home Flow Card ist noch nicht geladen. <a href="https://cards.flixlix.com/home-flow-card/installation#verify-the-install" target="_blank" rel="noopener noreferrer">Lovelace-Ressource prüfen</a>';
+        } else {
+          status.textContent = view.homeFlowReason || "Die Home Flow Card konnte mit dieser Konfiguration nicht geöffnet werden.";
+        }
+        (flowCard ? this._extras : this._flow).append(status);
       }
-      if (!flowCard && this._config.battery) appendCard(this._flow, helpers.createCardElement(this._config.battery));
+      if (view.flow) appendCard(this._flow, helpers.createCardElement(view.flow));
+      if (this._config.battery && (!flowCard || !view.homeFlow.battery?.state_of_charge)) {
+        appendCard(this._extras, helpers.createCardElement(this._config.battery));
+      }
       // The native daily distribution already includes water and gas.
       if (live) {
         for (const config of view.extra) appendCard(this._utilities, helpers.createCardElement(config));
@@ -236,13 +234,12 @@ class SmartphoneDashboardEnergy extends HTMLElement {
     const { loads, solar } = this._config;
     if (!this._config.views.live.flow) return;
     const groups = [
-      ["loads", "Größte Verbraucher", loads, 3],
       ["solar", today ? "PV-Ertrag je Eingang" : "PV-Eingänge", solar, undefined],
+      ["loads", "Größte Verbraucher", loads, 3],
     ].map(([kind, title, rows, limit]) => ({
       kind, title, rows: energyRows(rows, this._hass, this._period, this._daily || {}, limit),
       configured: rows.some((row) => today ? row.energy : row.power),
     }));
-    if (today) groups.reverse();
     const signature = JSON.stringify([this._period, groups, this._dailyError, Boolean(this._dailyRequest)]);
     if (signature === this._signature) return;
     this._signature = signature;
@@ -263,7 +260,8 @@ class SmartphoneDashboardEnergy extends HTMLElement {
           const row = document.createElement("li");
           row.innerHTML = '<div class="row"><span class="name"></span><span class="value"></span></div><div class="track" aria-hidden="true"><div class="bar"></div></div>';
           row.querySelector(".name").textContent = name;
-          row.querySelector(".value").textContent = formatter.format(value) + (today ? " kWh" : " W");
+          row.querySelector(".value").textContent = value === null
+            ? "Nicht verfügbar" : formatter.format(value) + (today ? " kWh" : " W");
           row.querySelector(".bar").style.width = (max ? Math.max(0, value) / max * 100 : 0) + "%";
           list.append(row);
         }
@@ -276,7 +274,7 @@ class SmartphoneDashboardEnergy extends HTMLElement {
         } else if (!configured) {
           status.textContent = kind === "loads" ? "Keine passenden Einzelverbraucher in den Energie-Einstellungen." :
             today ? "Keine sichtbaren PV-Ertragszähler gefunden. Prüfe die Energie-Entitäten deines Wechselrichters." :
-              "Keine sichtbaren PV-Leistungssensoren gefunden. Prüfe die PV-Eingänge am Gerät oder die Solarquellen in den Energie-Einstellungen.";
+              "Keine PV-Leistungssensoren gefunden. Wähle bei Bedarf die Module in den Dashboard-Einstellungen unter Energie aus.";
         } else if (today && this._dailyRequest) {
           status.textContent = "Tageswerte werden geladen …";
         } else if (today && this._dailyError) {

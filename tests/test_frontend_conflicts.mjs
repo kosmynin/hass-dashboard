@@ -2,9 +2,24 @@ import assert from "node:assert/strict";
 globalThis.HTMLElement = class { attachShadow() { this.shadowRoot = { activeElement: null, querySelector: () => null, querySelectorAll: () => [], replaceChildren() {}, append() {} }; return this.shadowRoot; } dispatchEvent() {} };
 globalThis.customElements = { registry: new Map(), get(name) { return this.registry.get(name); }, define(name, value) { this.registry.set(name, value); }, whenDefined() { return Promise.resolve(); } };
 globalThis.window = globalThis;
-const { SmartphoneDashboardStrategy, SmartphoneDashboardStrategyEditor, partitionConflictPatch, applyNotificationOptions, mergeBackendNotifications, detectedRooms, applyRoomOptions, configuredFeatures, parcelSensorEntities, popupContentCards } = await import("../custom_components/smartphone_dashboard/frontend/smartphone-dashboard-strategy.js");
+const {
+  SmartphoneDashboardStrategy, SmartphoneDashboardStrategyEditor, partitionConflictPatch,
+  applyNotificationOptions, mergeBackendNotifications, detectedRooms, applyRoomOptions,
+  configuredFeatures, parcelSensorEntities, popupContentCards, synchronizationStatus,
+  configurationValidationErrors,
+} = await import("../custom_components/smartphone_dashboard/frontend/smartphone-dashboard-strategy.js");
 const { energyPopupCards, energyRows, loadDailyEnergy, loadEnergyPopupCards } = await import("../custom_components/smartphone_dashboard/frontend/energy-popup.js");
 const { agendaRows, loadCalendarEvents } = await import("../custom_components/smartphone_dashboard/frontend/agenda-cards.js");
+
+const doorbellHass = { services: { notify: { mobile_app_phone: {}, household: {} } } };
+const doorbellSettings = { notification_doorbell: true, notification_recipients: "notify.household", doorbell_recipients: "" };
+assert.equal(synchronizationStatus({ ...doorbellSettings, notification_doorbell: false }, doorbellHass).active, true);
+assert.match(synchronizationStatus(doorbellSettings, doorbellHass).detail, /mindestens ein Handy/);
+assert.equal(synchronizationStatus({ ...doorbellSettings, notification_recipients: "notify.mobile_app_phone" }, doorbellHass).active, true);
+assert.equal(synchronizationStatus({ ...doorbellSettings, doorbell_recipients: "notify.mobile_app_phone" }, doorbellHass).active, true);
+assert.match(synchronizationStatus({ ...doorbellSettings, doorbell_recipients: "notify.mobile_app_missing" }, doorbellHass).detail, /mobile_app_missing/);
+assert.equal(configurationValidationErrors(doorbellSettings).length, 0);
+assert.ok(configurationValidationErrors({ ...doorbellSettings, doorbell_recipients: "notify.household" }).length);
 
 const roomHass = {
   states: {
@@ -434,6 +449,7 @@ assert.deepEqual(detectedBattery.views.live.homeFlow.battery, measuredOverview.v
 assert.deepEqual(measuredOverview.solar, [
   { name: "PV 1", power: "sensor.stream_pv1_power", energy: "sensor.stream_pv1_energy" },
   { name: "PV 2", power: "sensor.stream_pv2_power" },
+  { name: "PV 3", power: "sensor.stream_pv3_power" },
 ]);
 const translatedPv = {
   ...measuredHass,
@@ -483,18 +499,46 @@ const [automaticTotal] = energyPopupCards(separatePvPrefs, separatePvHass, (id) 
   Boolean(separatePvHass.states[id]) && !separatePvHass.entities[id]?.hidden_by,
 );
 assert.deepEqual(automaticTotal.views.live.homeFlow.solar, { entity: totalPower, name: "PV gesamt" });
-assert.deepEqual(automaticTotal.solar.map(({ power }) => power), ["sensor.stream_pv1_power", "sensor.stream_pv2_power"]);
+assert.deepEqual(automaticTotal.solar.map(({ power }) => power), [
+  "sensor.stream_pv1_power", "sensor.stream_pv2_power", "sensor.stream_pv3_power",
+]);
 assert.equal(automaticTotal.views.today.flow.type, "energy-distribution");
 const separateDevicesHass = { ...separatePvHass, entities: { ...separatePvHass.entities,
   "sensor.stream_pv2_power": { device_id: "other_inverter" },
 } };
 const [separateDevices] = energyPopupCards(separatePvPrefs, separateDevicesHass);
-assert.equal(separateDevices.views.live.homeFlow, null);
-assert.match(separateDevices.views.live.homeFlowReason, /mehrere getrennte Quellen/);
+assert.equal(separateDevices.views.live.homeFlow.grid.entity, "sensor.grid_power");
+assert.equal(separateDevices.views.live.homeFlow.solar, undefined);
+assert.match(separateDevices.views.live.homeFlowNotice, /Mehrere getrennte Quellen für PV/);
 const [selectedTotal] = energyPopupCards(separatePvPrefs, separateDevicesHass, undefined, "sensor.manual_pv_power");
 assert.equal(selectedTotal.views.live.homeFlow.solar.entity, "sensor.manual_pv_power");
 const [invalidTotal] = energyPopupCards(separatePvPrefs, separateDevicesHass, undefined, "sensor.stream_pv1_energy");
-assert.match(invalidTotal.views.live.homeFlowReason, /keine unterstützte Leistungseinheit/);
+assert.match(invalidTotal.views.live.homeFlowNotice, /keine unterstützte Leistungseinheit/);
+
+const pvMeters = {
+  "sensor.stream_power_pv_sum": reading(550, "W"),
+  "sensor.stream_power_pv_1": reading(220, "W"),
+  "sensor.stream_power_pv_2": reading(0, "W"),
+  "sensor.stream_power_pv_3": reading("unavailable", "W"),
+  "sensor.stream_power_pv_4": reading(0.33, "kW"),
+  "sensor.stream_power_pv1_volts": reading(31, "V"),
+};
+const selectedPvHass = { config: measuredHass.config, states: pvMeters };
+const [pvOnlyHouse] = energyPopupCards({ energy_sources: [
+  { type: "solar", stat_rate: totalPower },
+  { type: "battery", power_config: { stat_rate: "sensor.missing_battery" } },
+  { type: "grid", stat_rate: "sensor.missing_grid" },
+] }, selectedPvHass, () => false, totalPower, ["sensor.extra_panel"]);
+assert.equal(pvOnlyHouse.views.live.homeFlow.solar.entity, totalPower);
+assert.equal(pvOnlyHouse.views.live.flow.type, "power-sankey");
+assert.deepEqual(energyRows(pvOnlyHouse.solar, selectedPvHass, "live", {}).map(({ name, value }) => [name, value]), [
+  ["PV 1", 220], ["PV 2", 0], ["PV 3", null], ["PV 4", 330], ["sensor.extra_panel", null],
+]);
+const [splitGrid] = energyPopupCards({ energy_sources: [
+  { type: "grid", power: [{ stat_rate: "sensor.grid_power" }] },
+] }, measuredHass);
+assert.equal(splitGrid.views.live.homeFlow.grid.entity, "sensor.grid_power");
+assert.equal(splitGrid.views.live.flow.type, "power-sankey");
 const [withEnergyOnlyMeters] = energyPopupCards({ energy_sources: [
   ...separatePvPrefs.energy_sources,
   { type: "grid", stat_energy_from: "external:second_grid_energy" },
@@ -933,7 +977,8 @@ try {
     },
   };
   const dashboardWithTotal = await SmartphoneDashboardStrategy.generate(
-    { features: { energy: { pv_total: "sensor.manual_pv_power" } } }, hiddenTotalHass,
+    { features: { energy: { pv_total: "sensor.manual_pv_power", pv_inputs: ["sensor.extra_module"] } } },
+    hiddenTotalHass,
   );
   const popupWithTotal = dashboardWithTotal.views[0].sections[0].cards.find((card) => card.hash === "#energie");
   const deferredWithTotal = new DeferredCards();
@@ -946,6 +991,7 @@ try {
   const selectedOverview = deferredWithTotal._cards[0].config;
   assert.equal(selectedOverview.views.live.homeFlow.solar.entity, "sensor.manual_pv_power");
   assert.equal(selectedOverview.solar.some((row) => row.power === "sensor.manual_pv_power"), false);
+  assert.equal(selectedOverview.solar.some((row) => row.power === "sensor.extra_module"), true);
 
   const EnergyCard = replacementRegistry.get("smartphone-dashboard-energy");
   const overview = new EnergyCard();
@@ -985,7 +1031,7 @@ try {
   assert.equal(buttons[0]["aria-pressed"], "true");
   assert.match(overview._flow.children[0].innerHTML, /Lovelace-Ressource prüfen/);
   assert.equal(overview._cards[0].config.type, "power-sankey");
-  assert.equal(overview._details.children[0].dataset.kind, "loads");
+  assert.equal(overview._details.children[0].dataset.kind, "solar");
   assert.equal(requestStats.length, 1);
 
   const firstFlowCard = globalThis.customElements.get("home-flow-card");
@@ -994,6 +1040,7 @@ try {
     resolveHomeFlow();
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.equal(overview._cards[0].config.type, "custom:home-flow-card");
+    assert.deepEqual(overview._flow.children.map((card) => card.config.type), ["custom:home-flow-card", "power-sankey"]);
     assert.equal(requestStats.length, 1);
     buttons[1].events.click();
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -1004,6 +1051,7 @@ try {
     buttons[0].events.click();
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.equal(overview._flow.children[0].config.type, "custom:home-flow-card");
+    assert.equal(overview._flow.children[1].config.type, "power-sankey");
     assert.equal(requestStats.length, 2);
   } finally {
     overview.isConnected = false;

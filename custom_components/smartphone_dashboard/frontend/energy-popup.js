@@ -4,6 +4,7 @@ const POWER_FACTORS = { µW: 1e-6, mW: 1e-3, W: 1, kW: 1e3, MW: 1e6, GW: 1e9, TW
 const COLLECTION_KEY = "energy_smartphone_dashboard";
 const HOME_FLOW_TYPE = "home-flow-card";
 const SOURCE_LABELS = { grid: "Netz", solar: "PV", home: "Hausverbrauch", battery: "Speicher" };
+const SOLAR_TOTAL_SUFFIX = /_(?:power_pv_sum|pv_power_sum|pv_total_power|solar_power_total)$/i;
 
 function openEnergyDashboard() {
   const tapAction = { action: "navigate", navigation_path: "/energy" };
@@ -32,6 +33,12 @@ async function requestEnergy(hass, request) {
   }
 }
 
+function livePowerSources(source) {
+  return source.type === "grid" && Array.isArray(source.power)
+    ? source.power.map((meter) => ({ type: "grid", name: source.name, ...meter }))
+    : [source];
+}
+
 function hasLivePower(source) {
   return [source, source.power_config].some((settings) =>
     Object.entries(settings ?? {}).some(([key, entity]) =>
@@ -45,7 +52,7 @@ function nativeLiveFlow(sources, version) {
   if (!(year > 2025 || (year === 2025 && month >= 12))) {
     return hint("Das native Live-Diagramm ist ab Home Assistant 2025.12 verfügbar.");
   }
-  return sources.some(hasLivePower) ? {
+  return sources.flatMap(livePowerSources).some(hasLivePower) ? {
     type: "power-sankey",
     title: "Aktueller Leistungsfluss",
     collection_key: "energy_dashboard_now",
@@ -67,10 +74,10 @@ function powerWatts(state) {
 }
 
 function detectedSolarTotal(sources, hass, entries, isVisible) {
-  const inputs = [...new Set(sources.map((source) => source.stat_rate).filter(Boolean))];
+  const inputs = [...new Set(sources.map((source) => source.stat_rate || source.stat_energy_from).filter(Boolean))];
   if (inputs.length < 2) return undefined;
   return Object.keys(hass.states ?? {}).find((entity) => {
-    const prefix = entity.match(/^(.+)_(?:power_pv_sum|pv_power_sum|pv_total_power|solar_power_total)$/i)?.[1];
+    const prefix = SOLAR_TOTAL_SUFFIX.test(entity) && entity.replace(SOLAR_TOTAL_SUFFIX, "");
     if (!prefix || !isVisible(entity) || !powerEntity(hass, entity)) return false;
     const device = entries.get(entity)?.device_id;
     // The total must belong to every configured PV input, never just one inverter of several.
@@ -118,37 +125,38 @@ function homeFlowNode(source, hass) {
 function homeFlowConfig(sources, hass, batteryLabel, batterySoc, solarTotal) {
   const nodes = {};
   const missingLiveSources = new Set();
+  const ambiguous = new Set();
+  const candidates = new Map();
   if (solarTotal) nodes.solar = { entity: solarTotal, name: "PV gesamt" };
   for (const source of sources) {
     const { type } = source;
     if (type === "solar" && solarTotal) continue;
-    // Energy-only sources do not have a live value, even in the native diagram.
-    if (!hasLivePower(source)) {
+    const node = homeFlowNode(source, hass);
+    if (!node.entity) {
       if (type !== "home") missingLiveSources.add(SOURCE_LABELS[type]);
       continue;
     }
-    // The external card has one node per source type. Use the native flow
-    // whenever individual sources cannot be represented without dropping data.
-    if (nodes[type]) {
-      const reason = type === "solar"
-        ? "Für PV sind mehrere getrennte Quellen eingerichtet. Wähle im Dashboard-Editor unter Weitere Bereiche → Energie einen PV-Gesamtsensor."
-        : `Für ${SOURCE_LABELS[type]} sind mehrere getrennte Quellen eingerichtet. Die native Karte kann alle anzeigen.`;
-      return { card: null, reason };
-    }
-    const node = homeFlowNode(source, hass);
-    if (!node.entity) {
-      return { card: null, reason: `Für ${SOURCE_LABELS[type]} fehlt eine passende Leistungsmessung für die Home Flow Card.` };
-    }
-    nodes[type] = {
+    const meters = candidates.get(type) ?? new Map();
+    const meterKey = JSON.stringify(node);
+    if (!meters.has(meterKey)) meters.set(meterKey, {
       ...node,
       name: source.name || (type === "battery" ? batteryLabel : SOURCE_LABELS[type]),
-      ...(type === "battery" && batterySoc && { state_of_charge: batterySoc }),
-    };
+      ...(type === "battery" && (source.stat_soc || batterySoc) && { state_of_charge: source.stat_soc || batterySoc }),
+    });
+    candidates.set(type, meters);
   }
-  const missingNotice = missingLiveSources.size
-    ? `Quellen ohne Leistungssensor fehlen im Live-Stromfluss (${[...missingLiveSources].join(", ")}).` : undefined;
+  // Home Flow has one node per type. The native card below shows separate meters.
+  for (const [type, meters] of candidates) {
+    if (meters.size === 1) nodes[type] = meters.values().next().value;
+    else ambiguous.add(SOURCE_LABELS[type]);
+  }
+  const notice = [
+    missingLiveSources.size && `Quellen ohne Leistungssensor oder mit ungeeigneter Einheit fehlen in der Hausgrafik (${[...missingLiveSources].join(", ")}).`,
+    ambiguous.size && `Mehrere getrennte Quellen für ${[...ambiguous].join(", ")} stehen im nativen Leistungsfluss.`,
+    ambiguous.has("PV") && "Für PV kann ein Gesamtsensor für die Hausgrafik gewählt werden.",
+  ].filter(Boolean).join(" ");
   if (!nodes.grid && !nodes.solar && !nodes.battery) {
-    return { card: null, reason: missingNotice || "Die Home Flow Card braucht mindestens eine Quelle für Netz, PV oder Speicher." };
+    return { card: null, reason: notice || "Die Home Flow Card braucht mindestens eine Quelle für Netz, PV oder Speicher." };
   }
   return {
     card: {
@@ -158,7 +166,7 @@ function homeFlowConfig(sources, hass, batteryLabel, batterySoc, solarTotal) {
       disable_dots: true,
       ...nodes,
     },
-    notice: missingNotice,
+    notice,
   };
 }
 
@@ -176,32 +184,43 @@ function solarInputNumber(names) {
   for (const name of names) {
     if (!name) continue;
     const normalized = name.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[_-]+/g, " ");
-    const input = normalized.match(/\b(?:pv|solar)\s*(?:(?:eingang|input|string|leistung|power|energie|energy)\s+){0,2}([1-4])(?:\s+(?:leistung|power|energie|energy|ertrag)\b|\s*$)/i)?.[1];
+    const input = normalized.match(/\b(?:pv|solar)\s*(?:(?:eingang|input|string|modul|panel|leistung|power|energie|energy)\s+){0,2}(\d+)\b/i)?.[1];
     if (input) return input;
   }
   return undefined;
 }
 
-function solarDetails(sources, hass, isVisible, visibleStatistic, entries, devices, batteryDeviceId) {
+function solarDetails(sources, hass, visibleStatistic, entries, devices, batteryDeviceId, solarTotal, manualInputs) {
   const result = [];
   const ports = new Map();
-  const linkedDevices = new Set([batteryDeviceId, ...sources.flatMap((source) => [
+  const linkedDevices = new Set([batteryDeviceId, entries.get(solarTotal)?.device_id, ...sources.flatMap((source) => [
     entries.get(source.stat_rate)?.device_id, entries.get(source.stat_energy_from)?.device_id,
   ])].filter(Boolean));
-  for (const [entity, entry] of entries) {
-    if (!isVisible(entity)) continue;
-    if (!linkedDevices.has(entry.device_id) && !isStreamUltra(devices[entry.device_id])) continue;
-    const input = solarInputNumber([entry.translation_key, entry.original_name, entityName(hass, entity), entity]);
-    if (!input) continue;
-    const key = entry.device_id + ":" + input;
-    const attributes = hass.states?.[entity]?.attributes;
-    const metric = powerEntity(hass, entity) ? "power" :
-      ["Wh", "kWh", "MWh"].includes(attributes?.unit_of_measurement) ? "energy" : null;
+  const solarPrefix = solarTotal && SOLAR_TOTAL_SUFFIX.test(solarTotal) && solarTotal.replace(SOLAR_TOTAL_SUFFIX, "");
+  const selected = new Set(Array.isArray(manualInputs) ? manualInputs : []);
+  for (const entity of new Set([...Object.keys(hass.states ?? {}), ...selected])) {
+    if (entity === solarTotal || typeof entity !== "string" || !entity.startsWith("sensor.")) continue;
+    const state = hass.states?.[entity];
+    const entry = entries.get(entity);
+    if (entry?.disabled_by) continue;
+    const device = entry?.device_id;
+    const related = linkedDevices.has(device) || isStreamUltra(devices[device]) ||
+      (solarPrefix && entity.startsWith(solarPrefix + "_"));
+    if (!related && !selected.has(entity)) continue;
+    const input = solarInputNumber([entry?.translation_key, entry?.original_name, entityName(hass, entity), entity]);
+    if (!input && !selected.has(entity)) continue;
+    const key = input && (device || solarPrefix) ? (device || solarPrefix) + ":" + input : entity;
+    const metric = powerEntity(hass, entity) || selected.has(entity) ? "power" :
+      ["Wh", "kWh", "MWh"].includes(state?.attributes?.unit_of_measurement) ? "energy" : null;
     if (!metric) continue;
-    if (!ports.has(key)) ports.set(key, { name: "PV " + input, device: entry.device_id });
-    ports.get(key)[metric] ??= entity;
+    if (!ports.has(key)) ports.set(key, { name: input ? "PV " + input : entityName(hass, entity), device });
+    const row = ports.get(key);
+    if (!row[metric] || (metric === "power" && (
+      (selected.has(entity) && !selected.has(row.power)) ||
+      (!selected.has(row.power) && powerWatts(hass.states?.[row.power]) === undefined && powerWatts(state) !== undefined)
+    ))) row[metric] = entity;
   }
-  const portRows = [...ports.values()].sort((a, b) => a.name.localeCompare(b.name));
+  const portRows = [...ports.values()].sort((a, b) => a.name.localeCompare(b.name, "de", { numeric: true }));
   const multipleDevices = new Set(portRows.map((row) => row.device)).size > 1;
   for (const { device, ...row } of portRows) {
     const label = devices[device]?.name_by_user || devices[device]?.name || devices[device]?.model;
@@ -218,7 +237,7 @@ function solarDetails(sources, hass, isVisible, visibleStatistic, entries, devic
     const device = deviceForSource(source);
     const matchingInput = result.find((row) => (power && row.power === power) || (energy && row.energy === energy));
     if (matchingInput) {
-      if (!matchingInput.power && isVisible(power)) matchingInput.power = powerEntity(hass, power);
+      if (!matchingInput.power) matchingInput.power = powerEntity(hass, power);
       if (!matchingInput.energy && visibleStatistic(energy)) matchingInput.energy = energy;
       continue;
     }
@@ -226,14 +245,14 @@ function solarDetails(sources, hass, isVisible, visibleStatistic, entries, devic
     const inputs = sourceCounts.get(device) === 1 ? portRows.filter((row) => row.device === device) : [];
     result.push({
       name: source.name || entityName(hass, hass.states?.[energy] ? energy : power || energy),
-      power: !inputs.some((row) => row.power) && isVisible(power) ? powerEntity(hass, power) : undefined,
+      power: power !== solarTotal && !inputs.some((row) => row.power) ? powerEntity(hass, power) : undefined,
       energy: !inputs.some((row) => row.energy) && visibleStatistic(energy) ? energy : undefined,
     });
   }
   return result.filter((row) => row.power || row.energy);
 }
 
-function energyPopupCards(prefs, hass, isVisible = (entity) => Boolean(hass.states?.[entity]), configuredSolarTotal) {
+function energyPopupCards(prefs, hass, isVisible = (entity) => Boolean(hass.states?.[entity]), configuredSolarTotal, manualInputs = []) {
   const sources = (Array.isArray(prefs?.energy_sources) ? prefs.energy_sources : [])
     .filter((source) => ENERGY_SOURCE_TYPES.has(source?.type));
   const dashboardLink = openEnergyDashboard();
@@ -253,8 +272,10 @@ function energyPopupCards(prefs, hass, isVisible = (entity) => Boolean(hass.stat
     return [nativeToday, dashboardLink];
   }
 
-  const entries = new Map(Object.entries(hass.entities ?? {}).map(([key, entry]) => [entry.entity_id || key, entry]));
-  const devices = hass.devices ?? {};
+  const entries = new Map(Object.entries(hass.entities ?? {}).filter(([, entry]) => entry)
+    .map(([key, entry]) => [entry.entity_id || key, entry]));
+  const devices = Object.fromEntries(Object.entries(hass.devices ?? {}).filter(([, device]) => device)
+    .map(([key, device]) => [device.id || key, device]));
   const batteries = electricity.filter((source) => source.type === "battery");
   const battery = batteries.find(hasLivePower) || batteries[0];
   const batteryDeviceId = [battery?.stat_soc, battery?.stat_rate, battery?.stat_energy_from, battery?.stat_energy_to,
@@ -271,8 +292,11 @@ function energyPopupCards(prefs, hass, isVisible = (entity) => Boolean(hass.stat
         .some((name) => /(?:^|\s)(?:battery[ _]soc|batterie[- ]?ladestand)$/i.test(name || "")))?.[0];
   }
   const solarSources = electricity.filter(({ type }) => type === "solar");
-  const solar = solarDetails(solarSources, hass, visible, visibleStatistic, entries, devices, batteryDeviceId);
-  const liveSources = electricity.map((source) => {
+  const selectedTotal = powerEntity(hass, configuredSolarTotal);
+  const solarTotal = selectedTotal || detectedSolarTotal(solarSources, hass, entries, visible);
+  const solar = solarDetails(solarSources, hass, visibleStatistic, entries, devices, batteryDeviceId,
+    solarTotal || configuredSolarTotal, manualInputs);
+  const liveSources = electricity.flatMap(livePowerSources).map((source) => {
     if (source.type === "solar" && !source.stat_rate && source.stat_energy_from) {
       const power = solar.find((row) => row.energy === source.stat_energy_from)?.power;
       return power ? { ...source, stat_rate: power } : source;
@@ -295,13 +319,8 @@ function energyPopupCards(prefs, hass, isVisible = (entity) => Boolean(hass.stat
       energy: visibleStatistic(stat_consumption) ? stat_consumption : undefined,
     }))
     .filter((row) => row.power || row.energy);
-  const solarTotal = configuredSolarTotal
-    ? powerEntity(hass, configuredSolarTotal)
-    : detectedSolarTotal(liveSources.filter((source) => source.type === "solar"), hass, entries, visible);
-  // A manually selected meter is a flow source even if it is hidden from entity lists.
-  if (solarTotal && visible(solarTotal) && !solar.some((row) => row.power)) solar.push({ name: "PV gesamt", power: solarTotal });
   let solarTotalIssue;
-  if (configuredSolarTotal && !solarTotal) {
+  if (configuredSolarTotal && !selectedTotal) {
     solarTotalIssue = hass.states?.[configuredSolarTotal]
       ? "Der ausgewählte PV-Gesamtsensor liefert keine unterstützte Leistungseinheit."
       : "Der ausgewählte PV-Gesamtsensor ist in Home Assistant nicht verfügbar.";
@@ -328,9 +347,9 @@ function energyPopupCards(prefs, hass, isVisible = (entity) => Boolean(hass.stat
   }, dashboardLink];
 }
 
-async function loadEnergyPopupCards(hass, isVisible, configuredSolarTotal) {
+async function loadEnergyPopupCards(hass, isVisible, configuredSolarTotal, manualInputs) {
   try {
-    return energyPopupCards(await requestEnergy(hass, { type: "energy/get_prefs" }), hass, isVisible, configuredSolarTotal);
+    return energyPopupCards(await requestEnergy(hass, { type: "energy/get_prefs" }), hass, isVisible, configuredSolarTotal, manualInputs);
   } catch (error) {
     if (error?.code === "not_found") return energyPopupCards(null, hass, isVisible);
     return [
@@ -382,7 +401,8 @@ function energyRows(rows, hass, period, daily, limit) {
   const values = rows.flatMap((row) => {
     if (!current) return Number.isFinite(daily[row.energy]) ? [{ ...row, value: daily[row.energy] }] : [];
     const value = powerWatts(hass.states?.[row.power]);
-    return Number.isFinite(value) ? [{ ...row, value }] : [];
+    if (Number.isFinite(value)) return [{ ...row, value }];
+    return !limit && row.power ? [{ ...row, value: null }] : [];
   });
   if (!limit) return values;
   const ranked = new Map();

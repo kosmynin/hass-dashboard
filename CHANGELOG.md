@@ -1,3 +1,8 @@
+# Version 23.2.0
+
+- **Energie → Jetzt** zeigt die Home Flow Card, den nativen Leistungsfluss und danach die einzelnen PV-Eingänge. Fehlende Messquellen blenden die Hausgrafik nicht mehr vollständig aus. Die PV-Liste zeigt auch ausgeblendete Eingänge des Wechselrichters. Weitere Module lassen sich im Dashboard-Editor ergänzen.
+- Die optionale Reolink-Türklingel meldet Tastendrücke mit Ton auf den ausgewählten Companion-Handys. Antippen öffnet das Livebild mit der Gegensprechfunktion, sofern das Modell und die Home-Assistant-Konfiguration sie unterstützen.
+
 # Version 23.1.9
 
 - Ein manuell gewählter PV-Gesamtsensor bleibt auch bei ausgeblendeter Entität als Quelle der Hausgrafik verfügbar.

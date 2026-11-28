@@ -10,7 +10,7 @@ import { SmartphoneDashboardEnergy } from "./energy-overview.js";
 import { SmartphoneDashboardAgenda } from "./agenda-cards.js";
 import { selectParcels } from "./parcel-selection.js";
 
-const STRATEGY_VERSION = "23.1.9";
+const STRATEGY_VERSION = "23.2.0";
 const CONFIG_VERSION = 26;
 
 const HOME_SECTION_LABELS = {
@@ -130,7 +130,7 @@ class SmartphoneDashboardDeferredCards extends HTMLElement {
       ? window.loadCardHelpers()
       : Promise.reject(new Error("Home-Assistant-Kartenhelfer sind nicht verfügbar"));
     const cardsReady = energy
-      ? loadEnergyPopupCards(this._hass, (entityId) => isEntityVisible(this._hass, entityId), config.pv_total)
+      ? loadEnergyPopupCards(this._hass, (entityId) => isEntityVisible(this._hass, entityId), config.pv_total, config.pv_inputs)
       : config.cards;
     void Promise.all([helpersReady, cardsReady]).then(([helpers, configs]) => {
       if (!this.isConnected || this._config !== config || !this._isRequested()) return;
@@ -301,6 +301,7 @@ const NOTIFICATION_HELPERS = {
 const BACKEND_NOTIFICATION_KEYS = [
   ...Object.keys(NOTIFICATION_HELPERS), "waste_days", "notification_media", "notification_parcels", "notification_appliances",
 ];
+const EDITOR_NOTIFICATION_KEYS = [...BACKEND_NOTIFICATION_KEYS, "notification_doorbell", "doorbell_recipients"];
 
 class SmartphoneDashboardStrategy extends HTMLElement {
   static async getConfigElement() {
@@ -769,6 +770,13 @@ function synchronizationStatus(config, hass) {
   const missingServices = recipients.filter((service) => !/^notify\.[a-z0-9_]+$/.test(service) || !hass?.services?.notify?.[service.slice(7)]);
   const problems = [];
   if (missingServices.length) problems.push(`Notify-Dienste fehlen: ${missingServices.join(", ")}`);
+  if (config.notification_doorbell) {
+    const selected = csv(config.doorbell_recipients);
+    const phones = selected.length ? selected : recipients.filter((service) => service.startsWith("notify.mobile_app_"));
+    if (!phones.length) problems.push("Wähle mindestens ein Handy für die Türklingel.");
+    const missing = selected.filter((service) => !hass?.services?.notify?.[service.slice(7)]);
+    if (missing.length) problems.push(`Für die Türklingel nicht erreichbar: ${missing.join(", ")}`);
+  }
   const pushDetail = recipients.length === 1 ? "1 optionaler Push-Dienst" : `${recipients.length} optionale Push-Dienste`;
   return { active: problems.length === 0, installedHelpers, totalHelpers: helperIds.length,
     title: problems.length ? "Benachrichtigungssystem unvollständig" : "Benachrichtigungssystem aktiv",
@@ -1414,9 +1422,20 @@ function normalizedNavigationHash(value, fallback) {
 
 function configurationValidationErrors(config) {
   const errors = [];
+  if (config?.notification_doorbell !== undefined && typeof config.notification_doorbell !== "boolean") {
+    errors.push("Die Reolink-Türklingel erwartet einen Ein-/Aus-Wert.");
+  }
+  const phones = config?.doorbell_recipients;
+  if (phones !== undefined && (typeof phones !== "string" || csv(phones).some((id) => !/^notify\.mobile_app_[a-z0-9_]+$/.test(id)))) {
+    errors.push("Für die Türklingel bitte Companion-Handys auswählen.");
+  }
   const pvTotal = config?.features?.energy?.pv_total;
   if (pvTotal !== undefined && (typeof pvTotal !== "string" || (pvTotal && !/^sensor\.[a-z0-9_]+$/.test(pvTotal)))) {
     errors.push("Energie · PV-Gesamtleistung erwartet eine Sensor-Entitäts-ID.");
+  }
+  const pvInputs = config?.features?.energy?.pv_inputs;
+  if (pvInputs !== undefined && (!Array.isArray(pvInputs) || !pvInputs.every((id) => /^sensor\.[a-z0-9_]+$/.test(id)))) {
+    errors.push("Energie · PV-Module erwarten Sensor-Entitäts-IDs.");
   }
   const hashes = [];
   for (const [key, meta] of Object.entries(FEATURE_META)) {
@@ -1689,6 +1708,7 @@ function configuredFeatures(config, hass) {
       system_groups: systemGroups,
       system_colors: key === "system" ? normalizedSystemColors(item.system_colors) : {},
       ...(key === "energy" && item.pv_total && { pv_total: item.pv_total }),
+      ...(key === "energy" && Array.isArray(item.pv_inputs) && { pv_inputs: item.pv_inputs }),
       master_alarm: key === "security"
         ? securityMasterAlarm(item.master_alarm, entities, hass)
         : "",
@@ -1850,6 +1870,7 @@ function featurePopupCards(item, hass) {
     popup_hash: item.hash,
     card_source: "energy",
     ...(item.pv_total && { pv_total: item.pv_total }),
+    ...(item.pv_inputs?.length && { pv_inputs: item.pv_inputs }),
     cards: [],
   }];
   if (item.key === "parcels") return parcelFeatureCards(item, hass);
@@ -2063,6 +2084,8 @@ const EDITOR_DEFAULTS = {
   notification_parcels: true,
   notification_media: true,
   notification_appliances: true,
+  notification_doorbell: false,
+  doorbell_recipients: "",
   battery_threshold: 6,
   contact_minutes: 15,
   co2_threshold: 1000,
@@ -2205,7 +2228,7 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
       this._backendKeyLoaded = requestKey;
       this._backendBase = result.config || {};
       let importedNotifications = false;
-      for (const key of BACKEND_NOTIFICATION_KEYS) {
+      for (const key of EDITOR_NOTIFICATION_KEYS) {
         if (Object.prototype.hasOwnProperty.call(this._backendBase, key) && !Object.prototype.hasOwnProperty.call(this._sourceConfig || {}, key) && !this._localEditsBeforeBackend?.has(key)) {
           this._config[key] = this._backendBase[key]; importedNotifications = true;
         }
@@ -3243,6 +3266,14 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
             <label class="native-field">Frost-Grenzwert in °C<input data-notification-number="frost_threshold" type="number" min="-30" max="20"></label>
             <div class="entity-title">Benachrichtigungen</div>
             <div data-notify-selector-host></div>
+            ${this._dashboardKey() === "default" ? `
+              <div class="switch-row">
+                <div class="switch-copy"><div class="switch-title">Reolink-Türklingel</div><div class="switch-description">Ein Druck auf die Klingeltaste benachrichtigt die Handys mit Ton. Antippen öffnet das Livebild der Klingel.</div></div>
+                <ha-switch data-switch="notification_doorbell" aria-label="Reolink-Türklingel"></ha-switch>
+              </div>
+              <div data-doorbell-phones></div>
+              <p class="hint">Bei leerer Auswahl klingeln die oben ausgewählten Companion-Handys. <a href="https://www.home-assistant.io/integrations/reolink/#two-way-audio" target="_blank" rel="noopener noreferrer">Gegensprechen einrichten</a></p>`
+              : '<p class="hint">Die Reolink-Türklingel wird im primären Dashboard mit backend_key: default eingerichtet.</p>'}
             <div data-battery-selector-host></div>
             <div data-frost-selector-host></div>
             <div data-waste-selector-host></div>
@@ -3361,6 +3392,18 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
       fallbackOptions: notifyOptions,
       onChange: saveNotificationList("notification_recipients"),
     }));
+    const doorbellPhones = this.shadowRoot.querySelector("[data-doorbell-phones]");
+    if (doorbellPhones) {
+      const options = notifyOptions.filter(({ value }) => value.startsWith("notify.mobile_app_"));
+      doorbellPhones.replaceWith(this._createSelector({
+        label: "Handys für die Türklingel",
+        value: notificationList("doorbell_recipients"),
+        multiple: true,
+        selector: { select: { multiple: true, mode: "dropdown", options } },
+        fallbackOptions: options,
+        onChange: saveNotificationList("doorbell_recipients"),
+      }));
+    }
     this.shadowRoot.querySelector("[data-battery-selector-host]").replaceWith(this._entitySelector(
       "Ausgeschlossene Batteriesensoren", notificationList("battery_exclusions"),
       { domain: "sensor", device_class: "battery", multiple: true }, saveNotificationList("battery_exclusions"),
@@ -3405,7 +3448,7 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
       const hashListId = `feature-hashes-${feature.key}`;
       const energy = feature.key === "energy";
       const sourceFields = energy
-        ? '<div data-pv-total-host></div><p class="hint">Ohne Auswahl wird ein passender PV-Gesamtsensor automatisch erkannt.</p>'
+        ? '<div data-pv-total-host></div><div data-pv-inputs-host></div>'
         : `<div class="switch-row"><div class="switch-copy"><div class="switch-title">Neue Entitäten automatisch ergänzen</div></div><ha-switch data-auto></ha-switch></div>
           ${feature.key === "security" ? '<div data-master-alarm-host></div>' : ""}
           ${feature.key === "printer" ? '<div data-printer-ids-host></div><label class="select-label">Automatisch erkannte Bambu-Lab Geräte-IDs<textarea class="readonly-list" data-auto-printer-ids rows="3" readonly></textarea></label><div data-excluded-printer-ids-host></div>' : ""}
@@ -3464,6 +3507,10 @@ class SmartphoneDashboardStrategyEditor extends HTMLElement {
         row.querySelector("[data-pv-total-host]").replaceWith(this._entitySelector(
           "PV-Gesamtleistung für die Hausgrafik", feature.pv_total || "",
           { domain: "sensor", device_class: "power" }, (value) => updateFeature({ pv_total: value }),
+        ));
+        row.querySelector("[data-pv-inputs-host]").replaceWith(this._entitySelector(
+          "Zusätzliche PV-Module (Leistung)", feature.pv_inputs || [],
+          { domain: "sensor", device_class: "power", multiple: true }, (value) => updateFeature({ pv_inputs: value }),
         ));
         featurePanel.appendChild(row);
         continue;

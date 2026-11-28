@@ -13,12 +13,13 @@ import time
 from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_STATE_CHANGED
-from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.core import CoreState, Event, HomeAssistant, callback
 from homeassistant.helpers import area_registry as ar, device_registry as dr, entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.util import dt as dt_util
 from .config_manager import ConfigManager
 from .const import SIGNAL_ALERTS_UPDATED
+from .doorbell import doorbell_camera, doorbell_payload, is_doorbell_press
 from .notification_core import (
     aggregate_alert_message,
     alert_content_digest,
@@ -71,6 +72,7 @@ LIVE_ACTIVITY_PAYLOAD_VERSION = "11"
 MOBILE_PUSH_DUPLICATE_INTERVAL = 10 * 60
 MOBILE_PUSH_HOURLY_LIMIT = 40
 MOBILE_PUSH_DAILY_LIMIT = 120
+DOORBELL_ALIAS_WINDOW = timedelta(seconds=3)
 SNOOZE_SECONDS = 30 * 60
 _LOGGER = logging.getLogger(__name__)
 TEST_ACTIVITY_TAGS = (
@@ -129,6 +131,8 @@ class NotificationCoordinator:
         self._pending_actions: list[dict[str, str]] = []
         self._mobile_send_times: dict[str, list[float]] = {}
         self._mobile_payload_sent_at: dict[tuple[str, str], float] = {}
+        self._mobile_send_locks: dict[str, asyncio.Lock] = {}
+        self._last_doorbell_press: dict[str, tuple[str, datetime]] = {}
         self._appliance_remaining_baselines: dict[str, float] = {}
         self._test_design_sent_at: dict[str, float] = {}
         self.alerts: list[dict[str, object]] | None = None
@@ -185,11 +189,66 @@ class NotificationCoordinator:
     @callback
     def _state_changed(self, event: Event) -> None:
         entity_id = event.data.get("entity_id", "")
+        if (
+            entity_id.startswith("binary_sensor.") and self.hass.state is CoreState.running
+            and is_doorbell_press(event.data.get("old_state"), event.data.get("new_state"))
+        ):
+            self._handle_doorbell_press(entity_id, event.data["new_state"].last_changed)
         if entity_id.startswith((
             "sensor.", "binary_sensor.", "media_player.", "switch.",
             "select.", "number.", "datetime.", "climate.", "input_",
         )):
             self._enqueue()
+
+    @callback
+    def _handle_doorbell_press(self, entity_id: str, pressed_at: datetime) -> None:
+        strategy = self.manager.data.get("dashboards", {}).get("default", {}).get("config", {})
+        if strategy.get("notification_doorbell") is not True:
+            return
+        registry = er.async_get(self.hass)
+        visitor = registry.async_get(entity_id)
+        if not visitor or visitor.platform != "reolink" or visitor.translation_key != "visitor":
+            return
+        selected = strategy.get("doorbell_recipients", "").strip()
+        targets = selected.split(",") if selected else self._recipients()
+        recipients = list(dict.fromkeys(
+            target.strip() for target in targets
+            if re.fullmatch(r"notify\.mobile_app_[a-z0-9_]+", target.strip())
+        ))
+        if not recipients:
+            return
+        camera_id = None
+        device = None
+        if visitor.device_id:
+            previous = self._last_doorbell_press.get(visitor.device_id)
+            # A direct and an NVR entry can report the same physical button.
+            if previous and previous[0] != entity_id and abs(pressed_at - previous[1]) <= DOORBELL_ALIAS_WINDOW:
+                return
+            self._last_doorbell_press[visitor.device_id] = (entity_id, pressed_at)
+            device = dr.async_get(self.hass).async_get(visitor.device_id)
+            camera_id = doorbell_camera(
+                er.async_entries_for_device(registry, visitor.device_id), self.hass.states.get
+            )
+        name = (device.name_by_user or device.name) if device else ""
+        payload = doorbell_payload(entity_id, name, camera_id)
+        press_key = f"doorbell:{entity_id}:{pressed_at.isoformat()}"
+        self.entry.async_create_background_task(
+            self.hass, self._ring_phones(recipients, payload, press_key),
+            "smartphone_dashboard_doorbell",
+        )
+
+    async def _ring_phones(
+        self, recipients: list[str], payload: dict[str, Any], press_key: str
+    ) -> None:
+        async def ring(recipient: str) -> None:
+            try:
+                await self._async_notify(
+                    recipient, recipient.removeprefix("notify."), payload, event_key=press_key
+                )
+            except Exception as err:
+                _LOGGER.warning("Türklingel konnte %s nicht benachrichtigen: %s", recipient, err)
+
+        await asyncio.gather(*(ring(recipient) for recipient in recipients))
 
     @callback
     def _enqueue(self) -> None:
@@ -213,7 +272,7 @@ class NotificationCoordinator:
         ]
 
     async def _async_notify(
-        self, recipient: str, service: str, payload: dict[str, Any]
+        self, recipient: str, service: str, payload: dict[str, Any], *, event_key: str | None = None
     ) -> bool:
         """Send once through a local circuit breaker before Companion limits apply."""
         if not recipient.startswith("notify.mobile_app_"):
@@ -221,8 +280,15 @@ class NotificationCoordinator:
                 "notify", service, payload, blocking=True
             )
             return True
+        # A doorbell press, a test and the periodic worker can target the same phone.
+        async with self._mobile_send_locks.setdefault(recipient, asyncio.Lock()):
+            return await self._async_mobile_notify(recipient, service, payload, event_key)
+
+    async def _async_mobile_notify(
+        self, recipient: str, service: str, payload: dict[str, Any], event_key: str | None
+    ) -> bool:
         now = time.monotonic()
-        signature = hashlib.sha256(
+        signature = event_key or hashlib.sha256(
             json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str).encode()
         ).hexdigest()
         signature_key = (recipient, signature)
